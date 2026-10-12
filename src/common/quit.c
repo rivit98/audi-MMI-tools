@@ -29,7 +29,6 @@ const char *quit_name(int reason)
 	switch (reason) {
 	case QUIT_NONE:     return "none";
 	case QUIT_TIMER:    return "timer";
-	case QUIT_KEY:      return "key press";
 	case QUIT_SIGNAL:   return "signal";
 	case QUIT_SDCARD:   return "SD card removed";
 	case QUIT_WATCHDOG: return "watchdog";
@@ -80,7 +79,9 @@ static void *signal_thread(void *arg)
 
 /* Blocking reads of the HMI's key channel, as qnx-audi does (no select()
  * support there). Byte 7/6 = rotary knob left/right, 5/4 = volume knob;
- * any other message is a button press. */
+ * any other message is a button press. Nothing here stops the app: the
+ * messages are logged (to keep decoding the protocol) and handed to the
+ * app's observer, and that is all. */
 static void *key_thread(void *arg)
 {
 	int fd = (int)(intptr_t)arg, n, i, seen = 0;
@@ -102,8 +103,6 @@ static void *key_thread(void *arg)
 		}
 		if (key_cb != NULL)
 			key_cb(buf, n, key_cb_arg);
-		if (n >= 8 && (buf[4] | buf[5] | buf[6] | buf[7]) == 0)
-			quit_request(QUIT_KEY);
 	}
 	close(fd);
 	return NULL;
@@ -145,14 +144,15 @@ int quit_init_ex(const char *sd_path, unsigned watchdog_s,
 
 	fd = open(KEY_DEVICE, O_RDONLY);
 	if (fd < 0) {
-		log_msg("quit: open %s: %s; no key exit", KEY_DEVICE, strerror(errno));
+		log_msg("quit: open %s: %s; no key messages", KEY_DEVICE, strerror(errno));
 	} else if ((errno = pthread_create(&tid, NULL, key_thread, (void *)(intptr_t)fd)) != 0) {
-		log_msg("quit: key thread: %s; no key exit", strerror(errno));
+		log_msg("quit: key thread: %s; no key messages", strerror(errno));
 		close(fd);
 	} else {
 		pthread_detach(tid);   /* stays blocked in read(); exit() ends it */
 	}
-	log_msg("quit: watchdog %u s, stop on: timer, button (%s), SIGTERM/INT/HUP, "
-	        "SD removal (%s)", watchdog_s, KEY_DEVICE, sd_path);
+	log_msg("quit: watchdog %u s, stop on: timer, SIGTERM/INT/HUP, "
+	        "SD removal (%s); %s is read but never stops the app",
+	        watchdog_s, sd_path, KEY_DEVICE);
 	return rc == 0 ? 0 : -1;
 }

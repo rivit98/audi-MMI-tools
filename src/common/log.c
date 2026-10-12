@@ -1,11 +1,13 @@
 #include "log.h"
 
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
 static FILE *log_file;
+static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;  /* one line at a time */
 static struct timespec log_t0;
 
 static unsigned ms_since(const struct timespec *t0)
@@ -42,6 +44,7 @@ void log_msg(const char *fmt, ...)
 	unsigned ms = log_ms();
 	va_list ap;
 
+	pthread_mutex_lock(&log_lock);
 	printf("[%6u ms] ", ms);
 	va_start(ap, fmt);
 	vprintf(fmt, ap);
@@ -49,8 +52,10 @@ void log_msg(const char *fmt, ...)
 	putchar('\n');
 	fflush(stdout);
 
-	if (log_file == NULL)
+	if (log_file == NULL) {
+		pthread_mutex_unlock(&log_lock);
 		return;
+	}
 	fprintf(log_file, "[%6u ms] ", ms);
 	va_start(ap, fmt);
 	vfprintf(log_file, fmt, ap);
@@ -58,4 +63,5 @@ void log_msg(const char *fmt, ...)
 	fputc('\n', log_file);
 	fflush(log_file);
 	fsync(fileno(log_file));
+	pthread_mutex_unlock(&log_lock);
 }

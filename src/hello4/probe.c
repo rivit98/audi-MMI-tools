@@ -7,6 +7,7 @@
 
 #include <GLES/gl.h>
 
+#include "gfx.h"
 #include "log.h"
 
 #define TOL 40   /* per channel: RGB565 quantisation + lighting/fog rounding */
@@ -241,12 +242,13 @@ static int p_fog(void)
 
 	frustum();
 	glEnable(GL_FOG);
-	glFogf(GL_FOG_MODE, GL_LINEAR);
 	glFogfv(GL_FOG_COLOR, yellow);
-	/* blue quad 5 units away: past the fog end, halfway, before the start */
+	/* blue quad 5 units away: past the fog end, halfway, before the start.
+	 * gfx_fog_linear, not glFogf: range[1]'s start is range[0]'s end, and
+	 * writing that while the mode is GL_LINEAR divides by zero in the
+	 * driver (gfx.h, docs/qnx-sh-fpu-div0.md). */
 	for (i = 0; i < 3; i++) {
-		glFogf(GL_FOG_START, range[i][0]);
-		glFogf(GL_FOG_END, range[i][1]);
+		gfx_fog_linear(range[i][0], range[i][1]);
 		glClear(GL_COLOR_BUFFER_BIT);
 		colour(0, 0, 1);
 		quad(-1, -1, 1, 1, -5.0f, 0);

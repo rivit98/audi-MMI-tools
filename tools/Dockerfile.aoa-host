@@ -1,0 +1,14 @@
+# mmi-aoa-host - runs tools/aoa_host.py (desk stand-in for the MMI) with
+# libusb. `make aoa-host` starts it with /dev/bus/usb passed through.
+FROM ghcr.io/astral-sh/uv:0.5.11-python3.12-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libusb-1.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV UV_CACHE_DIR=/tmp/uv-cache
+COPY aoa_host.py /opt/aoa_host.py
+# Resolve the script's pinned dependencies at build time.
+RUN uv run --script /opt/aoa_host.py --check \
+ && chmod -R a+rwX /tmp/uv-cache
+ENTRYPOINT ["uv", "run", "--script", "/opt/aoa_host.py"]

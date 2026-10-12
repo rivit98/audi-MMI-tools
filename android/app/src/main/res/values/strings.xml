@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">usb_tx_test</string>
+    <string name="hint">Text for the MMI</string>
+    <string name="send">Send</string>
+</resources>

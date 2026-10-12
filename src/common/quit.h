@@ -4,8 +4,6 @@
  * The app polls quit_poll() once per frame and, when it returns non-zero,
  * leaves its loop and runs its normal teardown (gfx_shutdown). Sources:
  *   QUIT_TIMER     the app's own run time is over (it calls quit_request)
- *   QUIT_KEY       a hardware button press on /dev/ipc/ch8 (qnx-audi's
- *                  rule: any message that is not a knob turn)
  *   QUIT_SIGNAL    SIGTERM / SIGINT / SIGHUP (`slay hello3` from a shell)
  *   QUIT_SDCARD    the SD card was pulled (checked once per second)
  *   QUIT_WATCHDOG  the app did not stop by itself within watchdog_s
@@ -22,7 +20,6 @@
 enum {
 	QUIT_NONE = 0,
 	QUIT_TIMER,
-	QUIT_KEY,
 	QUIT_SIGNAL,
 	QUIT_SDCARD,
 	QUIT_WATCHDOG,
@@ -30,16 +27,18 @@ enum {
 
 #define QUIT_HARD_S  10
 
-/* Called for every raw /dev/ipc/ch8 message, on the key thread, before the
- * built-in button rule runs - so an app can react to knob turns (which the
- * button rule ignores) without opening ch8 a second time. buf holds n bytes
- * (byte 7/6 = rotary knob left/right, 5/4 = volume knob; all of 4..7 zero is
- * a button). May be NULL. */
+/* Called for every raw /dev/ipc/ch8 message, on the key thread, so an app
+ * can react to knob turns and buttons without opening ch8 a second time.
+ * buf holds n bytes (byte 7/6 = rotary knob left/right, 5/4 = volume knob;
+ * all of 4..7 zero is a button). May be NULL.
+ *
+ * No key or button stops an app: a run always ends on its timer, a signal,
+ * SD removal or the watchdog, so a stray press cannot cut a test short. */
 typedef void (*quit_key_cb)(const unsigned char *buf, int n, void *arg);
 
 /* Call after log_open() and before any other thread exists. sd_path is
  * watched for card removal; watchdog_s arms alarm(). Returns 0, or -1 if
- * the signal thread could not be started (then only timer/SD/key work). */
+ * the signal thread could not be started (then only timer/SD work). */
 int  quit_init(const char *sd_path, unsigned watchdog_s);
 
 /* As quit_init(), plus a key observer. quit_init() is this with cb=NULL. */

@@ -15,7 +15,7 @@ run has finished.
    other MMI tools on the same card (another `copie_scr.sh`) will clash
    with this one.
 2. Copy **everything in this folder** (`copie_scr.sh`, `run.sh`,
-   `apps.conf`, `beep.wav`, `bin/`, `screens/`, `var/`, this file) to the
+   `apps.conf`, `screens.sh`, `beep.wav`, `bin/`, `var/`, this file) to the
    **root** of the card. Copy what is inside the folder, not the folder
    itself.
 3. Eject the card safely.
@@ -28,22 +28,38 @@ run has finished.
 3. After a few seconds, the "rivit_app" start screen appears. Each test
    then has a screen before it, which says what it does and what you
    should see, and a screen after it with its result.
-4. Wait for the **"all done"** screen to go away (a few minutes in all),
-   then take the card out.
+4. The last test is `usb_tx_test` (text from the phone). It runs until you
+   take the card out, so that is how the run ends - there is no "all done"
+   screen. The tests before it (hello5, hello6, hello4, in that order) take
+   about 9 minutes. If your card's run
+   does not end with `usb_tx_test`, wait for the **"all done"** screen to
+   go away instead, then take the card out.
 
-A hardware button press ends the running test early. The MMI may react to
-that press as well. **If the screen freezes**, restart the MMI: hold
+Buttons and knobs do not stop a test - each one runs for its own fixed time.
+To stop early, pull the card. **If the screen freezes**, restart the MMI: hold
 **MENU + the rotary knob + the top-right soft key** until it reboots.
 
+**`hello4` may freeze the whole MMI** (picture, knobs, volume), as it did on
+the last run. Finding out when and why is the point of the test. If the
+rings stop moving for more than 30 s, note the yellow number top left, then
+reboot with the key combo above. Everything up to the freeze is already on
+the card.
+
 ## The tests
+
+`hello`, `lmprobe`, `hello2` and `hello3` have passed on the car and are no
+longer run, but they are still on the card.
 
 | Test | What it checks | What you see / do |
 |---|---|---|
 | `hello` | A program built for the MMI runs at all | Nothing on screen. Writes `hello.txt` with "hello world" to the card. |
+| `lmprobe` | The screen hand-over, without OpenGL, 5 s | Eight vertical colour bars (white, yellow, cyan, green, magenta, red, blue, black) replace the picture. |
 | `hello2` | Drawing with the graphics chip (OpenGL ES), 20 s | A background slowly changing colour, a rotating coloured square, a white block bouncing along the top and a yellow progress bar. Saves screenshots to the card. |
 | `hello3` | Graphics speed (fill rate), 3 × 10 s | Random coloured blocks that get smaller, flowing rainbow plasma, then more and more plasma layers (yellow number). Green frame counter top left. |
-| `hello4` | 3D drawing, 4 × 10 s | Squares top right (green = check passed, red = failed), then two cubes cutting through each other, a gold ring with a moving light, a chequered world with crates and a grid of rings. |
+| `hello4` | Why heavy 3D drawing froze the MMI, about 2 minutes | A grid of coloured rings; the yellow number is how many: 1, 2, 4, then 8 for a whole minute, then 12, 16, 24, 32, 64. **May freeze the MMI** (see above). |
 | `hello5` | Sound, 30 s | The picture doesn't change. Turn the main rotary knob: every click should beep. |
+| `usb_tx_test` | Text from the phone over USB. Runs until you pull the card, so it is always the last test: pulling the card ends it and the run. | Install the usb_tx_test app on the phone, then plug the phone into the car's USB port. The bar at the top turns green ("Connected") once the phone accepts the "open usb_tx_test" prompt. Text sent from the phone appears on screen and in `usb_tx_test.log`. Unplug and replug as often as you like. **Pull the card to end it.** |
+| `hello6` | Whether the MMI's video chip plays phone-style video, and how fast pictures can be drawn. About 5 minutes. **Park the car.** | Text screens explain every step. First about a minute of flickering test patterns (nothing to do). Then 10 short test videos, each with a screen before it: **turn the main knob one click whenever you see a moving test picture** (a coloured pattern with its name and a counting number). The picture may stay black for some of them; that is a result too. A results screen stays up for 20 s at the end. |
 
 The result screen after each test shows one of these verdicts:
 
@@ -64,7 +80,8 @@ The result screen after each test shows one of these verdicts:
 | `var/<test>_out.log` | Everything the test printed, with its exit code and verdict at the end |
 | `var/<test>_slog.txt` | The MMI's system log after the test (has the details if it crashed) |
 | `var/rivit_app.log` | The log of the run itself |
-| `hello.txt`, `hello2.log` … `hello5.log`, `*.png`, `*.bmp` | The tests' own logs and screenshots |
+| `hello.txt`, `lmprobe.log`, `hello2.log` … `hello6.log`, `*.png`, `*.bmp` | The tests' own logs and screenshots |
+| `hello6/` | hello6's details: system info, a log of each video's playback, CPU load and screen layers during each video |
 
 If there is nothing new in `var/` after a run, the card was not started
 by the MMI. Check that the files are in the card's root folder and that

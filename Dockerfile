@@ -8,11 +8,15 @@
 #   fwlibs           the device .so files to stub (staged by make)
 # GLES 1.1 / EGL headers are the standard Khronos ones from Debian's
 # libgles-dev/libegl-dev; build-sysroot.sh copies them into the sysroot.
-FROM debian:bookworm-slim
+# sid for gcc-16-sh4-linux-gnu: bookworm's GCC 12.2 miscompiles at -O1+
+# (docs/gcc-sh4-treg-bug.md). The versioned package pins the major version;
+# the canary in the Makefile catches a regression.
+FROM debian:sid-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        gcc-sh4-linux-gnu g++-sh4-linux-gnu binutils-sh4-linux-gnu make python3 file \
+        gcc-16-sh4-linux-gnu g++-16-sh4-linux-gnu binutils-sh4-linux-gnu make python3 file \
+        gcc libc6-dev liblz4-dev \
         libgles-dev libegl-dev \
  && rm -rf /var/lib/apt/lists/*
 

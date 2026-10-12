@@ -25,7 +25,7 @@
 
 #include <GLES/gl.h>
 
-#include "bmp.h"
+#include "img.h"
 #include "gfx.h"
 #include "log.h"
 #include "quit.h"
@@ -157,7 +157,7 @@ static void take_screenshots(int w, int h)
 		        pixels[((h / 2) * w + w / 2) * 4 + 0], pixels[((h / 2) * w + w / 2) * 4 + 1],
 		        pixels[((h / 2) * w + w / 2) * 4 + 2], pixels[((h / 2) * w + w / 2) * 4 + 3]);
 		log_msg("write %s: %s", path,
-		        bmp_write_rgba(path, pixels, w, h) == 0 ? "ok" : strerror(errno));
+		        img_write_bmp_rgba(path, pixels, w, h) == 0 ? "ok" : strerror(errno));
 		free(pixels);
 	}
 
@@ -174,6 +174,10 @@ static void animate(struct gfx *g, unsigned seconds)
 	unsigned run_ms = seconds * 1000, start = log_ms(), last = start;
 	unsigned frames = 0, sec_frames = 0, next_report = 1000;
 	unsigned worst = 0, swap_fail = 0, shot_done = 0;
+	/* Milliseconds spent capturing and writing files. The readback and the
+	 * card write are not drawing, so they are kept out of both the clock
+	 * that drives the animation and the fps / worst-frame numbers. */
+	unsigned paused = 0;
 
 	glViewport(0, 0, g->width, g->height);
 	glMatrixMode(GL_PROJECTION);
@@ -185,7 +189,7 @@ static void animate(struct gfx *g, unsigned seconds)
 	log_msg("animation: %u s, glError=0x%04x", seconds, glGetError());
 
 	for (;;) {
-		unsigned now = log_ms(), ms = now - start;
+		unsigned now = log_ms(), ms = now - start - paused;
 
 		if (ms >= run_ms)
 			quit_request(QUIT_TIMER);
@@ -193,7 +197,11 @@ static void animate(struct gfx *g, unsigned seconds)
 			break;
 		draw_frame(g->width, g->height, ms, run_ms);
 		if (!shot_done && ms >= SHOT_AT_MS) {
+			unsigned t0 = log_ms();
+
 			take_screenshots(g->width, g->height);
+			paused += log_ms() - t0;
+			last = log_ms();        /* don't bill the capture to this frame */
 			shot_done = 1;
 		}
 		if (gfx_swap(g) != 0 && swap_fail++ < 3)
@@ -213,11 +221,13 @@ static void animate(struct gfx *g, unsigned seconds)
 			next_report += 1000;
 		}
 	}
-	run_ms = log_ms() - start;   /* actual, shorter after an early stop */
+	run_ms = log_ms() - start - paused;   /* actual, shorter after an early stop */
 	if (run_ms == 0)
 		run_ms = 1;
 	log_msg("animation done: %u frames in %u ms (avg %u.%u fps), swap failures=%u",
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
+	if (paused != 0)
+		log_msg("  (+%u ms capturing and writing files, not counted above)", paused);
 }
 
 int main(int argc, char *argv[])

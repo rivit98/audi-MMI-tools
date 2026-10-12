@@ -3,20 +3,21 @@
 #     cd $SDPATH; exec ksh ./run.sh $SDPATH
 #
 # Runs every test app in APPS one after another (filled in by `make sd`,
-# settings per app in apps.conf). First screens/start.png for PRE_S
+# settings per app in apps.conf). First the start screen for PRE_S
 # seconds (what this is, don't pull the card), then for each app:
-#   1. screens/next_<app>.png for PRE_S seconds (the wait before it)
+#   1. its "Next" screen for PRE_S seconds (the wait before it)
 #   2. the app, with stdout + stderr captured in var/<app>_out.log and its
 #      exit code, run time and verdict appended there as "=== " lines.
 #      It is stopped (TERM, then KILL) if it runs longer than its timeout.
-#   3. screens/<app>_<verdict>.png for POST_S seconds
-# then screens/done_<number of OK apps>.png for FINAL_S seconds. The
-# verdicts are also in var/summary.txt.
+#   3. its result screen for POST_S seconds
+# then the "all done" screen for FINAL_S seconds. The verdicts are also in
+# var/summary.txt.
 #
-# The screens are PNGs pre-rendered by sdk/mkscreens.py and shown with
-# bin/showScreen -t (core/bin/showScreen, DrGER's tool, proven on the car).
-# If showScreen or a PNG is missing, or showScreen returns early, the wait
-# is made up with sleep, so the timing stays the same.
+# The screens are rendered when they are needed: screens.sh prints the
+# layout, bin/pngondemand turns it into a PNG in /tmp, and bin/showScreen -t
+# (core/bin/showScreen, DrGER's tool, proven on the car) shows it. If any
+# of that fails, or showScreen returns early, the wait is made up with
+# sleep, so the timing stays the same.
 #
 # Binaries are copied to /tmp before running: the FAT32 card may not carry
 # an exec bit, and the card can be pulled while a program runs.
@@ -34,23 +35,15 @@ FINAL_S=@FINAL_S@      # final screen
 KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
 SDPATH="${1:-${0%/*}}"
 VAR="${SDPATH}/var"
-SCREENS="${SDPATH}/screens"
 BIN=/tmp/rivit_app
+SCREEN="${BIN}/screen"     # screen.layout -> screen.png, rendered by show
 LOG="${VAR}/rivit_app.log"
 SUMMARY="${VAR}/summary.txt"
 mkdir -p "${VAR}"
 
-# app_info <app>: ARGS and TIMEOUT from apps.conf (its description is
-# only used for the screens)
-app_info() {
-    ARGS=""; TIMEOUT=120
-    [ -f "${SDPATH}/apps.conf" ] || return
-    while IFS='|' read -r n t a d; do
-        [ "$n" = "$1" ] || continue
-        ARGS=$a
-        [ -n "$t" ] && TIMEOUT=$t
-    done < "${SDPATH}/apps.conf"
-}
+# app_info (ARGS, TIMEOUT from apps.conf) and the screen_* layouts. Without
+# it the apps still run (defaults), only the screens are missing.
+[ -f "${SDPATH}/screens.sh" ] && . "${SDPATH}/screens.sh"
 
 # run_limited <timeout> <out_file> <cmd> [args...]
 # Runs cmd in the background with stdout + stderr appended to out_file. A
@@ -83,26 +76,31 @@ run_limited() {
     [ -f "${BIN}/timed_out" ] && TIMED_OUT=1
 }
 
-# show <png> <seconds>: the screen for that long (blocking)
+# show <seconds> <screen_* function> [args]: render that screen and show it
+# for that long (blocking). The layout is made first, while RC, SECS and
+# FAILS are still the app's (run_limited sets them again for showScreen).
 show() {
-    _s0=${SECONDS}
-    if [ -x "${BIN}/showScreen" ] && [ -f "${SCREENS}/$1" ]; then
-        run_limited $(($2 + 10)) "${VAR}/showscreen.log" \
-            "${BIN}/showScreen" -t "$2" "${SCREENS}/$1"
-        echo "showScreen $1: exit ${RC}"
+    _s0=${SECONDS}; _secs=$1; shift
+    rm -f "${SCREEN}.png"
+    "$@" > "${SCREEN}.layout"
+    "${BIN}/pngondemand" "${SCREEN}.layout" "${SCREEN}.png" || echo "pngondemand $*: exit $?"
+    if [ -x "${BIN}/showScreen" ] && [ -f "${SCREEN}.png" ]; then
+        run_limited $((_secs + 10)) "${VAR}/showscreen.log" \
+            "${BIN}/showScreen" -t "${_secs}" "${SCREEN}.png"
+        echo "showScreen $*: exit ${RC}"
     else
-        echo "no showScreen or ${SCREENS}/$1"
+        echo "no showScreen or no screen for $*"
     fi
-    _left=$(($2 - (SECONDS - _s0)))
+    _left=$((_secs - (SECONDS - _s0)))
     [ ${_left} -gt 0 ] && sleep ${_left}
 }
 
-run_app() {   # run_app <app>
-    APP=$1
-    app_info "${APP}"
+run_app() {   # run_app <i> <app>
+    I=$1; APP=$2
+    app_info "${APP}" || { ARGS=""; TIMEOUT=120; }    # (no screens.sh)
     OUT="${VAR}/${APP}_out.log"
 
-    show "next_${APP}.png" ${PRE_S}
+    show ${PRE_S} screen_next ${I} "${APP}"
 
     echo "--- ${APP} ${ARGS}  (timeout ${TIMEOUT} s)"
     : > "${OUT}"
@@ -134,6 +132,7 @@ run_app() {   # run_app <app>
     echo "${APP} exit code: ${RC}  verdict: ${VERDICT} (${DETAIL})  ${SECS} s"
     echo "${APP} ${VERDICT} ${DETAIL}, ${SECS} s, ${FAILS} FAIL lines" >> "${SUMMARY}"
     [ ${VERDICT} = OK ] && NOK=$((NOK + 1))
+    RESULTS="${RESULTS} ${VERDICT}"
 
     sloginfo > "${VAR}/${APP}_slog.txt" 2>&1
     for f in /HBpersistence/core/"${APP}".* /mnt/persistence/"${APP}".* /tmp/"${APP}".*; do
@@ -143,7 +142,7 @@ run_app() {   # run_app <app>
     done
     sync
 
-    show "${APP}_${VERDICT}.png" ${POST_S}
+    show ${POST_S} screen_result ${I} "${APP}" ${VERDICT}
 }
 
 {
@@ -153,12 +152,13 @@ run_app() {   # run_app <app>
     cp "${SDPATH}"/bin/* "${BIN}/" && chmod 755 "${BIN}"/*
     rm -f "${SUMMARY}" "${VAR}/showscreen.log"
 
-    NOK=0
-    show start.png ${PRE_S}
+    NOK=0; RESULTS=""; N=0
+    show ${PRE_S} screen_start
     for A in ${APPS}; do
-        run_app "${A}"
+        run_app ${N} "${A}"
+        N=$((N + 1))
     done
-    show "done_${NOK}.png" ${FINAL_S}
+    show ${FINAL_S} screen_done ${NOK}
 
     rm -rf "${BIN}"
     sync

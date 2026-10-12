@@ -7,7 +7,7 @@ set -eu
 
 IN="$1"
 OUT="$2"
-CC=sh4-linux-gnu-gcc
+CC=sh4-linux-gnu-gcc-16
 ARCH="-m4 -ml -Wa,--isa=sh4"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 

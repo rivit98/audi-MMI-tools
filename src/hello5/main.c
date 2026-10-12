@@ -6,24 +6,28 @@
  * main rotary knob left/right, 5/4 = volume knob left/right, all of 4..7
  * zero = a button press. quit.c owns the single reader; hello5 hooks it
  * with quit_init_ex() and plays a short PCM clip whenever byte 6 or 7 is
- * set (a main-rotary detent). A button press still exits (QUIT_KEY).
+ * set (a main-rotary detent). Nothing on ch8 stops the run; it ends on its
+ * own timer.
  *
  * Audio goes through QNX Sound Architecture (QSA / libasound). io-audio on
  * this unit runs the hb_fpga driver and exposes six playback devices; index
  * 5 is "tones1", the UI-tone mixer input (see mmi3g-srv-starter.cfg), so a
  * beep there mixes over media/nav instead of fighting the ent3 output.
  * The plugin layer (snd_pcm_plugin_*) resamples/upmixes the clip to whatever
- * the FPGA wants, so the stock 22.05 kHz mono tone WAV plays as-is.
+ * the FPGA wants. beep.wav is rendered by sdk/mkbeep.py: a 600 ms two-note
+ * chime at 44.1 kHz mono, so the plugin has no rate conversion to do.
  *
- * The QSA struct ABI in <sys/asoundlib.h> is reconstructed and unverified;
- * every snd_* return code and the negotiated format are logged, so one car
- * run shows whether it is right (watch the "params" and "setup" lines).
+ * The QSA struct ABI in <sys/asoundlib.h> is reconstructed from the device's
+ * own libasound.so.2; every snd_* return code, the negotiated format and the
+ * driver's why_failed code are logged, so one car run shows which parameter
+ * it rejects (watch the "params" and "setup" lines).
  *
  * Stops on a button press, SIGTERM/INT/HUP, SD removal, its own run timer,
  * or the watchdog (src/common/quit.c).
  *
  * usage: hello5 <sd_path> [run_seconds] [wav_path] [device_index]
  */
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,7 +57,7 @@ struct clip {
 
 static snd_pcm_t *pcm_handle;
 static struct clip beep;
-static unsigned beeps, beep_fail;
+static unsigned beeps, beep_busy, beep_fail;
 
 /* ---- little-endian readers (the MMI is SH4 little-endian, as are WAVs) ---- */
 
@@ -148,6 +152,23 @@ static int sfmt_for(uint16_t bits)
 	return -1;
 }
 
+/* params->why_failed after a rejected snd_pcm_plugin_params(): the driver's
+ * own reason, which is the only thing that says which field it disliked. */
+static const char *why_failed_name(int why)
+{
+	switch (why) {
+	case 0:                             return "not set";
+	case SND_PCM_PARAMS_BAD_MODE:       return "bad mode (or interleave unsupported)";
+	case SND_PCM_PARAMS_BAD_START:      return "bad start_mode";
+	case SND_PCM_PARAMS_BAD_STOP:       return "bad stop_mode";
+	case SND_PCM_PARAMS_BAD_FORMAT:     return "bad format";
+	case SND_PCM_PARAMS_BAD_RATE:       return "bad rate";
+	case SND_PCM_PARAMS_BAD_VOICES:     return "bad voices";
+	case SND_PCM_PARAMS_NO_CHANNEL:     return "no channel";
+	}
+	return "?";
+}
+
 /* Open the tones device and negotiate the clip's format once. */
 static int audio_open(int card, int device, const struct clip *c)
 {
@@ -166,6 +187,10 @@ static int audio_open(int card, int device, const struct clip *c)
 		pcm_handle = NULL;
 		return -1;
 	}
+	/* The plugin layer builds an mmap plugin unless bit 1 of the disable
+	 * mask is set (plugin_params tests `handle[0x9B0] & 2`); the standard
+	 * QSA playback sequence turns mmap off before negotiating. */
+	snd_pcm_plugin_set_disable(pcm_handle, PLUGIN_DISABLE_MMAP);
 	/* let the plugin layer resample/upmix to the hardware's fixed format */
 	snd_pcm_plugin_set_src_method(pcm_handle, SND_PCM_PLUGIN_CONV_AUTO);
 
@@ -184,7 +209,16 @@ static int audio_open(int card, int device, const struct clip *c)
 
 	rc = snd_pcm_plugin_params(pcm_handle, &p);
 	if (rc < 0) {
-		log_msg("audio: snd_pcm_plugin_params: %s", snd_strerror(rc));
+		/* why_failed is the driver's own reason, copied back into our
+		 * struct by libasound; without it "Invalid argument" says
+		 * nothing about which field was rejected. */
+		log_msg("audio: snd_pcm_plugin_params: %s (why_failed=%d: %s)",
+		        snd_strerror(rc), p.why_failed,
+		        why_failed_name(p.why_failed));
+		log_msg("audio: requested %u Hz, %u ch, %u-bit (sfmt=%d), "
+		        "frag_size=%d frags %d..%d",
+		        c->rate, c->voices, c->bits, fmt,
+		        p.frag_size, p.frags_min, p.frags_max);
 		snd_pcm_close(pcm_handle);
 		pcm_handle = NULL;
 		return -1;
@@ -219,6 +253,12 @@ static void beep_play(void)
 	if (pcm_handle == NULL)
 		return;
 	rc = snd_pcm_plugin_prepare(pcm_handle, SND_PCM_CHANNEL_PLAYBACK);
+	if (rc == -EBUSY) {
+		/* the previous chime is still playing: on 12.10 v2 every EBUSY
+		 * came < 600 ms (the clip's length) after a beep that worked */
+		beep_busy++;
+		return;
+	}
 	if (rc < 0) {
 		beep_fail++;
 		log_msg("beep: prepare: %s", snd_strerror(rc));
@@ -231,6 +271,7 @@ static void beep_play(void)
 		return;
 	}
 	beeps++;
+	log_msg("beep %u: %u bytes written", beeps, beep.len);
 }
 
 /* quit.c calls this for every ch8 message. Byte 7/6 = main rotary turn. */
@@ -288,7 +329,7 @@ int main(int argc, char *argv[])
 
 	/* quit.c owns /dev/ipc/ch8; on_key() runs on its reader thread. */
 	quit_init_ex(sd_path, run_s + WATCHDOG_SLACK, on_key, NULL);
-	log_msg("hello5: ready - turn the main rotary knob to beep, press a button to exit");
+	log_msg("hello5: ready - turn the main rotary knob to beep");
 
 	for (;;) {
 		if (log_ms() >= run_ms)
@@ -299,8 +340,8 @@ int main(int argc, char *argv[])
 	}
 
 	audio_close();
-	log_msg("hello5 exit (stop: %s), beeps=%u, failures=%u",
-	        quit_name(quit_poll()), beeps, beep_fail);
+	log_msg("hello5 exit (stop: %s), beeps=%u, busy (still playing)=%u, failures=%u",
+	        quit_name(quit_poll()), beeps, beep_busy, beep_fail);
 	log_close();
 	free(beep.pcm);
 	return 0;

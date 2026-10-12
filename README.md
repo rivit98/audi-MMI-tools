@@ -6,10 +6,14 @@ little endian) with Debian's stock SH4 GCC, packaged as a Docker image.
 | App | What it does |
 |---|---|
 | `hello` | On SD insert, writes `hello.txt` (`hello world`) to the card. Toolchain smoke test. |
+| `lmprobe` | Layer manager test without OpenGL: replays showScreen's devctl sequence, fills the frame buffer with colour bars, logs every raw status. Also carries an on-car proof of the compiler bug below. |
 | `hello2` | OpenGL ES test. Logs full EGL/GL/gf diagnostics, runs a 20 s animation, and saves screenshots to the card. |
 | `hello3` | GPU canvas: random-colour pixel blocks and a plasma effect, both rendered by the GPU from textures uploaded once, then a fill-rate benchmark. On-screen FPS counter. |
 | `hello4` | 3D pipeline test: automatic pixel-readback probes (depth, culling, perspective, lighting, texture, fog, blend, stencil) shown as PASS/FAIL squares, then lit/textured/fogged 3D scenes and a triangle-rate benchmark. |
 | `hello5` | Audio test: beeps on every turn of the main rotary knob. Plays a bundled PCM clip (`beep.wav`) through QSA (`libasound`) on the `tones1` device. First user of `/dev/ipc/ch8` input and of sound. |
+| `usb_tx_test` | Text from an Android phone over USB (Android Open Accessory). Shows the link state and received messages full screen, logs them to the card. Pairs with the phone app in `android/`. Runs until the SD card is pulled. See [usb_tx_test](#usb_tx_test-make-sd-sd_appsusb_tx_test). |
+| `pngondemand` | Tool, not a test: renders a text layout (rectangles, text, word-wrapped paragraphs) to a PNG on the car. `run.sh` uses it to draw each status screen right before showing it. See [Screens](#the-test-run). |
+| `hello6` | Checks the phone-mirroring assumptions ([docs/phone-mirroring.md](docs/phone-mirroring.md)): system/GPU info, CPU/VFB/texture-upload/LZ4 benchmarks, then ten test videos through the unit's DM642 decoder on a layer manager video displayable. About 5 minutes, driver watching. See [hello6](#hello6-make-sd-sd_appshello6). |
 
 ```sh
 make sdk               # once: build the mmi-sdk Docker image (toolchain + QNX sysroot)
@@ -37,9 +41,11 @@ in IDA (Hex-Rays has no SH4 target; it is read from the SH4 disassembly). The
 `snd_pcm_channel_params_t` size (752 B, from the `devctl` dcmd `0xC2F04134`)
 and the `channel`/`mode`/`format`/`frag_size`/`stop_mode`/`frags_max` offsets
 are confirmed from the code and locked by `_Static_assert`s in that header;
-`start_mode`/`frags_min` sit in the gaps and are inferred. `hello5` still logs
-every `snd_*` return code and the negotiated format, so the first car run is
-the final check — watch the `params`/`setup` lines in `hello5.log`.
+`start_mode`/`frags_min` sit in the gaps and are inferred. The enum values come
+from the unit's io-audio, and the setup read-back has its own layout (format
+`@0x08`). On 12.10 v2 the params were accepted and 15 clips were written in
+full. `prepare` returns `EBUSY` while the previous chime is still playing.
+Whether it was audible is still unconfirmed (docs/platform-notes.md §9).
 
 ---
 
@@ -88,8 +94,11 @@ library is loaded.
    has no GCC or binutils. It provides the headers (`lib/c/public`,
    `services/system/public`) and the SH startup code
    (`lib/c/startup/sh/{crt1,crti,crtn}.S`, `crtbegin/crtend.s`).
-2. **Debian ships a usable SH4 compiler:** `gcc-sh4-linux-gnu` 12.2 and
-   binutils 2.40 in bookworm.
+2. **Debian ships a usable SH4 compiler:** `gcc-16-sh4-linux-gnu` 16.2 and
+   binutils 2.47 in sid. (bookworm's GCC 12.2 also works, but only at `-O0`:
+   see [`docs/gcc-sh4-treg-bug.md`](docs/gcc-sh4-treg-bug.md).) GCC 14+
+   predefines `_FILE_OFFSET_BITS=64` / `_TIME_BITS=64` for Debian's 64-bit
+   `time_t`; the wrapper undefines both, or `open()` becomes `open64()`.
 3. **The headers support modern GCC.** `sys/compiler_gnu.h` uses
    `__builtin_va_*` for GCC ≥ 3. GCC only needs QNX's macros:
    `-D__QNX__ -D__QNXNTO__ -D__SH__ -D__LITTLEENDIAN__`, with the Linux
@@ -98,7 +107,7 @@ library is loaded.
    `__fpscr_values` and `__sdivsi3_i4`.
 5. **FPU mode:** `crt1.S` calls `__set_fpscr(0xc0400)`, which sets PR=1
    (double precision), DN=1, and enables the divide-by-zero trap. That's
-   exactly GCC's `-m4`. GCC 12 switches FPU modes inline and doesn't need
+   exactly GCC's `-m4`. GCC switches FPU modes inline and doesn't need
    `__fpscr_values`.
 6. **The init/fini array runners don't exist anywhere.** `crt1.S` calls
    `_preinit_array`, `_init_array` and `_fini_array`. They lived in QNX's
@@ -153,7 +162,18 @@ MMI3GApplication / your app
   | `0x80040504` | `UPDATE_VFB` |
   | `0x800C0505` | `SHOW_DISPLAYABLES` |
   | `0xC00C0506` | `CHECK_VERSION` |
-  | `0x80040501` | unknown |
+  | `0x80040501` | `UNREGISTER_DISPLAYABLE(cid)` (qnx-audi: unknown) |
+
+  A rejected request comes back as `devctl() == EINVAL` plus `<ERR>` lines
+  in the slog. Displayables outlive their client (closing the fd doesn't
+  unregister), so apps unregister their cid before registering, as
+  showScreen does.
+
+  **The VFB is double-buffered:** `GET_VFB` returns the back surface and
+  `UPDATE_VFB` flips front/back. So the sid changes with every update, and a
+  CPU-drawing client must call `GET_VFB` again after each `UPDATE_VFB`.
+  Otherwise every other update shows a never-written surface (noise). See
+  docs/platform-notes.md §3.
 
 - **Text commands for debugging.** Writing to `/dev/layermanager` accepts:
   - `s-shot <display> <file>`: whole-screen snapshot
@@ -199,32 +219,56 @@ MMI3GApplication / your app
 ## Layout
 
 ```
-Dockerfile            mmi-sdk image: debian bookworm + gcc-sh4-linux-gnu + sysroot
+Dockerfile            mmi-sdk image: debian sid + gcc-16-sh4-linux-gnu + sysroot
 Makefile              host entry point (sdk / all / check / sd / shell / clean)
 sdk/
   shle-nto-gcc        compiler wrapper: QNX headers, crt objects, link flags
   build-sysroot.sh    runs in `docker build`: headers, crt, stubs, 6.3.2 patch
   mkstubs.py          stripped device .so → link-time stub (.S)
-  mkscreens.py        pre-renders run.sh's status screens (PNG) for `make sd`
   fonts/              Terminus Font 8x16 / 16x32 console fonts (SIL OFL, OFL.txt)
   crtarray.c          _preinit_array/_init_array/_fini_array for crt1.o
   include/gf/         reconstructed gf.h / gf3d.h (QNX 6.3.2 layouts)
+  canary.c            build-time check for the GCC miscompile (docs/gcc-sh4-treg-bug.md)
+  mkbeep.py           renders src/hello5/beep.wav (the knob-detent chime)
+  include/sys/        reconstructed QSA asoundlib.h (from the unit's libasound)
+                      and USBDI usbdi.h (from the unit's libusbdi, see usb_tx_test)
+  mkfont.py           PSF font -> C glyph table (usb_tx_test's on-device text)
+docs/
+  platform-notes.md   what the car has confirmed: GPU limits, layer manager,
+                      vsync, capture, input, audio ABI. Start here.
+  qnx-sh-fpu-div0.md  why a divide by zero is a fatal SIGFPE on this platform
+  gcc-sh4-treg-bug.md GCC 12.2's -O1+ `a == 0 && b == 0` miscompile (fixed in 16)
 src/
   common/             shared by graphics apps
     log.c             SD log, fsync per line
     lmgr.c            /dev/layermanager client (devctl + text commands)
     gfx.c             gf + EGL bring-up / teardown (port of qnx-audi Screen)
-    bmp.c             24-bit BMP writer
-    quit.c            clean-stop sources: timer, button, signals, SD removal, watchdog
+    img.c             BMP / PNG writers over the vendored stb_image_write.h
+    quit.c            clean-stop sources: timer, signals, SD removal, watchdog
     hud.c             seven-segment FPS counter + rectangles
   hello/hello.c
+  lmprobe/main.c      showScreen's layer manager sequence, colour bars, no GL
   hello2/main.c
   hello3/main.c       scenes, timing, fill-rate table
   hello4/main.c       3D scenes, timing, triangle-rate table
   hello4/mesh.c       cube / torus / ground grid (indexed, client-side arrays)
   hello4/probe.c      glReadPixels pass/fail checks of the 3D pipeline
+  usb_tx_test/        AOA receiver: aoa.c (USB), proto.c (frames), text.c (UTF-8,
+                      wrap, glyphs), ui.c (screen layout), screen.c (VFB), model.c
+  pngondemand/        layout -> PNG: layout.c (the layout language), main.c
+                      (PNG via common/img.c); README.md
+  hello6/             mirroring checks: main.c (phases), sysinfo.c, bench.c,
+                      video.c, label.c (text screens), texts.h (their text +
+                      the clip list), proc.c (spawn tools), lz4mini.c
+media/                hello6's test videos: mkclips.sh (ffmpeg, mmi-media image)
+tests/                host unit tests (make test) + ui_preview.c (make ui-preview)
+                      + hello6_preview.c (make hello6-preview)
+                      + screens_preview.sh (make screens-preview)
+android/              usb_tx_test sender app (Kotlin, Gradle in docker/Dockerfile)
+tools/aoa_host.py     desk stand-in for the MMI side (make aoa-host)
 sd/run.sh             launched by copie_scr.sh on SD insert: runs the test apps
                       (@APPS@ and screen times filled by make)
+sd/screens.sh         run.sh's status screens as pngondemand layouts (sourced)
 sd/apps.conf          per-app timeout, arguments, description (run.sh + screens)
 sd/README.md          short user guide, copied to the card as README.md
 build/                output (gitignored); build/sd/ = SD card root
@@ -243,9 +287,11 @@ General procedure:
 1. FAT32 card. Copy `build/sd/*` to the root.
 2. Turn the ignition on and wait for the MMI to boot fully. Insert the card.
 3. A start screen comes first. Then each app gets a "Next" screen (what it
-   does and what you should see) and a result screen. Wait until the
-   "all done" screen has gone (about 4 min for all five apps), then pull
-   the card.
+   does and what you should see) and a result screen. The default run
+   is hello5, hello6, hello4 (about 9 min), then usb_tx_test, which runs until
+   the card is pulled: that is the end of the run, so its result screen
+   and the "all done" screen never appear. With an `SD_APPS` list that
+   doesn't end in usb_tx_test, wait for "all done" before pulling.
 
 If neither the apps' output nor `var/rivit_app.log` appears,
 `copie_scr.sh` didn't run.
@@ -254,7 +300,7 @@ If neither the apps' output nor `var/rivit_app.log` appears,
 
 `run.sh` (ksh, no native runner) does this for each app in `SD_APPS`:
 
-0. **Screen "rivit_app"** (`start.png`) for 5 s, once: what the run is,
+0. **Screen "rivit_app"** for 5 s, once: what the run is,
    and don't pull the card before "all done".
 1. **Screen "Next: <app>"** for 5 s: its title and what you should see or
    do, its arguments and timeout, and the run order. This is the pause
@@ -264,10 +310,11 @@ If neither the apps' output nor `var/rivit_app.log` appears,
    sends TERM when the app runs over its timeout, and KILL 15 s later.
    Then `sloginfo` goes to `var/<app>_slog.txt` and core files are moved to
    `var/` (see "When an app crashes").
-3. **Screen "<app>: <verdict>"** for 8 s, with what the verdict means and
-   where its logs are.
+3. **Screen "<app>: <verdict>"** for 8 s, with what the verdict means, the
+   exit code, run time and FAIL line count, and where its logs are.
 
-Then a final screen "k of n apps OK" for 15 s. The verdicts, with exit
+The run order on every screen shows the verdicts so far. Then a final
+screen "k of n apps OK" for 15 s. The verdicts, with exit
 code and run time, are in `var/summary.txt`.
 
 | Verdict | Meaning |
@@ -287,27 +334,36 @@ hello5 runs 30 s there, not its 600 s default. The screen times are
 **Screens.** They are shown with the toolkit's `core/bin/showScreen`
 (DrGER's tool, already proven on the car), as
 `showScreen -t <seconds> <png>`. `-t` shows the image and blocks until
-the time is up. showScreen can only show a PNG, so `sdk/mkscreens.py`
-pre-renders every screen a run can need into `screens/` on the card
-(42 PNGs for five apps, about 300 KB):
+the time is up. showScreen can only show a PNG, so each screen is drawn
+on the car when it is needed, nothing is pre-rendered:
 
-| File | Shown |
-|---|---|
-| `start.png` | once, first |
-| `next_<app>.png` | before the app |
-| `<app>_<VERDICT>.png` | after it, one per verdict |
-| `done_<k>.png` | at the end: k of the n apps OK |
+1. a `screen_*` function in [`sd/screens.sh`](sd/screens.sh) prints the
+   screen's layout (`screen_start`, `screen_next`, `screen_result`,
+   `screen_done`) to `/tmp/rivit_app/screen.layout`;
+2. `bin/pngondemand` renders it to `/tmp/rivit_app/screen.png`;
+3. `showScreen -t` shows that.
 
-To preview them, look at `build/sd/screens/` after `make sd`. If
-showScreen or a PNG is missing, or showScreen returns early, `run.sh`
-sleeps the rest of the time, so the timing doesn't change. showScreen's
-own output goes to `var/showscreen.log`.
+The rendering time counts towards the screen's time. If any step fails,
+or showScreen returns early, `run.sh` sleeps the rest of the time, so the
+timing doesn't change. pngondemand's errors go to `var/rivit_app.log`,
+showScreen's output to `var/showscreen.log`.
 
-**Not yet verified on the car:** that the screen goes back to the HMI
-when `showScreen -t` ends (the toolkit's scripts only ever ran it without
-options, in the background). Also not verified: that a hello app can take
-the screen right after it. If the final screen stays up, the MMI reboot
-key combo clears it.
+`make screens-preview` renders every screen a run can show (each verdict
+of each app, every "k of n") into `build/screens/*.png` with a host build
+of pngondemand and the real `sd/screens.sh` + `apps.conf`, next to the
+`.layout` it came from. It fails if any text does not fit.
+
+**pngondemand** renders a text layout (one command per line: `bg`,
+`rect`, `text`, word-wrapped `para`, `footer`, ...) to a PNG:
+`pngondemand [-s] <layout|-> <out.png|->`. The layout language, options
+and an example are in [`src/pngondemand/README.md`](src/pngondemand/README.md);
+`pngondemand -h` prints a summary. The PNG is written by `common/img.c` over
+the vendored [stb_image_write](https://github.com/nothings/stb) (public domain / MIT),
+as the SDK has no zlib or libpng.
+
+Verified on the car (video of the 2026-10-11 run): the screen goes back to
+the HMI when `showScreen -t` ends, and a hello app takes the screen right
+after it. If a screen ever stays up, the MMI reboot key combo clears it.
 
 ### Stopping an app
 
@@ -318,8 +374,7 @@ back to the HMI. The log ends with `stop requested: <reason>` and
 
 | How | Notes |
 |---|---|
-| Wait | The normal end: 20 s for hello2, 3 × 10 s for hello3, 4 × 10 s for hello4. |
-| **Press a hardware button** | Read from `/dev/ipc/ch8`, as qnx-audi does. Any message that isn't a turn of the rotary or volume knob counts as a button. The first 30 raw messages are logged as hex to help decode the key protocol. Not verified on P1001. The HMI may also react to the press. |
+| Wait | The normal end: 20 s for hello2, 3 × 10 s for hello3, 4 × 10 s for hello4 (with no arguments; `sd/apps.conf` gives it a ~100 s stress plan). |
 | **Pull the SD card** | Checked once per second. The card is gone, so the log and screenshots are lost after that point. |
 | `slay hello3` / `kill -TERM <pid>` | From a shell (telnet or serial), if you have one. SIGTERM, SIGINT and SIGHUP all work. A second signal forces `_exit`. |
 | Watchdog | Run time + 40 s, in case GL or the layer manager hangs. |
@@ -476,9 +531,10 @@ row of squares, top right: **green = pass, red = fail, grey = skip**.
 | 6 | `texture` | All four texels of a 2×2 `GL_NEAREST` texture, `GL_REPLACE`. |
 | 7 | `fog` | Linear fog: fully fogged, half and none. |
 | 8 | `blend` | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` at α = 0.5. |
-| 9 | `stencil` | Drawing only where a stencil mask was written. **SKIP** if the EGL config has no stencil bits, which is likely: it doesn't ask for any. |
+| 9 | `stencil` | Drawing only where a stencil mask was written. `gfx.c` now asks for an 8-bit stencil config (the driver has them), so this should run rather than SKIP. |
 
-Then four scenes of 10 s each (`hello4 <sd> <seconds>` changes the length):
+Then four scenes of 10 s each (`hello4 <sd> <seconds>` changes the length;
+what runs is selectable, see "Options" below):
 
 | Scene | What you see | Exercises |
 |---|---|---|
@@ -504,6 +560,179 @@ the GPU has headroom. If fps falls as 1/N, the ktris/s column is the
 transform and lighting rate for lit, untextured, indexed triangles. The
 tori are small on screen, so fill rate is not what limits it.
 
+**The stress scene froze the whole unit on 2026-10-11** (picture, knobs and
+radio volume, for minutes; no watchdog fired) while drawing 8 tori, after
+probes and scenes 1–3 had all passed. See
+[`docs/gpu-results.md`](docs/gpu-results.md). The default run
+(`sd/apps.conf`) therefore runs only the stress scene, built to find out
+when and why:
+
+```
+hello4 <sd> scenes=s step=5 tori=1,2,4,8:60,12,16,24,32,64 trace=1
+```
+
+Options (any order, after `<sd>`):
+
+| Option | Meaning | Default |
+|---|---|---|
+| `<n>` | seconds per scene (cube/light/world), and for the whole stress scene when there is no `step=` | 10 |
+| `scenes=pclws` | what runs, in this order: `p` probes, `c` cube, `l` light, `w` world, `s` stress | all |
+| `tori=1,2,8:60` | stress steps: torus counts, each with optional own seconds | 1,2,4,8,16,32,64 |
+| `step=<s>` | seconds of a stress step without its own | scene time ÷ steps |
+| `trace=0/1/2` | stress only. 1: one fsync'ed line per frame after its swap, `f<frame> n=<tori> draw=<ms> swap=<ms>`. 2: also `f<n> draw` / `f<n> swap` before each. Each line costs ~12 ms on the card, so fps drops. | 0 |
+
+A bad option is a `FAIL` line and exit 2, so nothing is drawn. Each stress
+step logs its start with triangles per frame and free RAM, and the
+per-second line now includes `free=<MB>` (the size of `/proc`), to catch a
+driver leak before a freeze. After a freeze, the last `f<n>` line in
+`hello4.log` is the last frame that finished.
+
+### usb_tx_test (`make sd SD_APPS=usb_tx_test`)
+
+A phone app sends text over USB; the MMI shows it and logs it.
+
+```
+phone: android/ app  --USB (AOA bulk)-->  MMI: usb_tx_test  -->  screen + usb_tx_test.log
+```
+
+**How it works.** The MMI's USB host stack is QNX `io-usb` (EHCI + OHCI,
+started by srv-starter) with the client library `libusbdi.so.2` on
+efs-system (`/mnt/efs-system/lib`, symlinked to `/lib`). `usb_tx_test`
+connects to it with a wildcard filter and does the
+[Android Open Accessory](https://source.android.com/docs/core/interaction/accessories/aoa)
+handshake with any new device (vendor requests 51/52/53). An Android phone
+re-enumerates as `18d1:2d00`/`2d01` with a bulk IN/OUT interface (`ff/ff`).
+That needs no root and no USB debugging on the phone. Android starts the
+sender app because its `accessory_filter.xml` matches manufacturer
+`rivit` / model `usb_tx_test`.
+
+Protocol (`src/usb_tx_test/proto.h` = `android/.../Proto.kt`): frames of
+`type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say
+who is at each end, `TEXT` carries `seq u16` + UTF-8, `ACK` echoes `seq`.
+
+**Robustness.** Callbacks from io-usb only queue events; a manager thread
+does all the work. Unplugging the phone, a transfer error, or a device
+that isn't Android (USB stick, iPod) never ends the app: it goes back to
+"Waiting for phone". A link that breaks while the phone stays plugged in
+is reopened on the same device, up to 5 tries (see below for why that
+happens). It retries `usbd_connect` every 2 s if io-usb isn't there. It
+stops only on SD removal or SIGTERM/INT/HUP (no watchdog), then gives the
+screen back to the HMI.
+
+**What the unit's USB stack does (verified in Ghidra).** Checked against
+`libusbdi.so.2`, `io-usb`, `vdev-medialaunch` and `iofs-pfs.so` (rev 51).
+Full write-up, with the client-side consequences, in
+[`docs/usb-stack.md`](docs/usb-stack.md):
+
+| Question | Answer from the binaries | Where |
+|---|---|---|
+| Can another client lock us out of the phone? | No. `udi_attach` only counts openings; it refuses nothing but hubs. | io-usb `0x08046040` |
+| Does the media stack's MTP driver take the accessory? | No. `ptp_parse_descriptors` needs bulk IN + bulk OUT + interrupt; the accessory interface (`ff/ff`) has no interrupt endpoint. | iofs-pfs `0x27940` |
+| Do unplug / abort / detach complete our URBs? | Yes, all three complete them with `ABORTED` and send the completion event **before** the removal event. | io-usb `udi_in_out 0x08046620`, `0x08044e80`, `udi_transfer_complete 0x08044d40` |
+| Can the link break while the phone stays plugged? | Yes. A client's `usbd_detach` aborts **every** URB on the interface's endpoints, other clients' included, and the media launcher attaches/probes/detaches new devices. Its MTP probe also resets a device whose `GET_DESCRIPTOR(0xEE)` times out (a STALL is fine). Hence the reopen. | io-usb `udi_detach 0x08046400`; medialaunch `0x080539c0`, `0x080537e0` |
+| Removal while our URBs are pending? | libusbdi defers our `removal()` until they complete; no deadlock. | libusbdi `usbdi_event_thread 0x17a20`, `usbdi_synchronise` |
+| Close/detach races | `usbd_close_pipe` / `usbd_detach` return `EBUSY` (and free nothing) while libusbdi still counts I/O, which it decrements only **after** our callback returns. A device never detached keeps io-usb's port in "holdoff" even after an unplug. So both are retried until the counters drain. | libusbdi `0x15aa0`, `0x15820`; io-usb `CLASS_ExtractDevice 0x08048e60` |
+| Synchronous vs asynchronous `usbd_io` | Decided by the endpoint: EP0 waits for the reply (our control transfers), others are asynchronous and complete on the event thread. | libusbdi `usbd_io 0x19360` |
+| Event thread | One thread (`usbdi_event_handler`, 16 KB stack) runs insertion, removal and completion callbacks in order. | libusbdi `0x17ca0` |
+
+(Addresses as Ghidra loads them: libusbdi and iofs-pfs rebased at 0x10000.
+`io-usb` from the efs extraction has a corrupt section header table; load a
+copy with `e_shoff`/`e_shnum` zeroed.)
+
+**USBDI header.** openqnx has no USB DDK headers, so `sdk/include/sys/usbdi.h`
+is reconstructed from the QNX 6.5.0 SDK header (same ABI generation).
+Checked against the unit's `libusbdi.so.2` disassembly: the
+`usbd_connect_parm_t` offsets, the accepted `USBD_VERSION` (0 or `0x0101`),
+the `usbd_setup_vendor`/`usbd_setup_bulk` argument order, and that buffers
+must come from `usbd_alloc()` (the library calls `usbd_mphys` on them). The
+usage pattern follows smartdevicelink's QNX USB transport, which shipped on
+QNX head units.
+
+**Build and run.**
+
+```sh
+make sdk                         # once, adds the libusbdi stub + host gcc
+make test                        # C unit tests: protocol, UTF-8, wrap, drawing
+make ui-preview                  # build/ui_<state>.bmp: the screen, per link state
+make sd SD_APPS=usb_tx_test      # receiver only (the default run has it last)
+make apk                         # android/out/usb_tx_test.apk  (= make -C android)
+make apk-test                    # Kotlin unit tests (protocol)
+make apk-install                 # adb install -r: adb runs in the container
+make aoa-host                    # desk test: this PC plays the MMI
+```
+
+Everything builds and runs in Docker: `mmi-sdk` for the MMI side,
+`mmi-android` (`android/Makefile`, `android/docker/Dockerfile`) for the
+phone app, `mmi-aoa-host` for the desk test. For `apk-install` and
+`aoa-host`, stop a host adb server first (`adb kill-server`), since only
+one program can own the phone's USB interface. The APK is signed with a
+fixed key in `android/keystore/`, so reinstalls keep working after `make
+clean`.
+
+**In the car.**
+1. Install the APK on the phone. Insert the SD card; the screen says
+   *Waiting for phone*.
+2. Plug the phone into the car's USB port (the AMI/USB socket).
+   - The status bar goes amber (*switching*), then blue (*phone connected,
+     app not open*).
+   - The phone asks to open usb_tx_test for this accessory. Accept, and
+     the bar turns green: *Connected*, with the phone model.
+3. Type and send. The text shows on the MMI, and on the phone it gets a ✓
+   once the MMI has acknowledged it.
+4. Unplug and replug at will. Pull the SD card to end it.
+
+Everything is in `usb_tx_test.log` on the card: every USBDI return code, the
+device and interface descriptors, every state change and every message. A
+failed handshake or a removal also saves the system log to
+`var/usb_slog_<n>.txt`. run.sh can't do that for this app, because pulling
+the card ends it.
+
+**Not yet verified on the car:** the whole USB path end to end. In the
+log, expect to see the media launcher's probe as one "USB link interrupted -
+reconnecting" right after the phone becomes an accessory; that's handled.
+If the phone's MTP mode gets in the way before the switch, set its USB mode
+to "charging only" before plugging in.
+
+### hello6 (`make sd SD_APPS=hello6`)
+
+Tests T1–T3 of [docs/phone-mirroring.md](docs/phone-mirroring.md) §7 in
+one run of about 5 minutes. Park the car; text screens say what to do.
+
+| Phase | What | Output |
+|---|---|---|
+| `s` system info | `pidin`, mounts, `/dev/io-media`, `/dev/snd`, efs tool locations; the unit's `ShowVideoMemory`, `memusage`, `hbhogs` (not `ShowDisplayables`: it sets the shown list, and `ShowDisplayables 0` blanked the screen) | `hello6/sysinfo_before.txt`, `sysinfo_after.txt` |
+| `c` CPU | memcpy, RGB565→BGRA, LZ4 on UI/photo/random 800×480 frames | `RESULT` lines |
+| `g` GPU | CPU stores/memcpy to and from the VFB; `glTexSubImage2D` RGB565/RGBA/BGRA and DXT1 upload MB/s; visible upload+draw fps | `RESULT` lines |
+| `v` video | 10 clips (`media/mkclips.sh`) played by the unit's `testapp-file` with `-o mixer:DSPOUT_*` (its default PCM output cannot be attached on this unit), shown on a video displayable (cid 41): first half VCAP 0 (flags `0x101`), second half VCAP 1 (`0x201`). The driver turns the knob when the picture is visible. Clips 9–10 are written to the card while they play. | `hello6/play_<k>.log`, `hogs_<k>.txt`, `RESULT video_<k>` lines (incl. `output=`) |
+
+`hello6 <sd> [phases]` runs only some phases (`apps.conf` passes none: all).
+The summary is shown on screen at the end and written to `hello6.log`.
+
+**The unit's own tools.** hello6 runs `testapp-file` and the diagnostic
+tools from the unit's efs (`/mnt/efs-system/bin`, served decompressed by
+`inflator`). As a fallback, `make sd` copies them from
+`dev/HN+R_EU_AU_P1001/extracted/MU9411/efs-system/51/bin/`. They are this
+unit's files, inflated with `tools/qnx_inflator.c` where efs stores them
+compressed. `make sd` skips any that are missing. They are started with
+`spawnvp(P_NOWAIT)` with output to a file: QNX 6.3 refuses `fork()` in a
+multithreaded process.
+
+**Build.**
+
+```sh
+make clips                       # build/clips/ (also done by make sd SD_APPS=hello6)
+make hello6-preview              # build/hello6_*.bmp: every text screen, fails if text overflows
+make test                        # includes test_lz4: lz4mini vs the reference liblz4
+make sd SD_APPS=hello6           # hello6 alone (~16 MB of clips); or add it to the list
+```
+
+`make sdk` again after pulling this: the SDK image gained `liblz4-dev`
+for the LZ4 test.
+
+**Not yet verified on the car:** all of it. Three things are new to this
+code base: the efs tool paths, `spawnvp` from our binaries, and video
+displayables (flag bit 0).
+
 ## Limits / not done yet
 
 - `math.h` is missing: openqnx doesn't include libm. hello3/hello4 declare
@@ -512,13 +741,20 @@ tori are small on screen, so fill rate is not what limits it.
   them, GCC fuses `sinf` + `cosf` of the same angle into glibc's
   `sincosf`, which QNX's libm doesn't have.
 - **C only.** The car has `libstdc++.so.5` (GCC 3.3 ABI) and Dinkumware
-  `libcpp.so.4`. C++ from GCC 12 isn't ABI-compatible with either.
+  `libcpp.so.4`. C++ from modern GCC isn't ABI-compatible with either.
 - Floating point uses the same `-m4` double ABI as QNX. hello2's
   `glRotatef`/`glOrthof` calls will be the first real test of passing
   floats across the library boundary.
+- **GCC 16 required for `-O1`+.** Debian's sh4 GCC 12.2 drops the second
+  test of `a == 0 && b == 0` at `-O1` and up. That alone made hello2–4's
+  register look failed on the first car run, although the layer manager had
+  accepted it. GCC 16.2 compiles it correctly, so the build is `-O2` again;
+  the `-O2` GCC 16 binaries haven't run on the car yet. Details:
+  [`docs/gcc-sh4-treg-bug.md`](docs/gcc-sh4-treg-bug.md).
 - `gf` and layer-manager details beyond what qnx-audi used are still
-  unknown: register flags `2`, command `0x501`, and the `{cid, 16, 19}`
-  show list on exit.
-- Input is limited to "any button = stop" on `/dev/ipc/ch8`. The message
-  format beyond qnx-audi's byte 4–7 knob counters is unknown. The hex log
-  in `hello2.log`/`hello3.log` is the starting point for decoding it.
+  unknown: register flags `2` (bit 0 selects a different displayable
+  class), and the `{cid, 16, 19}` show list on exit.
+- `/dev/ipc/ch8` is read and logged but never stops an app, so a stray press
+  cannot cut a test short. Bytes 6 and 7 are confirmed to be main-rotary
+  detents, one per direction; the rest of the format is still being decoded.
+  See [`docs/platform-notes.md`](docs/platform-notes.md).

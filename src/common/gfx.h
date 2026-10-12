@@ -45,6 +45,14 @@ int  gfx_swap(struct gfx *g);
  * everything gfx_init created. Safe after a partial gfx_init. */
 void gfx_shutdown(struct gfx *g);
 
+/* Linear fog over [start, end). Always use this instead of setting
+ * GL_FOG_MODE / GL_FOG_START / GL_FOG_END by hand: while the mode is
+ * GL_LINEAR this unit's nVidia driver recomputes end/(end-start) and
+ * 1/(end-start) on every fog state change, with no guard for end == start,
+ * and on QNX/SH a divide by zero is a fatal SIGFPE rather than an inf
+ * (docs/qnx-sh-fpu-div0.md). start == end is clamped, not divided. */
+void gfx_fog_linear(float start, float end);
+
 const char *gf_format_name(gf_format_t f);
 const char *gf_err_name(int err);
 const char *egl_err_name(EGLint err);

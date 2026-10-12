@@ -1,0 +1,180 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pyusb==1.3.1"]
+# ///
+"""aoa_host.py - a desk stand-in for the MMI side of usb_tx_test.
+
+Does what src/usb_tx_test/aoa.c does, with libusb on a PC: switches a USB
+Android phone into accessory mode (AOA), then speaks the usb_tx_test
+protocol (src/usb_tx_test/proto.h): HELLO / HELLO_REPLY, prints every TEXT
+and ACKs it. Replug the phone at will; it goes back to waiting, like the
+MMI receiver. Ctrl-C to stop.
+
+Run with `make aoa-host` (Docker, USB passthrough) or `uv run tools/aoa_host.py`
+(needs access to /dev/bus/usb). Stop adb first if it holds the phone.
+"""
+
+import struct
+import sys
+import time
+
+import usb.core
+import usb.util
+
+MANUFACTURER, MODEL = "rivit", "usb_tx_test"  # = aoa.h, matched by accessory_filter.xml
+STRINGS = [MANUFACTURER, MODEL, "desk aoa_host.py", "1", "https://github.com/dspl1236/MMI3G-Toolkit",
+           "desk-0001"]
+HELLO_TEXT = b"usb_tx_test-desk/1"
+
+AOA_VID, AOA_PIDS = 0x18D1, range(0x2D00, 0x2D06)
+HELLO, TEXT, ACK, HELLO_REPLY = 1, 2, 3, 4
+HDR, MAX_PAYLOAD = 3, 2048
+
+
+def frame(ftype: int, payload: bytes = b"") -> bytes:
+    """Encode one protocol frame."""
+    return struct.pack("<BH", ftype, len(payload)) + payload
+
+
+class Decoder:
+    """Reassembles frames from arbitrary chunks; skips oversized ones."""
+
+    def __init__(self) -> None:
+        """Start with an empty buffer."""
+        self.buf, self.skip = b"", 0
+
+    def feed(self, data: bytes) -> list[tuple[int, bytes]]:
+        """Return the frames completed by data."""
+        out = []
+        self.buf += data
+        while True:
+            if self.skip:
+                n = min(self.skip, len(self.buf))
+                self.buf, self.skip = self.buf[n:], self.skip - n
+                if self.skip:
+                    return out
+            if len(self.buf) < HDR:
+                return out
+            ftype, n = struct.unpack_from("<BH", self.buf)
+            if n > MAX_PAYLOAD:
+                print(f"  oversized frame ({n} bytes) skipped")
+                self.buf, self.skip = self.buf[HDR:], n
+                continue
+            if len(self.buf) < HDR + n:
+                return out
+            out.append((ftype, self.buf[HDR:HDR + n]))
+            self.buf = self.buf[HDR + n:]
+
+
+def find_accessory():
+    """The phone already in accessory mode, or None."""
+    return usb.core.find(custom_match=lambda d: d.idVendor == AOA_VID and d.idProduct in AOA_PIDS)
+
+
+def try_switch(dev) -> bool:
+    """AOA handshake on one device; True if START was sent."""
+    try:
+        ver = dev.ctrl_transfer(0xC0, 51, 0, 0, 2, timeout=1000)
+    except usb.core.USBError:
+        return False
+    version = ver[0] | ver[1] << 8 if len(ver) == 2 else 0
+    if version < 1:
+        return False
+    print(f"{dev.idVendor:04x}:{dev.idProduct:04x} speaks AOA v{version}, switching")
+    for i, s in enumerate(STRINGS):
+        dev.ctrl_transfer(0x40, 52, 0, i, s.encode() + b"\0", timeout=1000)
+    dev.ctrl_transfer(0x40, 53, 0, 0, None, timeout=1000)
+    return True
+
+
+def wait_for_accessory():
+    """Switch any Android device to accessory mode and return it."""
+    tried = set()
+    while True:
+        acc = find_accessory()
+        if acc is not None:
+            return acc
+        for dev in usb.core.find(find_all=True):
+            key = (dev.bus, dev.address)
+            if dev.bDeviceClass == 9 or key in tried:
+                continue
+            tried.add(key)
+            if try_switch(dev):
+                break
+        time.sleep(1)
+
+
+def open_endpoints(acc):
+    """Claim the ff/ff accessory interface; return (iface, ep_in, ep_out)."""
+    cfg = acc.get_active_configuration()
+    for intf in cfg:
+        if (intf.bInterfaceClass, intf.bInterfaceSubClass) != (0xFF, 0xFF):
+            continue
+        if acc.is_kernel_driver_active(intf.bInterfaceNumber):
+            acc.detach_kernel_driver(intf.bInterfaceNumber)
+        usb.util.claim_interface(acc, intf.bInterfaceNumber)
+        eps = [e for e in intf if usb.util.endpoint_type(e.bmAttributes) == usb.util.ENDPOINT_TYPE_BULK]
+        ep_in = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
+        ep_out = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT)
+        return intf.bInterfaceNumber, ep_in, ep_out
+    raise RuntimeError("no ff/ff accessory interface")
+
+
+def handle(ftype: int, payload: bytes, ep_out) -> None:
+    """React to one frame from the phone."""
+    if ftype == HELLO:
+        print(f"phone HELLO: {payload.decode(errors='replace')}")
+        ep_out.write(frame(HELLO_REPLY, HELLO_TEXT), timeout=2000)
+    elif ftype == HELLO_REPLY:
+        print(f"phone HELLO_REPLY: {payload.decode(errors='replace')}")
+    elif ftype == TEXT and len(payload) >= 2:
+        seq = payload[0] | payload[1] << 8
+        print(f"TEXT #{seq}: {payload[2:].decode(errors='replace')}")
+        ep_out.write(frame(ACK, payload[:2]), timeout=2000)
+    else:
+        print(f"frame type {ftype}, {len(payload)} bytes ignored")
+
+
+def session(acc) -> None:
+    """Talk to the accessory until it goes away."""
+    iface, ep_in, ep_out = open_endpoints(acc)
+    print(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
+          f"OUT 0x{ep_out.bEndpointAddress:02x}; open usb_tx_test on the phone")
+    dec = Decoder()
+    try:
+        ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)
+    except usb.core.USBTimeoutError:
+        print("(HELLO not taken yet - the phone app is not open)")
+    try:
+        while True:
+            try:
+                data = bytes(ep_in.read(16384, timeout=1000))
+            except usb.core.USBTimeoutError:
+                continue
+            for ftype, payload in dec.feed(data):
+                handle(ftype, payload, ep_out)
+    finally:
+        usb.util.release_interface(acc, iface)
+        usb.util.dispose_resources(acc)
+
+
+def main() -> int:
+    """Loop: wait for a phone, talk to it, start over when it drops."""
+    if "--check" in sys.argv:          # image build: dependencies resolve, libusb loads
+        print(f"ok, libusb backend: {usb.core.find(find_all=True) is not None}")
+        return 0
+    print("waiting for an Android phone on USB...")
+    while True:
+        acc = wait_for_accessory()
+        try:
+            session(acc)
+        except usb.core.USBError as e:
+            print(f"link down: {e}; waiting again")
+            time.sleep(1)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

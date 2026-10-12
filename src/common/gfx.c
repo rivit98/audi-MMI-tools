@@ -19,6 +19,7 @@ enum {
 	GFX_STEP_CONTEXT  = 1 << 8,
 	GFX_STEP_ESURFACE = 1 << 9,
 	GFX_STEP_CURRENT  = 1 << 10,
+	GFX_STEP_REG_TRY  = 1 << 11, /* register sent: unregister at shutdown */
 };
 
 /* Flags qnx-audi registers its displayable with (meaning unknown). */
@@ -95,6 +96,12 @@ static int fail_egl(const char *what)
 	return -1;
 }
 
+static int fail_lm(const char *what, int rc)
+{
+	log_msg("FAIL %s: %d %s", what, rc, strerror(rc));
+	return -1;
+}
+
 static void log_egl_configs(EGLDisplay dpy)
 {
 	EGLint n = 0, i;
@@ -136,12 +143,19 @@ static void log_egl_configs(EGLDisplay dpy)
  * every layer format on the way. */
 static int choose_config(struct gfx *g)
 {
+	/* The driver offers stencil on the 8888 configs (cfg 1/5/11/... in the
+	 * log_egl_configs dump), but only if we ask: eglChooseConfig treats a
+	 * missing EGL_STENCIL_SIZE as "0 is fine" and hands back the first
+	 * match, which is a stencil-less config. Ask for 8 bits, and retry
+	 * without if this layer format has no such config. */
 	EGLint attribs[] = {
 		EGL_NATIVE_VISUAL_ID, 0,
 		EGL_RED_SIZE, 5, EGL_GREEN_SIZE, 5, EGL_BLUE_SIZE, 5,
 		EGL_DEPTH_SIZE, 16,
+		EGL_STENCIL_SIZE, 8,
 		EGL_NONE
 	};
+	const int stencil_val = 11;     /* index of the 8 above */
 	gf_layer_info_t li;
 	int i, found = 0;
 
@@ -161,12 +175,23 @@ static int choose_config(struct gfx *g)
 		if (found)
 			continue;
 		attribs[1] = li.format;
-		if (eglChooseConfig(g->egl_display, attribs, &g->egl_config, 1, &n) && n > 0) {
-			EGLint id = 0;
+		attribs[stencil_val] = 8;
+		if (!(eglChooseConfig(g->egl_display, attribs, &g->egl_config, 1, &n) && n > 0)) {
+			attribs[stencil_val] = 0;
+			n = 0;
+		}
+		if (attribs[stencil_val] == 0 &&
+		    !(eglChooseConfig(g->egl_display, attribs, &g->egl_config, 1, &n) && n > 0))
+			n = 0;
+		if (n > 0) {
+			EGLint id = 0, sbits = 0, dbits = 0;
 
 			eglGetConfigAttrib(g->egl_display, g->egl_config, EGL_CONFIG_ID, &id);
-			log_msg("  -> chose EGL config %d for layer format %s", id,
-			        gf_format_name(li.format));
+			eglGetConfigAttrib(g->egl_display, g->egl_config, EGL_STENCIL_SIZE, &sbits);
+			eglGetConfigAttrib(g->egl_display, g->egl_config, EGL_DEPTH_SIZE, &dbits);
+			log_msg("  -> chose EGL config %d for layer format %s (depth %d, stencil %d%s)",
+			        id, gf_format_name(li.format), dbits, sbits,
+			        attribs[stencil_val] == 0 ? ", no stencil config for this format" : "");
 			found = 1;
 		}
 	}
@@ -181,7 +206,7 @@ int gfx_init(struct gfx *g, int cid)
 	gf_display_info_t disp_info;
 	gf_surface_info_t si;
 	EGLint major = 0, minor = 0, w = 0, h = 0;
-	int rc, lm_major, lm_minor;
+	int rc, lm_major, lm_minor, lm_result;
 
 	memset(g, 0, sizeof(*g));
 	g->cid = cid;
@@ -217,18 +242,30 @@ int gfx_init(struct gfx *g, int cid)
 	        disp_info.refresh, disp_info.nlayers, disp_info.main_layer_index,
 	        g->layer_index);
 
-	/* Displayable + its virtual frame buffer */
-	rc = lm_register_displayable(cid, g->width, g->height, LM_REGISTER_FLAGS);
-	log_msg("lm_register_displayable(cid=%d, %dx%d, flags=%d): %s",
-	        cid, g->width, g->height, LM_REGISTER_FLAGS, rc ? strerror(rc) : "ok");
-	if (rc)
+	/* Displayable + its virtual frame buffer. A displayable survives its
+	 * client, so one left by a crashed run would make our register fail:
+	 * unregister it first, like showScreen (EINVAL = it wasn't there). */
+	rc = lm_unregister_displayable(cid);
+	log_msg("lm_unregister_displayable(%d) before register: rc=%d %s",
+	        cid, rc, rc ? strerror(rc) : "ok (a stale one was removed)");
+	g->done |= GFX_STEP_REG_TRY;
+	rc = lm_register_displayable(cid, g->width, g->height, LM_REGISTER_FLAGS,
+	                             &lm_result);
+	log_msg("lm_register_displayable(cid=%d, %dx%d, flags=%d): devctl rc=%d (%s), result=%d",
+	        cid, g->width, g->height, LM_REGISTER_FLAGS, rc,
+	        rc ? strerror(rc) : "ok", lm_result);
+	if (rc != 0)
+		return fail_lm("lm_register_displayable", rc);
+	if (lm_result == 0) {
+		log_msg("FAIL lm_register_displayable: devctl ok but result=0");
 		return -1;
+	}
 	g->done |= GFX_STEP_REGISTER;
 	rc = lm_get_vfb(cid, &g->vfb);
 	log_msg("lm_get_vfb(cid=%d): rc=%d sid=%u uid=%u alpha_sid=%u",
 	        cid, rc, g->vfb.sid, g->vfb.uid, g->vfb.alpha_sid);
 	if (rc)
-		return -1;
+		return fail_lm("lm_get_vfb", rc);
 	rc = gf_surface_attach_by_sid(&g->surface, g->dev, g->vfb.sid);
 	if (rc != GF_ERR_OK)
 		return fail_gf("gf_surface_attach_by_sid", rc);
@@ -299,17 +336,37 @@ int gfx_swap(struct gfx *g)
 	return eglSwapBuffers(g->egl_display, g->egl_surface) ? 0 : -1;
 }
 
+/* See gfx.h: the driver divides by (end - start) whenever fog state changes
+ * while GL_FOG_MODE is GL_LINEAR, so the mode is parked at GL_EXP (whose
+ * recompute only divides by a constant) while the range is written. That
+ * makes the degenerate state unreachable even when the new start equals the
+ * old end, which is what killed hello4 at probe "fog". */
+void gfx_fog_linear(float start, float end)
+{
+	if (end == start)
+		end = start + 1.0f;     /* never hand the driver a zero divisor */
+
+	glFogf(GL_FOG_MODE, GL_EXP);
+	glFogf(GL_FOG_START, start);
+	glFogf(GL_FOG_END, end);
+	glFogf(GL_FOG_MODE, GL_LINEAR);
+}
+
 void gfx_shutdown(struct gfx *g)
 {
-	/* qnx-audi's exit: updateVfb, cmd 0x501, show displayables {cid,16,19} */
+	/* qnx-audi's exit: updateVfb, unregister, show displayables {cid,16,19}
+	 * (showScreen's cleanup is the same minus updateVfb). Unregister also
+	 * after a register that looked failed: the server may still hold it. */
 	int cids[3] = { g->cid, 16, 19 };
 	int rc;
 
 	if (g->done & GFX_STEP_REGISTER) {
 		rc = lm_update_vfb(g->cid);
 		log_msg("lm_update_vfb(%d): %d", g->cid, rc);
-		rc = lm_cmd_501(g->cid);
-		log_msg("lm_cmd_501(%d): %d", g->cid, rc);
+	}
+	if (g->done & GFX_STEP_REG_TRY) {
+		rc = lm_unregister_displayable(g->cid);
+		log_msg("lm_unregister_displayable(%d): %d", g->cid, rc);
 		rc = lm_show_displayables(0, cids, 3);
 		log_msg("lm_show_displayables(0, {%d,16,19}): %d", g->cid, rc);
 	}

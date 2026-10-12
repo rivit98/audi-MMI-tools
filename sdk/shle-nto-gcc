@@ -1,5 +1,5 @@
 #!/bin/sh
-# shle-nto-gcc - Debian's sh4-linux-gnu-gcc driven as a QNX 6.3 SH4 (shle)
+# shle-nto-gcc - Debian's sh4-linux-gnu-gcc-16 driven as a QNX 6.3 SH4 (shle)
 # compiler. Compiles against openqnx headers, links with QNX's crt objects
 # and stub libraries of the MMI's real .so files.
 #
@@ -7,14 +7,17 @@
 # -c / -S / -E only compile; otherwise the QNX link line is added.
 
 SYSROOT="${MMI_SYSROOT:-/opt/mmi-sdk/sysroot}"
-CC="${MMI_CC:-sh4-linux-gnu-gcc}"
+CC="${MMI_CC:-sh4-linux-gnu-gcc-16}"
 
 # Code generation: SH4, little endian, FPU in double-precision mode (crt1
 # sets FPSCR.PR=1, which is what -m4 assumes). --isa=sh4 makes the assembler
 # reject SH-4A-only opcodes and mark the ELF "sh4" (Debian's default: sh4a).
 # Non-PIE, because QNX 6.3's loader expects ET_EXEC binaries like the stock
 # ones (base 0x08040000).
-# Linux-isms GCC would otherwise bake in are switched off. EGL native types
+# Linux-isms GCC would otherwise bake in are switched off, including Debian's
+# 64-bit time_t / off_t defaults on 32-bit targets (GCC 14+ predefines
+# _TIME_BITS=64 and _FILE_OFFSET_BITS=64, which turns open() into open64()
+# with a 64-bit off_t). EGL native types
 # become void*: on QNX GF they are gf_dev_t / gf_3d_target_t pointers.
 # GCC fuses sin(x) + cos(x) into glibc's sincos(), which QNX's libm.so.2
 # does not have: taking away the sin/cos builtins stops that.
@@ -24,6 +27,7 @@ CFLAGS="-m4 -ml -Wa,--isa=sh4 -fno-pie -fno-stack-protector
         -nostdinc -isystem $SYSROOT/usr/include
         -isystem $($CC -print-file-name=include)
         -U__linux__ -U__linux -Ulinux -U__gnu_linux__
+        -U_FILE_OFFSET_BITS -U_TIME_BITS
         -D__QNX__ -D__QNXNTO__ -D__SH__ -D__LITTLEENDIAN__
         -D__QNXNTO_VERSION__=632
         -DEGL_NO_PLATFORM_SPECIFIC_TYPES"
