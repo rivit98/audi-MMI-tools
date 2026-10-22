@@ -1,6 +1,5 @@
 /*
- * texts.h - hello6's on-screen texts and its clip list, in one place so
- * the host preview (make hello6-preview) renders exactly what the car shows.
+ * texts.h - hello6's on-screen texts and its clip list, in one place.
  */
 #ifndef HELLO6_TEXTS_H
 #define HELLO6_TEXTS_H
@@ -8,14 +7,12 @@
 #define FOOTER_MAIN  "hello6 - results in hello6.log and hello6/ on the card"
 #define FOOTER_VIDEO "hello6 - video test. Pull the SD card to stop."
 
-#define INTRO_TITLE  "hello6: video + speed test (~5 min)"
+#define INTRO_TITLE  "hello6: video test (~8 min)"
 #define INTRO_BODY \
-	"Park the car. First 10 short test videos, each explained first. " \
-	"Turn the main knob ONE click whenever you see a moving test " \
-	"picture.\n\nThen test patterns flicker for about a minute: " \
-	"nothing to do. They froze the MMI last time; if the picture " \
-	"stops for 30 s, reboot it.\n\nLeave the card in until the " \
-	"results screen has gone."
+	"Park the car. Ten test videos, each shown two ways one after " \
+	"the other (about 10 s each). Turn the main knob ONE click " \
+	"whenever you see the moving test picture.\n\nLeave the card " \
+	"in until the results screen has gone."
 
 #define SYSINFO_TITLE "hello6: collecting system info"
 #define SYSINFO_BODY  "Reading process, memory and GPU state. Nothing to do."
@@ -26,12 +23,14 @@
 /* Video screen: "%s" is the clip's 'what'. */
 #define VIDEO_TITLE_FMT "Video %d/%d: %s"
 #define VIDEO_BODY_FMT \
-	"%s\n\nFirst half: capture unit 0, second half: unit 1. Turn the " \
-	"main knob ONE click whenever you see the moving test picture " \
-	"(its name and a counting number)."
+	"%s\n\nFirst capture unit 1 (partial decode), then unit 0 (DSP " \
+	"video port), about 10 s each. Turn the main knob ONE click " \
+	"whenever you see the moving test picture (its name and a " \
+	"counting number)."
 
-/* media/mkclips.sh makes these (same names, CLIP_S seconds each). */
-#define CLIP_S 8
+/* media/mkclips.sh makes these (same names, CLIP_S seconds each: long
+ * enough for both capture-unit attempts, which take ~25 s per clip). */
+#define CLIP_S  30
 
 struct clip {
 	const char *file, *title, *what;

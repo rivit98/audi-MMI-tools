@@ -6,8 +6,8 @@
  * unicode map is sorted by codepoint; anything not in it (and anything
  * above U+FFFF) is drawn as the font's fallback glyph ('?').
  */
-#ifndef USBTX_TEXT_H
-#define USBTX_TEXT_H
+#ifndef COMMON_TEXT_H
+#define COMMON_TEXT_H
 
 #include <stdint.h>
 

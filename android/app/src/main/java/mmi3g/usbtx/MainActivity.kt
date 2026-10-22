@@ -1,4 +1,4 @@
-package rivit.usbtx
+package mmi3g.usbtx
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -9,8 +9,11 @@ import android.content.IntentFilter
 import android.graphics.Color
 import android.hardware.usb.UsbAccessory
 import android.hardware.usb.UsbManager
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -26,6 +29,11 @@ import android.widget.TextView
  * accessory mode (USB_ACCESSORY_ATTACHED, matched by
  * res/xml/accessory_filter.xml), which also grants the permission. When
  * opened by hand it looks for an already attached accessory in onResume.
+ *
+ * "Stream screen" asks for screen capture and starts CaptureService, which
+ * sends the screen to the MMI (~2 pictures a second) through the link
+ * published in [Streaming.link]. Back only moves the app to the background,
+ * so the link (and the streaming) stays up while another app is used.
  */
 class MainActivity : Activity(), AccessoryLink.Listener {
     private enum class Status(val colour: Int, val title: String) {
@@ -42,8 +50,21 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var sendButton: Button
     private lateinit var sentList: LinearLayout
     private lateinit var sentScroll: ScrollView
+    private lateinit var streamButton: Button
+    private lateinit var videoView: TextView
+    private val ui = Handler(Looper.getMainLooper())
+    private val refresh = object : Runnable {
+        override fun run() {
+            showVideo()
+            ui.postDelayed(this, 500)
+        }
+    }
 
     private var link: AccessoryLink? = null
+        set(value) {
+            field = value
+            Streaming.link = value
+        }
     private var status = Status.WAITING
     private val sentViews = HashMap<Int, TextView>()
 
@@ -73,7 +94,10 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         sendButton = findViewById(R.id.send)
         sentList = findViewById(R.id.sent_list)
         sentScroll = findViewById(R.id.sent_scroll)
+        streamButton = findViewById(R.id.stream)
+        videoView = findViewById(R.id.video_status)
         sendButton.setOnClickListener { send() }
+        streamButton.setOnClickListener { toggleStreaming() }
 
         val filter = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED)
@@ -95,10 +119,62 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     override fun onResume() {
         super.onResume()
+        ui.post(refresh)
         if (link == null && status != Status.PERMISSION) {
             usb.accessoryList?.firstOrNull()?.let { acc ->
                 if (usb.hasPermission(acc)) openAccessory(acc) else requestPermission(acc)
             }
+        }
+    }
+
+    override fun onPause() {
+        ui.removeCallbacks(refresh)
+        super.onPause()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        moveTaskToBack(true)            // keep the link (and the streaming) up
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_CAPTURE) return
+        if (resultCode == RESULT_OK && data != null) {
+            CaptureService.start(this, resultCode, data)
+        } else {
+            videoView.text = "Screen capture not allowed"
+        }
+    }
+
+    private fun toggleStreaming() {
+        if (Streaming.running) {
+            CaptureService.stop(this)
+        } else {
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            @Suppress("DEPRECATION")
+            startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
+        }
+    }
+
+    private fun showVideo() {
+        val l = link
+        val caps = l?.videoCaps
+        streamButton.text = getString(if (Streaming.running) R.string.stream_stop else R.string.stream_start)
+        streamButton.isEnabled = Streaming.running || caps != null
+        videoView.text = when {
+            Streaming.running && l != null -> {
+                val v = l.video
+                "Video: ${Streaming.status}; sent ${v.sent}, shown ${v.shown}, " +
+                    "bad ${v.bad}, dropped ${v.dropped}; MMI decode ${v.decodeMs} ms, " +
+                    "round trip ${v.roundTripMs} ms"
+            }
+            Streaming.running -> "Video: ${Streaming.status}"
+            l == null -> "Video: not connected"
+            caps == null -> "Video: this MMI app shows text only"
+            else -> "Video: off. MMI shows up to ${caps.landW}x${caps.landH} " +
+                "(landscape) / ${caps.portW}x${caps.portH} (portrait)"
         }
     }
 
@@ -191,6 +267,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     }
 
     companion object {
-        private const val ACTION_PERMISSION = "rivit.usbtx.USB_PERMISSION"
+        private const val ACTION_PERMISSION = "mmi3g.usbtx.USB_PERMISSION"
+        private const val REQ_CAPTURE = 1
     }
 }

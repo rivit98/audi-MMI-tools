@@ -8,7 +8,8 @@ below needs re-testing — build on it.
 Sources: `dev/10.10.2026 - first version run`, `dev/10.10.2026 - second
 version run (old toolchain)`, `dev/10.10.2026 - second version run (new
 toolchain O2)`, `dev/11.10.2026 - third version (3d pipeline)` (written up
-in [`gpu-results.md`](gpu-results.md)), plus IDA/objdump on the firmware libraries in
+in [`gpu-results.md`](gpu-results.md)), the later runs named in each
+section (up to `dev/21.10.2026`), plus IDA/objdump on the firmware libraries in
 `dev/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/usr/lib/`.
 
 ---
@@ -96,7 +97,7 @@ screen alternated between its UI and that noise. hello6's text screens were
 the second update after `screen_open` and showed only noise. One-shot users
 (showScreen, lmprobe) update once, which is why they never saw it. The same
 never-written surface is the "noise over the map" in the GL apps' `s-shot`s
-(§7). `src/usb_tx_test/screen.c` now re-fetches the VFB after each update and
+(§7). `src/common/screen.c` now re-fetches the VFB after each update and
 keeps both surfaces attached.
 
 Because this is settled, `lmprobe` is no longer in the default `TESTS` — it
@@ -220,31 +221,210 @@ is the untried route to a clean offscreen capture. **[unverified]**
 ## 8. Input: `/dev/ipc/ch8`
 
 The unit's only user input reaches us as 27-byte messages on `/dev/ipc/ch8`.
-Decoding so far, from the raw dumps hello5 logged:
+Each message is the current state of the controls: bytes 14–15 are always
+`01 02` (byte 17 = `01` too), and a message with all control bytes zero
+follows a button release. Decoded from hello5's stage 2 on 2026-10-21, a
+fixed sequence done by the user against the full 27-byte dumps:
+
+| byte | value | control |
+|---|---|---|
+| 6 | detents | main rotary knob **clockwise (right)** |
+| 7 | detents | main rotary knob **anticlockwise (left)** |
+| 4 | detents | volume knob **up** |
+| 5 | detents | volume knob **down** |
+| 3 | `0x04` | **MENU**? First of the two buttons on 21.10, but *second* on 19.10 v2, so the name is **unconfirmed**. Both times the press falls in the same second as the HMI's `OnOff new system state is 48` |
+| 1 | `0x02` | **top-left soft key**? Second on 21.10, first on 19.10 v2: **unconfirmed** |
+| 1 | `0x40` | another button, pressed twice after those (not in the sequence; which one is unknown) |
+| 1 | `0x80` | a button seen on 12.10 v2 (unknown) |
 
 ```
-00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 02   main knob, one way
-00 00 00 00 00 00 00 01 00 00 00 00 00 00 01 02   main knob, the other way
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 02   button press
+00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 02 00 01 ...  main knob 1 detent right
+00 00 00 00 00 02 00 00 00 00 00 00 00 00 01 02 00 01 ...  volume 2 detents down (fast turn)
+00 00 00 04 00 00 00 00 00 00 00 00 00 00 01 02 00 01 ...  MENU down
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 02 00 01 ...  button released
 ```
 
-Byte 6 and byte 7 carry main-rotary detents, one per direction; bytes 4/5 are
-the volume knob **[unverified]**; all of bytes 4–7 zero is a button.
-
-One 30 s session produced 20 clean detent events, so the channel is reliable.
+- The knob bytes are **counts**: a quick turn sends one message with `02`.
+  Main knob 5 + 5 clicks gave exactly 5 + 5 messages. Volume 3 up gave 3,
+  and "3 down" gave 4 messages carrying 5 detents (`01 01 01 02`), so the
+  knob reports what it physically moved.
+- MMI3GApplication logs the same turns in the system log, one line per ch8
+  message at the same moments: `[KEY] Encoder Key=0x10 Incr=±n` for the
+  main knob (byte 6 = +n, byte 7 = −n) and `Encoder Key=0x11` for the
+  volume knob (byte 4 = +n, byte 5 = −n), sizes included (`02` →
+  `Incr=-2`). Checked on 12.10 v2, 13.10, 19.10 v2 and 21.10.
+- Buttons are bitmasks in bytes 1 and 3, sent on press, then an all-zero
+  message on release (~200–350 ms later).
+- The HMI still acts on the knobs and buttons while our app is on screen
+  (user's observation). Keeping input away from the HMI is open
+  (`docs/TODO.md`).
 
 **No key or button stops an app.** Runs end on their own timer, a signal, SD
 removal or the watchdog — a stray press during a test cannot cut it short.
 `quit.c` still reads ch8, logs the first messages raw and offers the bytes to
-an app observer (`quit_init_ex`), which is how hello5 sees detents.
+an app observer (`quit_init_ex`), which is how hello5 counts volume detents.
+The knob and button log that decoded the table above was hello5's stage 2;
+it is **hello7** now, a free-form tester that names every control as it is
+used (`src/hello7/keys.c`) and reports unknown bits by byte, so the
+unknown `0x40`/`0x80` buttons can be named with one press each.
 
 ## 9. Audio (QSA / libasound) — playback works
 
 `snd_pcm_open` on card 0, device 5 (`tones1`, the UI-tone mixer input)
 succeeds, and since the 12.10 v2 run so does the rest: `snd_pcm_plugin_params`
 accepted 44.1 kHz mono S16_LE with the corrected enums, and 15 full 52,920-byte
-`snd_pcm_plugin_write`s went through in 30 s. Whether the chime was
-**audible** has not been confirmed: the phone video has no sound track.
+`snd_pcm_plugin_write`s went through in 30 s. **Nothing was heard** in the
+car (confirmed by the user after the 12.10 v2 run).
+
+Why, probably: the FPGA playback streams go to the amplifier over MOST, and
+the stock MMI does not just write to them. MMI3GApplication's
+`CHBGWavePlayer` plays the system tones on `/dev/snd/tones1` too, but the
+binary also names audio sources such as `eSRC_SYSANN_BEEP` and
+`eAmxRingerToneHFP`, so the audio manager presumably connects a source in
+the amplifier before its stream is audible. **[unverified]**
+
+**13.10: all six devices play, none is heard.** hello5 played group N = N
+chimes on each device (`5,1,2,3,4,0` = tones1, navi, SDS, BT-Tr, NAD, ent3)
+with the radio on. Every chime was written in full and consumed in real time
+(write + EBUSY ≈ 600–650 ms). The system log has an `hb_fpga: Play buffer
+underrun strmN` for each group as its stream ran dry (strm1…strm4, then
+strm0), plus `Audio Buffer Failed to Drain` at each close. Nothing was
+heard. So io-audio → FPGA works, and the block is downstream. io-audio's
+`hb_fpga` mixer has only PCM and I/O elements, no volume or mute, so the
+gating is not in io-audio. Most likely the amplifier only mixes a stream in
+once MMI3GApplication's audio management (`CAmpLC`, `LC_SRCSYSANN3_BEEP`,
+`eSRC_SYSANN_BEEP`) has connected that source. **[inferred]**
+
+The next hello5 tries the **io-media mixer** instead. It runs on the DM642 and
+is what the MME plays music into (`mixer:DSPOUT_TDM1_51_SAD?delay=130` is
+its `defaultoutput`). MMI3GApplication also builds mixer graphs from
+`mixer:DSPIN_TDM1_20` (presumably the tuner) to the `DSPOUT_TDM1` outputs.
+So a graph attached to a TDM1 output should be mixed into whatever is
+playing. Groups 1–3 play through the unit's `testapp-file` on mixer outputs
+TDM1 5.1, TDM1 2.0 and TDM2 2.0. Groups 4–6 are tones1, navi and ent3 as
+controls (outputs `m0,m1,m2,5,1,0`).
+
+**19.10: two mixer outputs play, none is heard, one cuts the radio.** With
+the radio on: `DSPOUT_TDM1_51_SAD` would not attach ("Mixer entry for
+DSPOUT_TDM1_51_SAD: Already in use", so the MME's own player holds it).
+`DSPOUT_TDM1_20` and `DSPOUT_TDM2_20` played every chime to `INPUT_EOF`.
+Nothing was heard, but **group 2 (TDM1 2.0) stopped the radio for about a
+second**. tones1, navi and ent3 behaved as on 13.10.
+
+io-media-nvidia's mixer (efs-system, strings at `0x237ed4`) knows the
+outputs `DSPOUT_TDM1_51(_SAD)`, `TDM1_20(_SAD)`, `TDM2_20(_SAD)`,
+`TDM3_20(_SAD)` and `PCI1..3`; the inputs `DSPIN_TDM1..3_20`; and four
+player zones `NV_AUDIO_MIXER_IN_ZONE_1..4`. Each output takes one player
+("mixer entry"), and the DSP mixer can stamp a "SAD" header on a stream
+(`AMixerSadHeaderSet`).
+
+Reading [inferred]: TDM1 carries the main entertainment stream to the
+external MOST amplifier: radio (`DSPIN_TDM1_20`, routed by MMI3GApplication's
+mixer graph) and MME music both go out as `TDM1_51_SAD`. `TDM1_20` drives
+the same TDM port in another format, so while it played, the stream the
+amplifier was decoding was gone (the radio stopped), and our 2.0 stream
+without the header was not played either. Every other stream (TDM2/TDM3,
+the io-audio devices) reaches the amplifier on channels it only mixes in when
+MMI3GApplication's audio management switches that source on. Next hello5
+(default `m2,m1,m6,m4,m7`): TDM1 2.0 *SAD*, TDM1 5.1 (no SAD), TDM3 2.0 SAD,
+TDM2 2.0 SAD, TDM3 2.0. The user also notes which groups cut the radio.
+
+**19.10 v2: all five mixer outputs play; maybe one chime heard.** Outputs
+`m2,m1,m6,m4,m7` (TDM1 2.0 SAD, TDM1 5.1, TDM3 2.0 SAD, TDM2 2.0 SAD, TDM3
+2.0): every one attached, with no "Already in use" this time, and played every
+chime to `INPUT_EOF` (testapp-file exits after 640–700 ms for the 600 ms
+clip). The listener thinks one chime was heard near the start, group 1 or
+2, but could not say which. The ch8 log backs that up: the first
+volume-knob turns came 1.3 s after group 1's only chime (TDM1 2.0 SAD) and
+went on through group 2. Groups 3–5 (TDM2/TDM3) were not heard. So the
+candidate is **TDM1 2.0 SAD** (one chime heard = group 1), with TDM1 5.1
+second **[unverified]**. The next hello5 plays the same outputs with a
+2.5 s chime (`sdk/mkbeep.py`), long enough to place by ear, and the user
+again notes which groups stop the radio.
+
+**21.10: TDM1 2.0 SAD is heard; TDM1 5.1 mutes the car.** Same five
+outputs, 2.5 s chime, radio on. io-media treated all five the same: each
+chime attached, played to `INPUT_EOF`, and `testapp-file` exited after
+2.46–2.57 s. What the user heard:
+
+| group | output | heard |
+|---|---|---|
+| 1 | m2 `DSPOUT_TDM1_20_SAD` | **the chime, clearly** |
+| 2 | m1 `DSPOUT_TDM1_51` | no chime; **the car audio went silent** while it played |
+| 3 | m6 `DSPOUT_TDM3_20_SAD` | nothing |
+| 4 | m4 `DSPOUT_TDM2_20_SAD` | nothing |
+| 5 | m7 `DSPOUT_TDM3_20` | nothing |
+
+The slog has nothing from io-media or the audio stack around any group.
+
+Reading [inferred]: the amplifier decodes the TDM1 stream with its SAD
+header. 2.0 with the header (`TDM1_20_SAD`) is a format it accepts, so our
+chime was played. 5.1 without the header
+broke the stream, so it went silent (as `TDM1_20` did on 19.10). TDM2 and
+TDM3 stay unheard in every format. **For an app that wants sound, the
+way out is `mixer:DSPOUT_TDM1_20_SAD?delay=130` through io-media** (as the
+unit's `testapp-file` does). Not known yet: whether it mixes with the radio
+or replaces it while playing, and what it does while the MME plays music
+(the MME holds `TDM1_51_SAD`).
+
+**Next run: what `TDM1_20_SAD` does next to the car's own audio.** hello5
+now runs steps instead of the group survey (steps `mnvt`; the survey is
+step `g`). Each step plays a ping train, a 0.5 s ping every 2 s, on
+`TDM1_20_SAD`. hello5 renders the train itself (`src/hello5/pulse.c`) into
+`/tmp`, so the run also shows whether io-media plays an app's file from
+RAM. If it doesn't, the step retries from the card. The silences between
+the pings carry the answer:
+
+| step | the driver | answers |
+|---|---|---|
+| m | radio on | is the radio still playing between the pings (mixed), or not (replaced)? |
+| n | radio on; hello5's own io-media client plays 9 pings at its own volume 100 / 30 / 100, then 3 one-ping files queued | does an app's own volume work? are the queued files gapless? when does io-media say it is playing? |
+| v | turns the volume knob 3 down, then 3 up, during the pings | do the pings follow the car's volume? (clicks counted on screen and logged) |
+| t | presses MEDIA and starts music | does the output still attach while the MME plays, and does the music keep playing between the pings? |
+
+**io-media from our own code (from `testapp-file`'s disassembly, P1001
+efs-system).** `testapp-file` links no io-media library (NEEDED is only
+`libc.so.2`). It creates a graph by opening
+`/dev/io-media/graphs/trackplayer/<name>` (`O_RDWR|O_CREAT|O_EXCL`, 0626)
+and drives it with `devctl`s: attach the output URL, set the volume (0–100,
+plus balance and fade), attach an input (`file:`, `tmpfile:` or a plain
+path; the extension picks the media type, `.wav` = 3), play, and read
+events from the same fd. Closing the fd destroys the graph. The codes and
+payloads are in [`src/hello5/iom.h`](../src/hello5/iom.h), and hello5's step
+`n` is the first use of them. **[confirmed in code, untested on the car]**
+
+- `testapp-file` always exits with **status 1**. `main` has one epilogue
+  (`mov #1,r0` at `0x80412A4`), and every path, success included, ends
+  there. Read its output instead: success is `FINISHED … 0 left to do`
+  followed by `Done, destroying the graph`.
+- Its stdout is **fully buffered** when it is a file: no `setvbuf` or
+  `fflush`, and QNX's `BUFSIZ` is 1 KB. So its log lines carry no timing,
+  and stderr lines can come before stdout lines printed earlier. hello5
+  step `n` logs every event itself, with the time since play.
+- Its multi-URL mode chains files: on `INPUT_EOF` (the file has been read,
+  which comes early: before 0.4 s of a 2.5 s clip) it detaches the input
+  and attaches the next. On `FINISHED`, if files are left, it plays again.
+  Step `n` copies this, to see whether an app can queue sound without gaps.
+- The mixer URL's query keys are `delay`, `volume_ctrl`, `mime`/`mimetype`,
+  `EncodingBitrate` and `PriorityAdjust`. There is no `volume=`.
+- `_SAD` is the same TDM port with flag `0x40000` in io-media's output
+  table at `0x82A8488` (`TDM1_20_SAD` `0x40002`, `TDM1_20` `0x2`). It
+  presumably switches on the DSP's `AMixerSadHeaderSet`, the header the
+  amplifier wants **[inferred]**.
+
+Until 13.10, stage 1 played group N = N chimes on each io-audio playback
+device in turn, so the number of chimes heard identifies the device. For every chime
+it logs the write time plus how long `prepare` keeps returning `EBUSY`: about
+600 ms (the clip's length) means the device consumed it in real time, heard or
+not. Each group runs on its own thread with a deadline, so a device whose
+write never returns is written off instead of hanging the run. The
+screen (`src/hello5/h5ui.c`) shows the group in its own colour, `GROUP n`,
+`chime k of n` and a white PLAYING box, presented just before the write
+that starts each chime, plus the log clock, so a phone video with sound
+says which chime was heard; the log line of each chime gives the `t=` its
+PLAYING frame went up. Stage 2
+logs every ch8 message in full against a fixed sequence of knob turns and
+presses (section 8).
 
 - `snd_pcm_plugin_prepare` returns **`EBUSY` while the previous clip is still
   playing**. On 12.10 v2 every EBUSY came less than 600 ms (the clip's length)
@@ -293,6 +473,15 @@ reboot key combo. No crash, no GL error. Cause still open; analysis and the
 follow-up experiment are in [`gpu-results.md`](gpu-results.md) §4.4. Until
 then, keep GL geometry far below that, and expect any GL app to be able to
 take the unit down, not just itself.
+
+On 2026-10-19 the stress scene alone, over the HMI main menu, passed 8 tori
+for 60 s and 12 tori, then froze the unit on the first 16-tori frame
+(~314 KB of client arrays per frame). Free RAM and swap times were flat up
+to the end. Together with 11.10 (frozen at 8 tori over the nav map), this
+points to a limit on the combined GPU work in flight **[hypothesis]**
+([`gpu-results.md`](gpu-results.md) §8). On 2026-10-21 the whole hello4
+sequence (probes, three scenes, stress up to 12 tori) ran clean, so that
+load is safe ([`gpu-results.md`](gpu-results.md) §9).
 
 On 2026-10-12, hello6 froze the unit twice in the same way with **texture
 uploads** ([`gpu-results.md`](gpu-results.md) §6–7). The working pattern so

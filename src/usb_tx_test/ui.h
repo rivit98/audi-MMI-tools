@@ -1,5 +1,6 @@
 /*
- * ui.h - draws the whole usb_tx_test screen from the model.
+ * ui.h - draws the whole usb_tx_test screen from the model and the phone's
+ * picture (video.h). Main loop only.
  */
 #ifndef USBTX_UI_H
 #define USBTX_UI_H

@@ -1,6 +1,10 @@
-/* test_proto.c - frame encoder/decoder (src/usb_tx_test/proto.c). */
+/* test_proto.c - frame encoder/decoder (src/usb_tx_test/proto.c) and
+ * video picture reassembly (src/usb_tx_test/vasm.c). */
+#include <stdlib.h>
+
 #include "check.h"
 #include "proto.h"
+#include "vasm.h"
 
 struct got {
 	int n;
@@ -142,8 +146,132 @@ static void test_max_payload_accepted(void)
 	CHECK_EQ(dec.oversized, 0);
 }
 
+/* --- vasm ------------------------------------------------------------- */
+
+static unsigned start(uint8_t *p, unsigned id, unsigned w, unsigned h,
+                      unsigned format, uint32_t size)
+{
+	proto_put_u16(p, id);
+	proto_put_u16(p + 2, w);
+	proto_put_u16(p + 4, h);
+	p[6] = (uint8_t)format;
+	proto_put_u32(p + 7, size);
+	return PROTO_VIDEO_START_LEN;
+}
+
+static unsigned data(uint8_t *p, unsigned id, const char *bytes, unsigned n)
+{
+	proto_put_u16(p, id);
+	memcpy(p + 2, bytes, n);
+	return 2 + n;
+}
+
+static void test_u32_le(void)
+{
+	uint8_t b[4];
+
+	proto_put_u32(b, 0x12345678u);
+	CHECK_EQ(b[0], 0x78);
+	CHECK_EQ(b[3], 0x12);
+	CHECK_EQ(proto_get_u32(b), 0x12345678u);
+}
+
+static void test_vasm_whole_picture(void)
+{
+	struct vasm a;
+	struct vpic pic;
+	uint8_t p[64];
+	int dropped, bad;
+	unsigned n;
+
+	vasm_init(&a, 100);
+	n = start(p, 7, 640, 360, PROTO_FMT_JPEG, 10);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	CHECK_EQ(dropped, -1);
+	n = data(p, 7, "abcd", 4);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_OK);
+	n = data(p, 8, "zz", 2);                     /* another id: ignored */
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_IGNORED);
+	n = data(p, 7, "", 0);                       /* empty chunk is fine */
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_OK);
+	n = data(p, 7, "efghij", 6);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
+	vasm_take(&a, &pic);
+	CHECK_EQ(pic.id, 7);
+	CHECK_EQ(pic.w, 640);
+	CHECK_EQ(pic.h, 360);
+	CHECK_EQ(pic.size, 10);
+	CHECK(memcmp(pic.data, "abcdefghij", 10) == 0);
+	free(pic.data);
+	/* nothing in progress now */
+	n = data(p, 7, "x", 1);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_IGNORED);
+	vasm_free(&a);
+}
+
+static void test_vasm_refusals(void)
+{
+	struct vasm a;
+	uint8_t p[64];
+	int dropped, bad;
+	unsigned n;
+
+	vasm_init(&a, 100);
+	n = start(p, 1, 640, 360, PROTO_FMT_JPEG, 101);   /* over max_bytes */
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	CHECK_EQ(bad, 1);
+	n = start(p, 2, 640, 360, PROTO_FMT_JPEG, 0);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	n = start(p, 3, 640, 360, 9, 10);                 /* unknown format */
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	n = start(p, 4, 0, 360, PROTO_FMT_JPEG, 10);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	CHECK_EQ(vasm_start(&a, p, 5, &dropped, &bad), VASM_BAD);   /* short */
+	CHECK_EQ(bad, 4);
+
+	/* overflow: more data than announced drops the picture */
+	n = start(p, 5, 10, 10, PROTO_FMT_JPEG, 3);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	n = data(p, 5, "abcd", 4);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_BAD);
+	CHECK_EQ(bad, 5);
+	CHECK_EQ(a.active, 0);
+	vasm_free(&a);
+}
+
+static void test_vasm_cut_short(void)
+{
+	struct vasm a;
+	struct vpic pic;
+	uint8_t p[64];
+	int dropped, bad;
+	unsigned n;
+
+	vasm_init(&a, 100);
+	n = start(p, 10, 10, 20, PROTO_FMT_JPEG, 4);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	n = data(p, 10, "ab", 2);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_OK);
+	n = start(p, 11, 10, 20, PROTO_FMT_JPEG, 2);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	CHECK_EQ(dropped, 10);
+	n = data(p, 10, "cd", 2);                    /* the old one's rest */
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_IGNORED);
+	n = data(p, 11, "XY", 2);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
+	vasm_take(&a, &pic);
+	CHECK_EQ(pic.id, 11);
+	CHECK(memcmp(pic.data, "XY", 2) == 0);
+	free(pic.data);
+	vasm_free(&a);
+}
+
 int main(void)
 {
+	test_u32_le();
+	test_vasm_whole_picture();
+	test_vasm_refusals();
+	test_vasm_cut_short();
 	test_encode();
 	test_whole_frames();
 	test_byte_by_byte();

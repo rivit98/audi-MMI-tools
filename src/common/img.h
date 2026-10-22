@@ -4,8 +4,8 @@
  * The SDK has no zlib or libpng: stb_image_write (Sean Barrett, public
  * domain / MIT) has its own deflate, so nothing else is linked.
  */
-#ifndef RIVIT_IMG_H
-#define RIVIT_IMG_H
+#ifndef COMMON_IMG_H
+#define COMMON_IMG_H
 
 #include <stddef.h>
 #include <stdint.h>

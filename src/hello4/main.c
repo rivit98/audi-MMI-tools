@@ -21,8 +21,9 @@
  *   3. world   mipmapped checkerboard ground fading into fog, a ring of
  *              textured, lit crates and a floating torus, with the camera
  *              circling: textures x lighting x fog together.
- *   4. stress  1, 2, 4 ... 64 lit tori (1024 triangles each). Logs fps
- *              and triangles/s per step.
+ *   4. stress  1, 2, 4, 8, 12 lit tori (1024 triangles each). Logs fps
+ *              and triangles/s per step. 16 and up are commented out
+ *              (opts_default): 16 froze the unit on 2026-10-19.
  * Top left: frames in the previous second (green) and, in the stress
  * scene, the torus count (yellow). Bottom: progress bar of the current
  * scene (of the current step, in stress).
@@ -33,6 +34,8 @@
  * (docs/gpu-results.md). So the scenes and the stress steps are
  * selectable, and the stress scene can log every frame (trace=), so the
  * last fsync'ed line on the card says which frame the unit died in.
+ * 2026-10-19 (stress only): 8 tori for 60 s and 12 passed, the first
+ * 16-tori frame froze the unit. The default plan now stops at 12.
  *
  * Stops early, with the normal teardown, on SIGTERM/SIGINT/SIGHUP, SD
  * card removal or the watchdog (src/common/quit.c). A freeze of the whole
@@ -48,14 +51,14 @@
  *   scenes=pclws   what runs, in this order: p = probes, c = cube,
  *                  l = light, w = world, s = stress (default: all)
  *   tori=1,2,8:60  the stress steps: torus counts, each optionally with
- *                  its own seconds (default 1,2,4,8,16,32,64)
+ *                  its own seconds (default 1,2,4,8,12)
  *   step=S         seconds of a stress step without its own (default:
  *                  scene_seconds split evenly over the steps)
  *   trace=0|1|2    stress scene only. 1: a line per frame after its swap
  *                  (frame, tori, draw ms, swap ms); 2: also a line
  *                  before drawing and before swapping. Every line is
  *                  fsync'ed (~12 ms on the card), which lowers the fps.
- * e.g. hello4 /mnt/sdcard10t12 scenes=s step=5 tori=1,2,4,8:60,16 trace=1
+ * e.g. hello4 /mnt/sdcard10t12 scenes=s step=5 tori=1,2,4,8:60,12 trace=1
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -698,7 +701,13 @@ static void run(struct gfx *g, const struct opts *o)
 
 static void opts_default(struct opts *o)
 {
-	static const unsigned tori[] = { 1, 2, 4, 8, 16, 32, 64 };
+	/* The first 16-tori frame froze the whole unit on 2026-10-19
+	 * (docs/gpu-results.md section 8), and more tori only load the GPU
+	 * harder, so 16 and up are out. tori= can still ask for them. */
+	static const unsigned tori[] = {
+		1, 2, 4, 8, 12,
+		/* 16, 32, 64, */
+	};
 	unsigned i;
 
 	memset(o, 0, sizeof(*o));

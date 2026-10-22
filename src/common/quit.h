@@ -14,8 +14,8 @@
  * Signals are taken by a sigwait() thread, never by a handler, so the
  * GL/gf calls in the main thread are not interrupted (no EINTR).
  */
-#ifndef RIVIT_QUIT_H
-#define RIVIT_QUIT_H
+#ifndef COMMON_QUIT_H
+#define COMMON_QUIT_H
 
 enum {
 	QUIT_NONE = 0,

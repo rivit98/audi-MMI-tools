@@ -2,8 +2,8 @@
  * log.h - line log on the SD card, flushed + fsync'ed after every line so a
  * crash or a pulled card still leaves everything up to the last step.
  */
-#ifndef RIVIT_LOG_H
-#define RIVIT_LOG_H
+#ifndef COMMON_LOG_H
+#define COMMON_LOG_H
 
 int  log_open(const char *path);
 void log_close(void);

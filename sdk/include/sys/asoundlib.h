@@ -55,8 +55,8 @@
  * libasound.so.2 is linked via its mkstubs.py stub (see the Makefile); the
  * real library resolves on the unit.
  */
-#ifndef RIVIT_SYS_ASOUNDLIB_H
-#define RIVIT_SYS_ASOUNDLIB_H
+#ifndef SYS_ASOUNDLIB_H
+#define SYS_ASOUNDLIB_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -216,4 +216,4 @@ _Static_assert(sizeof(snd_pcm_channel_setup_t)                >= 0x2D8, "setup f
 }
 #endif
 
-#endif /* RIVIT_SYS_ASOUNDLIB_H */
+#endif /* SYS_ASOUNDLIB_H */

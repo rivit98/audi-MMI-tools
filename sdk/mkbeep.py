@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""mkbeep.py - render src/hello5/beep.wav, the knob-detent confirmation tone.
+"""mkbeep.py - render src/hello5/beep.wav, hello5's sound-check chime.
 
-The old clip was 100 ms at 22.05 kHz, which is short enough to read as a
-click rather than a beep, and quiet enough to lose under road noise. This
-renders a longer two-note chime instead:
+The first clip was 100 ms at 22.05 kHz, short enough to read as a click.
+The second, a 600 ms two-note chime, was heard at most once in the 19.10 v2
+run, and the listener could not tell which group it came from: too short to
+notice and place in a running car. This renders one long chime instead:
 
-    A5 (880 Hz) -> D6 (1174.66 Hz), overlapping, 600 ms total
+    A5 (880 Hz) strike, then D6 (1174.66 Hz) held for ~2 s, 2.5 s total
 
-at 44.1 kHz so the plugin layer has no resampling to do (22.05 kHz needed a
+It is still one sound per chime, so "group N = N chimes" can be counted.
+44.1 kHz so the plugin layer has no resampling to do (22.05 kHz needed a
 2x rate conversion, and the tones device is very unlikely to run natively
 below 44.1 kHz). Mono 16-bit PCM, the format hello5's WAV loader expects.
 
@@ -30,20 +32,19 @@ BITS = 16
 VOICES = 1
 PEAK = 0.62  # headroom: the tones mixer adds our output to media/nav
 
-# (start seconds, length seconds, Hz, gain)
+# (start seconds, length seconds, Hz, gain, decay: e-folds over the note)
 NOTES = [
-    (0.00, 0.38, 880.00, 1.00),  # A5
-    (0.22, 0.38, 1174.66, 0.90),  # D6
+    (0.00, 0.60, 880.00, 1.00, 6.0),  # A5, a short strike
+    (0.25, 2.25, 1174.66, 0.90, 1.2),  # D6, held: ~10 dB down by its end
 ]
-LENGTH = 0.60
+LENGTH = 2.50
 ATTACK = 0.006
-DECAY = 7.0
 
 # relative amplitude of partials 1..3
 PARTIALS = (1.0, 0.28, 0.10)
 
 
-def envelope(t, length):
+def envelope(t, length, decay):
     """Raised-cosine attack, exponential decay, forced to zero at the end."""
     if t < 0.0 or t > length:
         return 0.0
@@ -51,7 +52,7 @@ def envelope(t, length):
         a = 0.5 - 0.5 * math.cos(math.pi * t / ATTACK)
     else:
         a = 1.0
-    a *= math.exp(-DECAY * t / length)
+    a *= math.exp(-decay * t / length)
     # taper the last 8 ms to silence so the clip ends on a zero crossing
     tail = 0.008
     if t > length - tail:
@@ -62,10 +63,10 @@ def envelope(t, length):
 def render():
     n = int(RATE * LENGTH)
     samples = [0.0] * n
-    for start, length, freq, gain in NOTES:
+    for start, length, freq, gain, decay in NOTES:
         for i in range(n):
             t = i / RATE - start
-            env = envelope(t, length)
+            env = envelope(t, length, decay)
             if env == 0.0:
                 continue
             v = 0.0

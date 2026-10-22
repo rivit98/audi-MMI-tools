@@ -18,7 +18,9 @@ run.
 | hello4 | — (froze the unit) | 9/9 probes pass, 3 scenes pass, then the **whole MMI froze** in the stress scene |
 
 hello2 and hello3 have answered their questions and are no longer in the
-default run. hello4 now runs only its stress scene (see §4.4).
+default run. hello4 ran only its stress scene on 19.10 (see §4.4, §8).
+On 21.10 it ran everything, with the stress steps stopping at 12 tori, and
+passed (§9). It has left the default run too.
 
 ---
 
@@ -357,3 +359,110 @@ in **31 ms ≈ 50 MB/s**, 800×120 in 8 ms. VFB CPU access: store32 9.1 MB/s
 (161 ms/frame), memcpy in 9.2 MB/s, memcpy out 4.8 MB/s. Main RAM memcpy
 107 MB/s, store32 215 MB/s. RGB565→BGRA on the CPU: 11.9 ms/frame. LZ4
 decompress: UI frame 8.8 ms, photo 29 ms.
+
+## 8. 19.10 v2: hello4 survives 8 and 12 tori, freezes on the first 16-tori frame
+
+Run `dev/19.10.2026 - v2`, stress scene only
+(`scenes=s step=5 tori=1,2,4,8:60,12,16,24,32,64 trace=1`), after hello5 and
+hello6 in the same boot. The HMI underneath showed the **main menu**, not
+the nav map (video 2:32). Phone video `VID_20261019_113015_v2.mp4` (kept
+outside the repo), hello4 from 2:50.
+
+| tori | frames | avg draw | avg swap | max swap | fps | result |
+|---|---|---|---|---|---|---|
+| 1 | 133 | 2.0 ms | 22 ms | 52 ms | 26 | ok |
+| 2 | 99 | 3.3 | 33 | 51 | 19 | ok |
+| 4 | 97 | 7.0 | 31 | 50 | 19 | ok |
+| **8** | **899 (60 s)** | 13.2 | 40 | 74 | 14–16 | **ok**: froze after ~25 frames on 11.10 |
+| 12 | 64 (5 s) | 20.0 | 44 | 67 | 12–13 | ok |
+| 16 | 0 | — | — | — | — | **froze**: last line `stress step 6/9 (16 tori): start` |
+
+- **Nothing built up before the freeze.** Swap time over the 60 s hold
+  was flat (first 100 frames 39 ms, last 100 frames 40 ms), free RAM stayed at
+  153–154 MB the whole time, and `glError` was 0 every second. Hypothesis 3
+  of §4.4 (something leaking in the driver) has no support.
+- **The freeze hit the first frame of a new, larger load.** The step line is
+  written before the first 16-tori frame. That frame's `f…` line never came
+  (each is fsync'ed after its swap). The video holds the last 12-tori frame
+  from 4:11 until the camera moves away at 4:33. run.sh's 170 s timeout for
+  hello4 never logged, so the whole unit stopped again, as in §4.4.
+- `draw=` grows linearly, ~1.65 ms of CPU per torus (client arrays copied
+  through the driver). `swap=` (glFinish + vsync wait) is the GPU.
+
+Per-frame client data, from `mesh_draw` (positions + normals as floats,
+`GL_UNSIGNED_SHORT` indices; one 561-vertex, 1024-triangle torus drawn n
+times): ~19.6 KB per torus, so **12 tori ≈ 235 KB passed, 16 tori ≈ 314 KB
+froze on the spot**.
+
+**What 11.10 and 19.10 v2 say together**
+
+| run | screen under it | GL before the stress scene | froze at |
+|---|---|---|---|
+| 11.10 | nav map | probes + 3 scenes, ~33 s | 8 tori (~157 KB/frame), ~25 frames in, mid-step |
+| 19.10 v2 | main menu | none | 16 tori (~314 KB/frame), first frame |
+
+No single per-frame size explains both. A **combined load** does: ours plus
+whatever else the GPU is doing (NavCore drawing the map on 11.10, hypothesis
+2 of §4.4). Then the system freezes when the total work queued in the driver
+passes some limit **[hypothesis]**. 12.10's texture-upload freezes (§6–7) fit
+the same picture: they came when several large uploads were queued at once.
+
+**Rules for apps until this is pinned down**
+
+- Keep per-frame client-array geometry **well under ~150 KB** (the 11.10
+  freeze level) and the triangle count in the low thousands. GLES-CM 1.0 has
+  no VBOs, so every frame re-sends its arrays.
+- One large upload in flight at a time (§7).
+- The mirroring options in [`phone-mirroring.md`](phone-mirroring.md) need
+  neither: option 1 uploads one texture per frame and draws one quad, and
+  option 2a doesn't touch GL at all. **hello4 has nothing more to tell the
+  mirroring work.** It went back into the default run (last before
+  usb_tx_test) with probes, scenes and stress, but the default stress steps
+  now stop at 12 tori: 16, 32 and 64 are commented out in `opts_default`.
+  After the clean run in §9 it was retired.
+  If the threshold ever matters, the cheap follow-up is the 16-tori frame
+  split into two halves with a `glFinish` between them: if that survives,
+  the limit is per submission, not per frame.
+
+## 9. 21.10: hello4 runs clean end to end, then retires
+
+Run `dev/21.10.2026/`, the full hello4 (`step=10 trace=1`: probes, cube,
+light, world, stress 1/2/4/8/12 tori, 10 s each), after hello5 and hello6
+(ten video clips through the DSP and VCAP 0) in the same boot. Verdict
+`OK`, exit 0, 85 s, no freeze, no swap failures, `glError` 0 throughout,
+free RAM flat at 148 MB.
+
+| part | result |
+|---|---|
+| probes | 9/9 PASS (clear, depth, cull, persp, light, texture, fog, blend, stencil) |
+| cube | 229 frames, 22 fps |
+| light | 288 frames, 28 fps |
+| world | 204 frames, 20 fps |
+
+| tori | frames (10 s) | avg draw | avg swap | max swap | fps |
+|---|---|---|---|---|---|
+| 1 | 201 | 2.0 ms | 34 ms | 53 ms | 20 |
+| 2 | 196 | 3.9 | 33 | 67 | 19 |
+| 4 | 178 | 7.0 | 35 | 64 | 17 |
+| 8 | 142 | 13.2 | 43 | 75 | 14 |
+| 12 | 118 | 20.1 | 51 | 70 | 11 |
+
+- **The user confirms it worked.** 8 and 12 tori passed again, and 8 tori
+  passed after the three scenes this time (on 11.10 that combination froze).
+  `draw=` per torus is the same as 19.10 v2 (~1.65 ms).
+- **Everything is slower than on 11.10 and 19.10 v2.** cube 22 fps (was 57),
+  light 28 (52), world 20 (28), and a single torus 20 fps (26 on 19.10 v2).
+  The extra time is in `swap=` (glFinish + vsync), not in `draw=`, so the
+  GPU or the compositor had more to do. The likely cause is hello6
+  running just before: the video displayable and VCAP were disabled and
+  unregistered, but io-media/DSP state may linger. The screen under hello4
+  may also differ **[unverified]**. Irrelevant for the GPU limits, but
+  worth knowing when timing GL after video playback.
+- Screenshots `hello4_cube/light/world.png` are again layer-manager
+  captures without the GL content (§2).
+
+hello4 has now answered what it was for: the 3D pipeline works, the
+per-frame geometry budget is known (§8 rules), and below 16 tori it is
+stable over the full sequence. It is out of the Makefile's default
+`TESTS`, and its `sd/apps.conf` line is commented out. Run it with
+`make sd SD_APPS="hello4 ..."` after uncommenting that line.

@@ -52,7 +52,7 @@ static const char help[] =
 "  bg 101820\n"
 "  rect 0 0 800 6 accent\n"
 "  footer 44 small 1C2836 E8E8E8 next app in 8 s\n"
-"  line big accent rivit_app\n"
+"  line big accent MMI 3G+ tests\n"
 "  para small E8E8E8 Word-wrapped text between the margins.\n";
 
 static char *read_all(const char *path)

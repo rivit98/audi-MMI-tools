@@ -1,6 +1,6 @@
 /*
  * label.c - full-screen instruction text between hello6's steps, drawn by
- * the CPU with usb_tx_test's screen (cid 40) and Terminus fonts.
+ * the CPU with common/screen.c (cid 40) and the Terminus fonts.
  */
 #include <string.h>
 

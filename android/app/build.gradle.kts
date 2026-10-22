@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    namespace = "rivit.usbtx"
+    namespace = "mmi3g.usbtx"
     compileSdk = 35
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "rivit.usbtx"
+        applicationId = "mmi3g.usbtx"
         minSdk = 23
         targetSdk = 35
         versionCode = 1

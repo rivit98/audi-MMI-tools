@@ -3,8 +3,8 @@
  * and seven-segment numbers (no font texture needed).
  * Coordinates are screen pixels, origin bottom-left (glOrthof(0,w,0,h)).
  */
-#ifndef RIVIT_HUD_H
-#define RIVIT_HUD_H
+#ifndef COMMON_HUD_H
+#define COMMON_HUD_H
 
 #include <GLES/gl.h>
 

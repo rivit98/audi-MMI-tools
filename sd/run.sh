@@ -35,9 +35,9 @@ FINAL_S=@FINAL_S@      # final screen
 KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
 SDPATH="${1:-${0%/*}}"
 VAR="${SDPATH}/var"
-BIN=/tmp/rivit_app
+BIN=/tmp/mmi_apps
 SCREEN="${BIN}/screen"     # screen.layout -> screen.png, rendered by show
-LOG="${VAR}/rivit_app.log"
+LOG="${VAR}/run.log"
 SUMMARY="${VAR}/summary.txt"
 mkdir -p "${VAR}"
 
@@ -146,7 +146,7 @@ run_app() {   # run_app <i> <app>
 }
 
 {
-    echo "=== rivit_app run.sh  $(date)  SDPATH=${SDPATH}  APPS=${APPS}"
+    echo "=== run.sh  $(date)  SDPATH=${SDPATH}  APPS=${APPS}"
     uname -a
     rm -rf "${BIN}" && mkdir -p "${BIN}"
     cp "${SDPATH}"/bin/* "${BIN}/" && chmod 755 "${BIN}"/*

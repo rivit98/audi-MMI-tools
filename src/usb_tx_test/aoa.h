@@ -12,7 +12,10 @@
  *      failure is retried up to 5 times with a growing delay.
  *   3. The phone re-enumerates as 18d1:2d00..2d05. Its accessory interface
  *      (class/subclass ff/ff) gets a bulk IN and OUT pipe; IN is read
- *      continuously with asynchronous usbd_io(), frames go to model.h.
+ *      continuously with asynchronous usbd_io(), frames go to model.h
+ *      (text) and, reassembled by vasm.h, video.h (pictures). The
+ *      MMI's VIDEO_CAPS goes out with its HELLO; VIDEO_ACKs queued by
+ *      video.c are sent from the manager thread.
  *   4. Removal or any transfer error tears the connection down and goes
  *      back to waiting. Nothing in here ever exits the process.
  *
@@ -24,7 +27,7 @@
 
 /* Identification sent to the phone; the Android app's accessory_filter.xml
  * matches manufacturer + model. */
-#define AOA_MANUFACTURER "rivit"
+#define AOA_MANUFACTURER "mmi3g"
 #define AOA_MODEL        "usb_tx_test"
 #define AOA_DESCRIPTION  "MMI 3G+ usb_tx_test receiver"
 #define AOA_VERSION      "1"
@@ -32,6 +35,9 @@
 #define AOA_SERIAL       "mmi3g-0001"
 
 #define USBTX_HELLO      "usb_tx_test-mmi/1"
+
+/* System log snapshots per run: <sd>/var/usb_slog_1.txt ... _<this>.txt */
+#define AOA_SLOG_SNAPSHOTS 6
 
 /* 0, or -1 if the manager thread could not start. sd_path: where a failed
  * handshake or a removal saves a system log snapshot (var/usb_slog_<n>.txt),

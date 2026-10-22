@@ -1,4 +1,4 @@
-# rivit_app: native app tests for the Audi MMI 3G+
+# Native app tests for the Audi MMI 3G+
 
 This SD card runs a set of small test programs on the MMI 3G+ head unit,
 one after another. They check that programs built for the MMI can run on
@@ -25,13 +25,14 @@ run has finished.
 1. Switch the ignition on and wait until the MMI has fully started (you
    see the normal main menu).
 2. Put the card into **SD slot 1**.
-3. After a few seconds, the "rivit_app" start screen appears. Each test
+3. After a few seconds, the start screen ("MMI 3G+ native app tests")
+   appears. Each test
    then has a screen before it, which says what it does and what you
    should see, and a screen after it with its result.
 4. The last test is `usb_tx_test` (text from the phone). It runs until you
    take the card out, so that is how the run ends - there is no "all done"
-   screen. The tests before it (hello5, hello6, hello4, in that order) take
-   about 9 minutes. If your card's run
+   screen. The tests before it (hello5, then hello6) take about 10
+   minutes. If your card's run
    does not end with `usb_tx_test`, wait for the **"all done"** screen to
    go away instead, then take the card out.
 
@@ -39,16 +40,17 @@ Buttons and knobs do not stop a test - each one runs for its own fixed time.
 To stop early, pull the card. **If the screen freezes**, restart the MMI: hold
 **MENU + the rotary knob + the top-right soft key** until it reboots.
 
-**`hello4` may freeze the whole MMI** (picture, knobs, volume), as it did on
-the last run. Finding out when and why is the point of the test. If the
-rings stop moving for more than 30 s, note the yellow number top left, then
-reboot with the key combo above. Everything up to the freeze is already on
-the card.
+**`hello4` could freeze the whole MMI** (picture, knobs, volume) with many
+rings. The ring counts that froze it are left out, and it ran clean on
+2026-10-21. It is no longer run by default. If you run it and the picture
+stops moving for more than 30 s, note what was on screen and the yellow
+number top left, then reboot with the key combo above. Everything up to the
+freeze is already on the card.
 
 ## The tests
 
-`hello`, `lmprobe`, `hello2` and `hello3` have passed on the car and are no
-longer run, but they are still on the card.
+`hello`, `lmprobe`, `hello2`, `hello3` and `hello4` have passed on the car
+and are no longer run, but they are still on the card.
 
 | Test | What it checks | What you see / do |
 |---|---|---|
@@ -56,10 +58,11 @@ longer run, but they are still on the card.
 | `lmprobe` | The screen hand-over, without OpenGL, 5 s | Eight vertical colour bars (white, yellow, cyan, green, magenta, red, blue, black) replace the picture. |
 | `hello2` | Drawing with the graphics chip (OpenGL ES), 20 s | A background slowly changing colour, a rotating coloured square, a white block bouncing along the top and a yellow progress bar. Saves screenshots to the card. |
 | `hello3` | Graphics speed (fill rate), 3 × 10 s | Random coloured blocks that get smaller, flowing rainbow plasma, then more and more plasma layers (yellow number). Green frame counter top left. |
-| `hello4` | Why heavy 3D drawing froze the MMI, about 2 minutes | A grid of coloured rings; the yellow number is how many: 1, 2, 4, then 8 for a whole minute, then 12, 16, 24, 32, 64. **May freeze the MMI** (see above). |
-| `hello5` | Sound, 30 s | The picture doesn't change. Turn the main rotary knob: every click should beep. |
+| `hello4` | 3D drawing, about 1.5 minutes | A row of small squares top right (green = pass, red = fail). Then 10 s each: two colourful cubes, a gold ring with moving lights, a checkerboard world with crates and fog. Then a grid of coloured rings; the yellow number is how many: 1, 2, 4, 8, 12, 10 s each. **May freeze the MMI** (see above). |
+| `hello5` | How our app's sound behaves next to the radio, the volume knob and music. About 2.5 minutes. | Radio on at a normal volume, and **film the screen with sound on**. Four steps; each one says on screen what to do and counts down before it starts. Each plays a short ping every 2 s with a white **PLAYING** box. **1:** listen whether the radio keeps playing *between* the pings. **2:** 12 pings played by hello5 itself: pings 4–6 should be quieter, and the last three should keep the same 2 s beat. **3:** while the pings play, turn the **volume** knob 3 clicks down, wait a few pings, then 3 clicks up; do the pings get quieter and louder too? **4:** press **MEDIA** and start music (USB, Bluetooth, Jukebox, CD) during the countdown; does the music keep playing between the pings? Note the answers (or let the video tell). |
+| `hello7` | A tool, not run by default: names every knob and button you use. 60 s. | Turn any knob and press any button, one at a time. Each is named on screen and counted; a control hello7 doesn't know yet shows as "unknown" with its byte and bits, so note which one you pressed. The MMI reacts to them as well. |
 | `usb_tx_test` | Text from the phone over USB. Runs until you pull the card, so it is always the last test: pulling the card ends it and the run. | Install the usb_tx_test app on the phone, then plug the phone into the car's USB port. The bar at the top turns green ("Connected") once the phone accepts the "open usb_tx_test" prompt. Text sent from the phone appears on screen and in `usb_tx_test.log`. Unplug and replug as often as you like. **Pull the card to end it.** |
-| `hello6` | Whether the MMI's video chip plays phone-style video, and how fast pictures can be drawn. About 5 minutes. **Park the car.** | Text screens explain every step. First about a minute of flickering test patterns (nothing to do). Then 10 short test videos, each with a screen before it: **turn the main knob one click whenever you see a moving test picture** (a coloured pattern with its name and a counting number). The picture may stay black for some of them; that is a result too. A results screen stays up for 20 s at the end. |
+| `hello6` | Whether the MMI's video chip plays phone-style video. About 8 minutes. **Park the car.** | Text screens explain every step. 10 test videos, each with a screen before it and each shown two ways, about 10 s each: **turn the main knob one click whenever you see a moving test picture** (a coloured pattern with its name and a counting number). The picture may stay black for some of them; that is a result too. A results screen stays up at the end. |
 
 The result screen after each test shows one of these verdicts:
 
@@ -79,7 +82,7 @@ The result screen after each test shows one of these verdicts:
 | `var/summary.txt` | One line per test: verdict, exit code, run time |
 | `var/<test>_out.log` | Everything the test printed, with its exit code and verdict at the end |
 | `var/<test>_slog.txt` | The MMI's system log after the test (has the details if it crashed) |
-| `var/rivit_app.log` | The log of the run itself |
+| `var/run.log` | The log of the run itself |
 | `hello.txt`, `lmprobe.log`, `hello2.log` … `hello6.log`, `*.png`, `*.bmp` | The tests' own logs and screenshots |
 | `hello6/` | hello6's details: system info, a log of each video's playback, CPU load and screen layers during each video |
 

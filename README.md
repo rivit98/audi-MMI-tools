@@ -1,4 +1,4 @@
-# rivit_app — native C apps for my MMI 3G+
+# Native C apps for my MMI 3G+
 
 Cross-compile plain C for the MMI 3G+ (QNX 6.3.2, Renesas SH7785 / SH-4A,
 little endian) with Debian's stock SH4 GCC, packaged as a Docker image.
@@ -10,10 +10,11 @@ little endian) with Debian's stock SH4 GCC, packaged as a Docker image.
 | `hello2` | OpenGL ES test. Logs full EGL/GL/gf diagnostics, runs a 20 s animation, and saves screenshots to the card. |
 | `hello3` | GPU canvas: random-colour pixel blocks and a plasma effect, both rendered by the GPU from textures uploaded once, then a fill-rate benchmark. On-screen FPS counter. |
 | `hello4` | 3D pipeline test: automatic pixel-readback probes (depth, culling, perspective, lighting, texture, fog, blend, stencil) shown as PASS/FAIL squares, then lit/textured/fogged 3D scenes and a triangle-rate benchmark. |
-| `hello5` | Audio test: beeps on every turn of the main rotary knob. Plays a bundled PCM clip (`beep.wav`) through QSA (`libasound`) on the `tones1` device. First user of `/dev/ipc/ch8` input and of sound. |
-| `usb_tx_test` | Text from an Android phone over USB (Android Open Accessory). Shows the link state and received messages full screen, logs them to the card. Pairs with the phone app in `android/`. Runs until the SD card is pulled. See [usb_tx_test](#usb_tx_test-make-sd-sd_appsusb_tx_test). |
+| `hello5` | Sound from our app. Steps (`hello5 <sd> <steps>`, default `mnvt`) play a ping train that hello5 renders itself (`src/hello5/pulse.c`, written to `/tmp`) on the one audible output, io-media mixer `DSPOUT_TDM1_20_SAD`: with the radio (does it mix or replace?), while the volume knob is turned and with music playing, through the unit's `testapp-file`; and through hello5's own io-media client (`src/hello5/iom.c`, the devctls `testapp-file` uses) with its own volume control and queued files, every event timed. Step `g` is the earlier output survey: the bundled chime (`beep.wav`) in groups of 1–6 chimes, one group per output (mixer outputs and io-audio devices through QSA / `libasound`). |
+| `hello7` | Knob and button tester (a tool, not in the default run): decodes every `/dev/ipc/ch8` message (`src/hello7/keys.c`) and shows it live with a counter per control; bits no known control explains show as "unknown" with their byte, to name new buttons. `hello7 <sd> [seconds]`, default 60. Was hello5's stage 2. |
+| `usb_tx_test` | Text and a slow screen stream (~2 JPEG pictures a second) from an Android phone over USB (Android Open Accessory). Shows the link state, received messages and the phone's screen full screen, logs them to the card. Pairs with the phone app in `android/`. Runs until the SD card is pulled. See [usb_tx_test](#usb_tx_test-make-sd-sd_appsusb_tx_test). |
 | `pngondemand` | Tool, not a test: renders a text layout (rectangles, text, word-wrapped paragraphs) to a PNG on the car. `run.sh` uses it to draw each status screen right before showing it. See [Screens](#the-test-run). |
-| `hello6` | Checks the phone-mirroring assumptions ([docs/phone-mirroring.md](docs/phone-mirroring.md)): system/GPU info, CPU/VFB/texture-upload/LZ4 benchmarks, then ten test videos through the unit's DM642 decoder on a layer manager video displayable. About 5 minutes, driver watching. See [hello6](#hello6-make-sd-sd_appshello6). |
+| `hello6` | Checks the phone-mirroring assumptions ([docs/phone-mirroring.md](docs/phone-mirroring.md)): system/GPU info, CPU/VFB/texture-upload/LZ4 benchmarks, then ten test videos through the unit's DM642 decoder on a layer manager video displayable. The default run plays only the videos: about 8 minutes, driver watching. See [hello6](#hello6-make-sd-sd_appshello6). |
 
 ```sh
 make sdk               # once: build the mmi-sdk Docker image (toolchain + QNX sysroot)
@@ -132,8 +133,8 @@ library is loaded.
        `builder/encoder.py`).
     2. That runs `core/copie_scr_plain.sh`.
     3. That runs `exec ksh ./run.sh $SDPATH`.
-    4. `run.sh` copies `bin/*` to `/tmp/rivit_app/` and runs the test apps
-       one after another, logging to `var/rivit_app.log` (see
+    4. `run.sh` copies `bin/*` to `/tmp/mmi_apps/` and runs the test apps
+       one after another, logging to `var/run.log` (see
        "The test run").
 
 ## Findings: graphics stack
@@ -232,20 +233,24 @@ sdk/
   mkbeep.py           renders src/hello5/beep.wav (the knob-detent chime)
   include/sys/        reconstructed QSA asoundlib.h (from the unit's libasound)
                       and USBDI usbdi.h (from the unit's libusbdi, see usb_tx_test)
-  mkfont.py           PSF font -> C glyph table (usb_tx_test's on-device text)
+  mkfont.py           PSF font -> C glyph table (the apps' on-device text)
 docs/
   platform-notes.md   what the car has confirmed: GPU limits, layer manager,
                       vsync, capture, input, audio ABI. Start here.
   qnx-sh-fpu-div0.md  why a divide by zero is a fatal SIGFPE on this platform
   gcc-sh4-treg-bug.md GCC 12.2's -O1+ `a == 0 && b == 0` miscompile (fixed in 16)
 src/
-  common/             shared by graphics apps
+  common/             shared by the apps (src/<app>/ is only that app's logic)
     log.c             SD log, fsync per line
     lmgr.c            /dev/layermanager client (devctl + text commands)
     gfx.c             gf + EGL bring-up / teardown (port of qnx-audi Screen)
     img.c             BMP / PNG writers over the vendored stb_image_write.h
+    jpeg.c            JPEG decoding over the vendored stb_image.h
     quit.c            clean-stop sources: timer, signals, SD removal, watchdog
     hud.c             seven-segment FPS counter + rectangles
+    text.c            UTF-8, word wrap, glyph drawing (Terminus fonts)
+    screen.c          CPU-drawn full-screen layer-manager displayable (VFB)
+    proc.c            start the unit's own tools from a threaded app
   hello/hello.c
   lmprobe/main.c      showScreen's layer manager sequence, colour bars, no GL
   hello2/main.c
@@ -253,17 +258,20 @@ src/
   hello4/main.c       3D scenes, timing, triangle-rate table
   hello4/mesh.c       cube / torus / ground grid (indexed, client-side arrays)
   hello4/probe.c      glReadPixels pass/fail checks of the 3D pipeline
-  usb_tx_test/        AOA receiver: aoa.c (USB), proto.c (frames), text.c (UTF-8,
-                      wrap, glyphs), ui.c (screen layout), screen.c (VFB), model.c
+  usb_tx_test/        AOA receiver: aoa.c (USB), proto.c (frames), vasm.c
+                      (picture reassembly), video.c (decode, acks), ui.c
+                      (screen layouts), model.c
   pngondemand/        layout -> PNG: layout.c (the layout language), main.c
                       (PNG via common/img.c); README.md
+  hello5/             sound: main.c (steps), pulse.c (ping trains), iom.c
+                      (io-media client), h5ui.c (screens)
   hello6/             mirroring checks: main.c (phases), sysinfo.c, bench.c,
                       video.c, label.c (text screens), texts.h (their text +
-                      the clip list), proc.c (spawn tools), lz4mini.c
+                      the clip list), lz4mini.c
+  hello7/             knob/button tester: keys.c (ch8 decoding), main.c
+  hello*/README.md    what each hello app does, in short
 media/                hello6's test videos: mkclips.sh (ffmpeg, mmi-media image)
-tests/                host unit tests (make test) + ui_preview.c (make ui-preview)
-                      + hello6_preview.c (make hello6-preview)
-                      + screens_preview.sh (make screens-preview)
+tests/                host unit tests (make test)
 android/              usb_tx_test sender app (Kotlin, Gradle in docker/Dockerfile)
 tools/aoa_host.py     desk stand-in for the MMI side (make aoa-host)
 sd/run.sh             launched by copie_scr.sh on SD insert: runs the test apps
@@ -288,19 +296,19 @@ General procedure:
 2. Turn the ignition on and wait for the MMI to boot fully. Insert the card.
 3. A start screen comes first. Then each app gets a "Next" screen (what it
    does and what you should see) and a result screen. The default run
-   is hello5, hello6, hello4 (about 9 min), then usb_tx_test, which runs until
+   is hello5, hello6 (about 8 min), then usb_tx_test, which runs until
    the card is pulled: that is the end of the run, so its result screen
    and the "all done" screen never appear. With an `SD_APPS` list that
    doesn't end in usb_tx_test, wait for "all done" before pulling.
 
-If neither the apps' output nor `var/rivit_app.log` appears,
+If neither the apps' output nor `var/run.log` appears,
 `copie_scr.sh` didn't run.
 
 ### The test run
 
 `run.sh` (ksh, no native runner) does this for each app in `SD_APPS`:
 
-0. **Screen "rivit_app"** for 5 s, once: what the run is,
+0. **Start screen ("MMI 3G+ native app tests")** for 5 s, once: what the run is,
    and don't pull the card before "all done".
 1. **Screen "Next: <app>"** for 5 s: its title and what you should see or
    do, its arguments and timeout, and the run order. This is the pause
@@ -328,7 +336,7 @@ code and run time, are in `var/summary.txt`.
 
 Per-app timeouts, arguments, titles and on-screen descriptions are in
 [`sd/apps.conf`](sd/apps.conf), which `make sd` also copies to the card.
-hello5 runs 30 s there, not its 600 s default. The screen times are
+hello5 runs steps `mnvt` there. The screen times are
 `PRE_S`/`POST_S`/`FINAL_S` in the Makefile.
 
 **Screens.** They are shown with the toolkit's `core/bin/showScreen`
@@ -339,19 +347,14 @@ on the car when it is needed, nothing is pre-rendered:
 
 1. a `screen_*` function in [`sd/screens.sh`](sd/screens.sh) prints the
    screen's layout (`screen_start`, `screen_next`, `screen_result`,
-   `screen_done`) to `/tmp/rivit_app/screen.layout`;
-2. `bin/pngondemand` renders it to `/tmp/rivit_app/screen.png`;
+   `screen_done`) to `/tmp/mmi_apps/screen.layout`;
+2. `bin/pngondemand` renders it to `/tmp/mmi_apps/screen.png`;
 3. `showScreen -t` shows that.
 
 The rendering time counts towards the screen's time. If any step fails,
 or showScreen returns early, `run.sh` sleeps the rest of the time, so the
-timing doesn't change. pngondemand's errors go to `var/rivit_app.log`,
+timing doesn't change. pngondemand's errors go to `var/run.log`,
 showScreen's output to `var/showscreen.log`.
-
-`make screens-preview` renders every screen a run can show (each verdict
-of each app, every "k of n") into `build/screens/*.png` with a host build
-of pngondemand and the real `sd/screens.sh` + `apps.conf`, next to the
-`.layout` it came from. It fails if any text does not fit.
 
 **pngondemand** renders a text layout (one command per line: `bg`,
 `rect`, `text`, word-wrapped `para`, `footer`, ...) to a PNG:
@@ -374,7 +377,7 @@ back to the HMI. The log ends with `stop requested: <reason>` and
 
 | How | Notes |
 |---|---|
-| Wait | The normal end: 20 s for hello2, 3 × 10 s for hello3, 4 × 10 s for hello4 (with no arguments; `sd/apps.conf` gives it a ~100 s stress plan). |
+| Wait | The normal end: 20 s for hello2, 3 × 10 s for hello3, 4 × 10 s for hello4 (with no arguments; `sd/apps.conf` gives it 3 × 10 s of scenes and 5 × 10 s of stress, ~85 s). |
 | **Pull the SD card** | Checked once per second. The card is gone, so the log and screenshots are lost after that point. |
 | `slay hello3` / `kill -TERM <pid>` | From a shell (telnet or serial), if you have one. SIGTERM, SIGINT and SIGHUP all work. A second signal forces `_exit`. |
 | Watchdog | Run time + 40 s, in case GL or the layer manager hangs. |
@@ -450,7 +453,7 @@ Files on the card:
 | `hello2_glread.bmp` | `glReadPixels` of our frame at t=5 s: **GL rendered.** |
 | `hello2_dshot.png` | Layer manager snapshot of our displayable (cid 40): **rendering reached the VFB.** |
 | `hello2_sshot.png` | Snapshot of the whole display: **our layer is what's actually visible.** |
-| `var/hello2_out.log` | stdout/stderr, exit code, verdict (`var/rivit_app.log`: `run.sh` itself). |
+| `var/hello2_out.log` | stdout/stderr, exit code, verdict (`var/run.log`: `run.sh` itself). |
 
 Diagnostics in `hello2.log`:
 - **Layer manager:** version.
@@ -563,12 +566,16 @@ tori are small on screen, so fill rate is not what limits it.
 **The stress scene froze the whole unit on 2026-10-11** (picture, knobs and
 radio volume, for minutes; no watchdog fired) while drawing 8 tori, after
 probes and scenes 1–3 had all passed. See
-[`docs/gpu-results.md`](docs/gpu-results.md). The default run
-(`sd/apps.conf`) therefore runs only the stress scene, built to find out
-when and why:
+[`docs/gpu-results.md`](docs/gpu-results.md). The 2026-10-19 run used only
+the stress scene, built to find out when and why. It passed 8 tori for 60 s
+and 12 tori, then froze the unit on the first 16-tori frame (gpu-results
+§8). The default stress steps now stop at 12 (16, 32 and 64 are commented
+out in `opts_default`). On 2026-10-21 everything (probes, three scenes,
+stress 1–12 tori) passed in one run (gpu-results §9), so hello4 has left
+the default run. Its `sd/apps.conf` line is kept, commented out:
 
 ```
-hello4 <sd> scenes=s step=5 tori=1,2,4,8:60,12,16,24,32,64 trace=1
+hello4 <sd> step=10 trace=1
 ```
 
 Options (any order, after `<sd>`):
@@ -577,7 +584,7 @@ Options (any order, after `<sd>`):
 |---|---|---|
 | `<n>` | seconds per scene (cube/light/world), and for the whole stress scene when there is no `step=` | 10 |
 | `scenes=pclws` | what runs, in this order: `p` probes, `c` cube, `l` light, `w` world, `s` stress | all |
-| `tori=1,2,8:60` | stress steps: torus counts, each with optional own seconds | 1,2,4,8,16,32,64 |
+| `tori=1,2,8:60` | stress steps: torus counts, each with optional own seconds | 1,2,4,8,12 |
 | `step=<s>` | seconds of a stress step without its own | scene time ÷ steps |
 | `trace=0/1/2` | stress only. 1: one fsync'ed line per frame after its swap, `f<frame> n=<tori> draw=<ms> swap=<ms>`. 2: also `f<n> draw` / `f<n> swap` before each. Each line costs ~12 ms on the card, so fps drops. | 0 |
 
@@ -589,7 +596,8 @@ driver leak before a freeze. After a freeze, the last `f<n>` line in
 
 ### usb_tx_test (`make sd SD_APPS=usb_tx_test`)
 
-A phone app sends text over USB; the MMI shows it and logs it.
+A phone app sends text, and optionally its screen (~2 pictures a second),
+over USB; the MMI shows them and logs them.
 
 ```
 phone: android/ app  --USB (AOA bulk)-->  MMI: usb_tx_test  -->  screen + usb_tx_test.log
@@ -604,11 +612,48 @@ handshake with any new device (vendor requests 51/52/53). An Android phone
 re-enumerates as `18d1:2d00`/`2d01` with a bulk IN/OUT interface (`ff/ff`).
 That needs no root and no USB debugging on the phone. Android starts the
 sender app because its `accessory_filter.xml` matches manufacturer
-`rivit` / model `usb_tx_test`.
+`mmi3g` / model `usb_tx_test`.
 
 Protocol (`src/usb_tx_test/proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say
 who is at each end, `TEXT` carries `seq u16` + UTF-8, `ACK` echoes `seq`.
+
+**Screen streaming.** Deliberately simple: one JPEG per picture, at most
+every 500 ms, one picture in flight.
+
+- The MMI announces what it can show in `VIDEO_CAPS` (sent with its
+  `HELLO` and `HELLO_REPLY`): a landscape box (800×452, under a 28 px
+  status bar) and a portrait box (400×480, the left half), plus 512 KB max
+  per JPEG. A phone app streams only to an MMI that sent it.
+- The phone (`CaptureService`, a MediaProjection foreground service)
+  mirrors its screen into a virtual display sized to fit the box for its
+  current orientation. It resizes the display when the phone rotates.
+  Every 500 ms it takes the newest image, compresses it (JPEG q60) and
+  sends `VIDEO_START` (id, w, h, format, size) plus `VIDEO_DATA` chunks
+  (id + ≤2046 B). A static screen produces no new images and so sends
+  nothing. After a replug, the new link gets the last picture again.
+- The MMI reassembles the picture (`vasm.c`), decodes it on its main
+  thread (`video.c`, stb_image), draws it and acks it with `VIDEO_ACK`
+  (id, status shown/bad/dropped, decode ms). The phone sends the next
+  picture only after the ack (or after 3 s), so a slow MMI lowers the
+  rate rather than queueing. `VIDEO_STOP` (or the link going down) brings
+  back the text screen.
+
+**Portrait vs landscape.** The picture keeps the phone's shape. It is
+never rotated or stretched, only scaled down.
+
+- **Landscape** (w ≥ h): full width under a slim status bar (state,
+  video fps, decode and screen-copy times). The newest message appears
+  as a caption over the bottom of the picture for 15 s.
+- **Portrait**: full height on the left (a 1080×2340 phone gives
+  220×480), with the normal text panel (status, messages, footer) in the
+  remaining ~580 px.
+
+**Cost on the MMI.** Each picture means a JPEG decode plus one full
+800×480 copy into the VFB. That copy was measured at ~160 ms
+(platform-notes). Both are logged (`video: #n ... decode .. ms, present ..
+ms`) and shown in the status bar or footer. While pictures arrive, the
+1 s clock redraw is skipped.
 
 **Robustness.** Callbacks from io-usb only queue events; a manager thread
 does all the work. Unplugging the phone, a transfer error, or a device
@@ -652,13 +697,13 @@ QNX head units.
 
 ```sh
 make sdk                         # once, adds the libusbdi stub + host gcc
-make test                        # C unit tests: protocol, UTF-8, wrap, drawing
-make ui-preview                  # build/ui_<state>.bmp: the screen, per link state
+make test                        # C unit tests: protocol, pictures, JPEG, UTF-8, wrap, drawing
 make sd SD_APPS=usb_tx_test      # receiver only (the default run has it last)
 make apk                         # android/out/usb_tx_test.apk  (= make -C android)
-make apk-test                    # Kotlin unit tests (protocol)
+make apk-test                    # Kotlin unit tests (protocol, picture fit)
 make apk-install                 # adb install -r: adb runs in the container
-make aoa-host                    # desk test: this PC plays the MMI
+make aoa-host                    # desk test: this PC plays the MMI; the newest
+                                 # streamed picture lands in build/aoa-host/latest.jpg
 ```
 
 Everything builds and runs in Docker: `mmi-sdk` for the MMI side,
@@ -679,7 +724,12 @@ clean`.
      the bar turns green: *Connected*, with the phone model.
 3. Type and send. The text shows on the MMI, and on the phone it gets a ✓
    once the MMI has acknowledged it.
-4. Unplug and replug at will. Pull the SD card to end it.
+4. *Stream screen* (enabled once the MMI has sent `VIDEO_CAPS`): allow
+   the screen capture, then use the phone as usual. Back or Home keep
+   the app and the stream running. The notification has *Stop*. The app
+   shows sent/shown pictures, the MMI's decode time and the round trip.
+5. Unplug and replug at will. Streaming carries on after a replug. Pull
+   the SD card to end it.
 
 Everything is in `usb_tx_test.log` on the card: every USBDI return code, the
 device and interface descriptors, every state change and every message. A
@@ -687,25 +737,30 @@ failed handshake or a removal also saves the system log to
 `var/usb_slog_<n>.txt`. run.sh can't do that for this app, because pulling
 the card ends it.
 
-**Not yet verified on the car:** the whole USB path end to end. In the
-log, expect to see the media launcher's probe as one "USB link interrupted -
-reconnecting" right after the phone becomes an accessory; that's handled.
-If the phone's MTP mode gets in the way before the switch, set its USB mode
-to "charging only" before plugging in.
+**Verified on the car (2026-10-21):** the whole USB path end to end.
+Redmi Note 8 Pro in MTP mode, three texts received and shown
+([`docs/usb-stack.md`](docs/usb-stack.md), "21.10 run"). On the first
+connection the phone needs two AOA `START`s before it comes back as an
+accessory. An accessory session nobody opens on the phone drops after
+~18 s, and the app reconnects by itself. Both are handled. The 12.10–19.10
+runs failed on `DEV_NOANSWER` for EP0 control requests with the same phone.
+If that comes back, see the open questions in usb-stack.md.
 
 ### hello6 (`make sd SD_APPS=hello6`)
 
-Tests T1–T3 of [docs/phone-mirroring.md](docs/phone-mirroring.md) §7 in
-one run of about 5 minutes. Park the car; text screens say what to do.
+Tests T1–T3 of [docs/phone-mirroring.md](docs/phone-mirroring.md) §7.
+The default run is phase `v` alone, about 8 minutes. Park the car; text
+screens say what to do.
 
 | Phase | What | Output |
 |---|---|---|
 | `s` system info | `pidin`, mounts, `/dev/io-media`, `/dev/snd`, efs tool locations; the unit's `ShowVideoMemory`, `memusage`, `hbhogs` (not `ShowDisplayables`: it sets the shown list, and `ShowDisplayables 0` blanked the screen) | `hello6/sysinfo_before.txt`, `sysinfo_after.txt` |
 | `c` CPU | memcpy, RGB565→BGRA, LZ4 on UI/photo/random 800×480 frames | `RESULT` lines |
 | `g` GPU | CPU stores/memcpy to and from the VFB; `glTexSubImage2D` RGB565/RGBA/BGRA and DXT1 upload MB/s; visible upload+draw fps | `RESULT` lines |
-| `v` video | 10 clips (`media/mkclips.sh`) played by the unit's `testapp-file` with `-o mixer:DSPOUT_*` (its default PCM output cannot be attached on this unit), shown on a video displayable (cid 41): first half VCAP 0 (flags `0x101`), second half VCAP 1 (`0x201`). The driver turns the knob when the picture is visible. Clips 9–10 are written to the card while they play. | `hello6/play_<k>.log`, `hogs_<k>.txt`, `RESULT video_<k>` lines (incl. `output=`) |
+| `v` video | 10 clips of 30 s (`media/mkclips.sh`) played by the unit's `testapp-file` with `-o mixer:DSPOUT_*` (its default PCM output cannot be attached on this unit), each shown on a video displayable (cid 41) two ways, 10 s each, with capture enabled through `/dev/videoctrl`: first VCAP 1 (flags `0x201`, VP 2), then VCAP 0 input 1 (`0x101`, VP 1 source 1, the DSP's video port; the way clips 1–3, 5 and 6 reach the screen, 2026-10-19/21). The driver turns the knob when the picture is visible. Clips 9–10 are written to the card while they play. | `hello6/play_<k>.log`, `hogs_<k>.txt`, `RESULT video_<k>` lines (incl. `output=`) |
 
-`hello6 <sd> [phases]` runs only some phases (`apps.conf` passes none: all).
+`hello6 <sd> [phases]` picks the phases, any of `scgv` (default, and what
+`apps.conf` runs: `v`).
 The summary is shown on screen at the end and written to `hello6.log`.
 
 **The unit's own tools.** hello6 runs `testapp-file` and the diagnostic
@@ -721,17 +776,20 @@ multithreaded process.
 
 ```sh
 make clips                       # build/clips/ (also done by make sd SD_APPS=hello6)
-make hello6-preview              # build/hello6_*.bmp: every text screen, fails if text overflows
 make test                        # includes test_lz4: lz4mini vs the reference liblz4
-make sd SD_APPS=hello6           # hello6 alone (~16 MB of clips); or add it to the list
+make sd SD_APPS=hello6           # hello6 alone (~55 MB of clips); or add it to the list
 ```
 
 `make sdk` again after pulling this: the SDK image gained `liblz4-dev`
 for the LZ4 test.
 
-**Not yet verified on the car:** all of it. Three things are new to this
-code base: the efs tool paths, `spawnvp` from our binaries, and video
-displayables (flag bit 0).
+**On the car (2026-10-21, phase `v`):** the efs tool paths, `spawnvp` and
+video displayables all work. Five of the ten clips play on screen through
+VCAP 0 input 1: MPEG-2 720×576, MPEG-4 640×480, H.264 Baseline 720×480,
+and H.264 720×336 with and without audio. VCAP 1 stayed black for every
+clip. The 800-wide H.264 clip, fragmented MP4, H.264 in MPEG-PS and both
+growing files never start (io-media error `0x80002`). Details:
+[docs/phone-mirroring.md](docs/phone-mirroring.md) §7.5.
 
 ## Limits / not done yet
 

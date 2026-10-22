@@ -19,8 +19,8 @@
  * Displayables are numbered "cids"; the layer manager hands each one a
  * virtual frame buffer (VFB): a gf surface identified by a sid.
  */
-#ifndef RIVIT_LMGR_H
-#define RIVIT_LMGR_H
+#ifndef COMMON_LMGR_H
+#define COMMON_LMGR_H
 
 /* devctl codes: __DIOT/__DIOTF(class 5, cmd, payload size) */
 #define LM_DCMD_REGISTER_DISPLAYABLE   0xC0140500u /* cid,w,h,flags -> ok   */

@@ -8,8 +8,8 @@
  *
  * Byte loads only: the SH4 faults on unaligned 32-bit access.
  */
-#ifndef RIVIT_LZ4MINI_H
-#define RIVIT_LZ4MINI_H
+#ifndef HELLO6_LZ4MINI_H
+#define HELLO6_LZ4MINI_H
 
 #include <stdint.h>
 

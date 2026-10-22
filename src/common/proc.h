@@ -7,8 +7,8 @@
  * the duration of the spawn call (a child inherits every fd without
  * FD_CLOEXEC) and restored straight after.
  */
-#ifndef HELLO6_PROC_H
-#define HELLO6_PROC_H
+#ifndef COMMON_PROC_H
+#define COMMON_PROC_H
 
 #include <sys/types.h>
 

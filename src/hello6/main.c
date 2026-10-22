@@ -5,9 +5,10 @@
  *   s  system info: processes, memory, device nodes, efs tool locations,
  *      GPU memory and layer manager state (sysinfo.c)
  *   c  CPU: memcpy, RGB565->BGRA, LZ4 on UI/photo/random frames (bench.c)
- *   v  video: ten clips through the unit's DM642 decoder via io-media and
- *      testapp-file, shown on a layer manager video displayable; the driver
- *      turns the knob when the picture is visible (video.c)
+ *   v  video: clips through the unit's DM642 decoder via io-media and
+ *      testapp-file, shown on a layer manager video displayable with the
+ *      capture unit enabled through dev-videoctrl; the driver turns the
+ *      knob when the picture is visible (video.c). All ten clips.
  *   g  GPU: CPU writes to the frame buffer, texture upload (RGBA, BGRA,
  *      RGB565, DXT1), visible upload+draw pipelines in fps (bench.c)
  *
@@ -18,13 +19,18 @@
  * screen at the end shows the key numbers for 20 s.
  *
  * Output: <sd>/hello6.log (every step, "RESULT" lines, the summary) and
- * <sd>/hello6/ (sysinfo, per-clip player logs, CPU load, displayables).
+ * <sd>/hello6/ (sysinfo, per-clip player logs and io-media queries, CPU
+ * load, the system log right after the video phase).
  *
  * The unit's tools come from its efs (/mnt/efs-system/bin, served
  * decompressed by inflator) or, failing that, from the copies `make sd`
  * puts next to hello6 on the card.
  *
- * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default all)
+ * Default: v only, every clip through both capture paths (~8 min). The
+ * rest only costs the driver's time (and g froze the unit on 12.10 and
+ * 13.10).
+ *
+ * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default "v")
  */
 #include <errno.h>
 #include <stdarg.h>
@@ -37,11 +43,12 @@
 #include "hello6.h"
 #include "lmgr.h"
 #include "log.h"
+#include "proc.h"
 #include "quit.h"
 #include "texts.h"
 
-#define WATCHDOG_S   600     /* the whole run is ~5 min */
-#define INTRO_MS     8000
+#define WATCHDOG_S   900     /* v alone ~8 min (10 clips x ~37 s) */
+#define INTRO_MS     12000   /* 8 s until 13.10: too short */
 #define PAGE_MS      12000   /* per results page */
 #define MAX_SUMMARY  48
 
@@ -170,12 +177,12 @@ static void restore_screen(void)
 
 int main(int argc, char *argv[])
 {
-	const char *phases = "scgv";
+	const char *phases = "v";
 	char path[300], *slash;
 	int i;
 
 	if (argc < 2) {
-		fprintf(stderr, "usage: %s <sd_path> [phases: scgv]\n", argv[0]);
+		fprintf(stderr, "usage: %s <sd_path> [phases: any of scgv, default v]\n", argv[0]);
 		return 2;
 	}
 	sd_path = argv[1];
@@ -210,8 +217,15 @@ int main(int argc, char *argv[])
 		bench_cpu();
 	}
 	label_hide();
-	if (strchr(phases, 'v') != NULL && quit_poll() == QUIT_NONE)
+	if (strchr(phases, 'v') != NULL && quit_poll() == QUIT_NONE) {
 		video_tests();
+		/* io-media's own messages for the clips. run.sh saves the slog
+		 * after the app, but on 13.10 the GPU phase froze the unit
+		 * first and that copy was never made. */
+		out_path(path, sizeof(path), "slog_video.txt");
+		log_msg("== system log after the video tests -> %s: %s", path,
+		        proc_status_str(proc_shell(path, 30, "sloginfo")));
+	}
 	if (strchr(phases, 's') != NULL && quit_poll() == QUIT_NONE)
 		sysinfo_run("sysinfo_after.txt", 0);
 	if (strchr(phases, 'g') != NULL && quit_poll() == QUIT_NONE)

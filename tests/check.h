@@ -1,8 +1,8 @@
 /*
  * check.h - minimal unit-test helpers for the host-side tests (make test).
  */
-#ifndef RIVIT_CHECK_H
-#define RIVIT_CHECK_H
+#ifndef TESTS_CHECK_H
+#define TESTS_CHECK_H
 
 #include <stdio.h>
 #include <string.h>

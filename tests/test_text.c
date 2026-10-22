@@ -1,4 +1,4 @@
-/* test_text.c - UTF-8, glyph lookup, wrapping, drawing (src/usb_tx_test/text.c). */
+/* test_text.c - UTF-8, glyph lookup, wrapping, drawing (src/common/text.c). */
 #include <stdlib.h>
 
 #include "check.h"

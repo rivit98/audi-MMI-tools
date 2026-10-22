@@ -3,4 +3,6 @@
     <string name="app_name">usb_tx_test</string>
     <string name="hint">Text for the MMI</string>
     <string name="send">Send</string>
+    <string name="stream_start">Stream screen</string>
+    <string name="stream_stop">Stop stream</string>
 </resources>

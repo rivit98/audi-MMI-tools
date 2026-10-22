@@ -5,8 +5,8 @@
  * Draw into screen_canvas() (an off-screen buffer), then screen_present()
  * copies it into the VFB and tells the layer manager.
  */
-#ifndef USBTX_SCREEN_H
-#define USBTX_SCREEN_H
+#ifndef COMMON_SCREEN_H
+#define COMMON_SCREEN_H
 
 #include "text.h"
 

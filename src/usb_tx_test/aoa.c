@@ -21,6 +21,8 @@
 #include "log.h"
 #include "model.h"
 #include "proto.h"
+#include "vasm.h"
+#include "video.h"
 
 /* AOA protocol (source.android.com/docs/core/interaction/accessories/aoa) */
 #define AOA_GET_PROTOCOL   51
@@ -36,7 +38,8 @@
 #define TEARDOWN_WAIT_MS   3000
 #define REOPEN_DELAY_MS    500
 #define REOPEN_MAX         5
-#define HANDSHAKE_DELAY_MS 1000     /* let the media launcher's probe go first */
+#define HANDSHAKE_FIRST_MS 4000     /* after insertion: media launcher done (below) */
+#define HANDSHAKE_DELAY_MS 1000     /* retry n waits n times this */
 #define HANDSHAKE_TRIES    5
 #define IN_BUF_SIZE        16384    /* Android accessory reads want >= 16 KB */
 #define OUT_QUEUE          16
@@ -109,6 +112,7 @@ struct link {
 	struct usbd_urb    *in_urb, *out_urb;
 	uint8_t            *in_buf, *out_buf;    /* usbd_alloc()ed */
 	struct proto_dec    dec;
+	struct vasm         vasm;                /* the picture being received */
 
 	pthread_mutex_t     lock;                /* out queue + flags below */
 	uint8_t             outq[OUT_QUEUE][OUT_FRAME_MAX];
@@ -231,6 +235,47 @@ static void log_text(const char *what, unsigned seq, const char *s, unsigned n)
 	log_msg("%s seq=%u len=%u: %s", what, seq, n, buf);
 }
 
+static void send_caps(struct link *l)
+{
+	uint8_t caps[PROTO_VIDEO_CAPS_LEN];
+
+	video_caps(caps);
+	link_send(l, PROTO_VIDEO_CAPS, caps, sizeof(caps));
+}
+
+/* VIDEO_START / VIDEO_DATA; usbd thread. Bad pictures are acked at once,
+ * good ones when they are on screen (video.c). */
+static void on_video(struct link *l, uint8_t type, const uint8_t *p, unsigned n)
+{
+	struct vpic pic;
+	int r, dropped = -1, bad = 0;
+
+	if (type == PROTO_VIDEO_START) {
+		r = vasm_start(&l->vasm, p, n, &dropped, &bad);
+		if (dropped >= 0) {
+			log_msg("video: picture %d cut short by the next one", dropped);
+			video_ack((unsigned)dropped, PROTO_VIDEO_DROPPED, 0);
+		}
+	} else {
+		r = vasm_data(&l->vasm, p, n, &bad);
+	}
+	switch (r) {
+	case VASM_BAD:
+		log_msg("rx %s for picture %d refused (%u bytes%s)",
+		        type == PROTO_VIDEO_START ? "VIDEO_START" : "VIDEO_DATA", bad, n,
+		        n >= PROTO_VIDEO_START_LEN && type == PROTO_VIDEO_START ?
+		        ": bad size/format/dimensions" : "");
+		video_ack((unsigned)bad, PROTO_VIDEO_BAD, 0);
+		break;
+	case VASM_DONE:
+		vasm_take(&l->vasm, &pic);
+		video_submit(&pic);
+		break;
+	default:
+		break;
+	}
+}
+
 static void set_peer(struct link *l, const uint8_t *p, unsigned n)
 {
 	char detail[MODEL_DETAIL_LEN];
@@ -254,6 +299,7 @@ static void on_frame(uint8_t type, const uint8_t *p, unsigned n, void *arg)
 	case PROTO_HELLO:
 		log_text("rx HELLO", 0, (const char *)p, n);
 		link_send(l, PROTO_HELLO_REPLY, USBTX_HELLO, sizeof(USBTX_HELLO) - 1);
+		send_caps(l);
 		set_peer(l, p, n);
 		break;
 	case PROTO_HELLO_REPLY:
@@ -272,6 +318,17 @@ static void on_frame(uint8_t type, const uint8_t *p, unsigned n, void *arg)
 		link_send(l, PROTO_ACK, ack, 2);
 		if (!l->hello_seen)
 			set_peer(l, (const uint8_t *)"phone app", 9);
+		break;
+	case PROTO_VIDEO_START:
+	case PROTO_VIDEO_DATA:
+		on_video(l, type, p, n);
+		if (!l->hello_seen)
+			set_peer(l, (const uint8_t *)"phone app", 9);
+		break;
+	case PROTO_VIDEO_STOP:
+		log_msg("rx VIDEO_STOP");
+		vasm_free(&l->vasm);
+		video_stop("the phone stopped streaming");
 		break;
 	default:
 		log_msg("rx unknown frame type 0x%02x, %u bytes, ignored", type, n);
@@ -362,6 +419,7 @@ static void link_free(struct link *l)
 		usbd_free(l->in_buf);
 	if (l->out_buf != NULL)
 		usbd_free(l->out_buf);
+	vasm_free(&l->vasm);
 	pthread_mutex_destroy(&l->lock);
 	free(l);
 }
@@ -460,6 +518,7 @@ static struct link *link_open(struct usbd_device *dev)
 	pthread_mutexattr_destroy(&ma);
 	l->dev = dev;
 	proto_dec_init(&l->dec);
+	vasm_init(&l->vasm, VIDEO_MAX_BYTES);
 	rc = usbd_open_pipe(dev, ep_in, &l->in);
 	if (rc == EOK)
 		rc = usbd_open_pipe(dev, ep_out, &l->out);
@@ -485,6 +544,7 @@ static struct link *link_open(struct usbd_device *dev)
 		return NULL;
 	}
 	link_send(l, PROTO_HELLO, USBTX_HELLO, sizeof(USBTX_HELLO) - 1);
+	send_caps(l);
 	return l;
 }
 
@@ -600,6 +660,7 @@ struct dev_entry {
 	int                    is_acc;    /* an AOA accessory (18d1:2d0x) */
 	unsigned               reopen_at; /* log_ms() to reopen the accessory, 0 = no */
 	int                    reopen_tries;
+	unsigned               inserted_at;  /* log_ms() of the insertion */
 	unsigned               handshake_at; /* log_ms() of the next AOA handshake, 0 = no */
 	int                    handshake_tries;
 	int                    retryable; /* a handshake failed in a way worth retrying */
@@ -646,6 +707,7 @@ static void link_drop(const char *why, enum link_state next)
 	log_msg("usb: accessory link down: %s", why);
 	link_close(acc);
 	acc = NULL;
+	video_stop("USB link down");
 	if (acc_entry != NULL)
 		dev_release(acc_entry);
 	acc_entry = NULL;
@@ -753,9 +815,9 @@ static void handshake_due(void)
 			d->dev = NULL;            /* gone: its removal event will follow */
 			continue;
 		}
-		log_msg("usb: AOA handshake %d/%d on %04x:%04x", d->handshake_tries,
-		        HANDSHAKE_TRIES, (unsigned)d->inst.ident.vendor,
-		        (unsigned)d->inst.ident.device);
+		log_msg("usb: AOA handshake %d/%d on %04x:%04x, %u ms after insertion",
+		        d->handshake_tries, HANDSHAKE_TRIES, (unsigned)d->inst.ident.vendor,
+		        (unsigned)d->inst.ident.device, now - d->inserted_at);
 		r = aoa_switch(d->dev);
 		dev_release(d);               /* keep the entry until it is removed */
 		if (r < 0)
@@ -787,6 +849,7 @@ static void on_insert(usbd_device_instance_t *in)
 	struct dev_entry *d = dev_find(in);
 	usbd_device_descriptor_t *dd;
 	struct usbd_desc_node *node = NULL;
+	char detail[80];
 	int i, rc;
 
 	if (d != NULL)                    /* another interface of a known device */
@@ -815,6 +878,7 @@ static void on_insert(usbd_device_instance_t *in)
 	d->devno = in->devno;
 	d->generation = in->generation;
 	d->inst = *in;
+	d->inserted_at = log_ms();
 
 	rc = usbd_attach(conn, in, 0, &d->dev);
 	log_msg("usb: insert path %u devno %u gen %u iface %u, %04x:%04x class %02x/%02x/%02x: "
@@ -856,10 +920,23 @@ static void on_insert(usbd_device_instance_t *in)
 		}
 		return;
 	}
-	/* The media launcher probes every new device at the same moment
-	 * (GET_DESCRIPTOR 0xEE, select_config, MTP): let it finish first. */
-	dev_release(d);                   /* keep the entry until it is removed */
-	d->handshake_at = due_in(HANDSHAKE_DELAY_MS);
+	/* Stay off EP0 until the media launcher is done with the device. Its
+	 * insertion callback (vdev-medialaunch vml_insertion, P1001) runs at
+	 * the same moment as ours: an MTP probe, GET_DESCRIPTOR(0xEE) on EP0,
+	 * that calls usbd_reset_device on any failure but a STALL
+	 * (0x080539c0), then usbd_select_config (SET_CONFIGURATION), then
+	 * the bus event thread waits its -c delay (default 2000 ms, srv-starter
+	 * passes none) before it starts the MTP driver. On 12.10 our handshake
+	 * ran inside that window (+0.2 s in v1, +1.3 s in v2): GET_PROTOCOL
+	 * answered, then DEV_NOANSWER on the next request and on everything
+	 * after it - a reset device - and io-usb reported the phone removed
+	 * 3-5 s later. The handshake now waits HANDSHAKE_FIRST_MS. If the
+	 * phone is reset anyway, its re-insertion starts over with a new entry. */
+	snprintf(detail, sizeof(detail), "USB device %04x:%04x found - handshake in %u s",
+	         (unsigned)dd->idVendor, (unsigned)dd->idProduct, HANDSHAKE_FIRST_MS / 1000);
+	dev_release(d);                   /* keep the entry until it is removed; frees dd */
+	d->handshake_at = due_in(HANDSHAKE_FIRST_MS);
+	model_set_state(LINK_WAITING, detail);
 }
 
 /* The system log at this moment, into <sd>/var/usb_slog_<n>.txt, in the
@@ -867,7 +944,6 @@ static void on_insert(usbd_device_instance_t *in)
  * pulling the card, so run.sh never gets to save usb_tx_test's slog; these
  * snapshots are what shows io-usb's and the media launcher's side of a
  * failed handshake (12.10: DEV_NOANSWER on SEND_STRING, cause unknown). */
-#define SLOG_SNAPSHOTS 6
 static const char *slog_sd;
 
 static void slog_snapshot(const char *why)
@@ -875,7 +951,7 @@ static void slog_snapshot(const char *why)
 	static int n;
 	char cmd[400];
 
-	if (slog_sd == NULL || n >= SLOG_SNAPSHOTS)
+	if (slog_sd == NULL || n >= AOA_SLOG_SNAPSHOTS)
 		return;
 	n++;
 	snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%d.txt' 2>&1 &", slog_sd, n);
@@ -953,6 +1029,7 @@ static void wait_locked(unsigned ms)
 static void *manager(void *arg)
 {
 	unsigned attempt = 0;
+	uint8_t ack[PROTO_VIDEO_ACK_LEN];
 	struct event ev;
 	int i, have, broken;
 
@@ -994,6 +1071,9 @@ static void *manager(void *arg)
 			if (broken)
 				acc_broken();
 		}
+		while (video_ack_pop(ack))         /* no link: they go nowhere */
+			if (acc != NULL)
+				link_send(acc, PROTO_VIDEO_ACK, ack, sizeof(ack));
 		if (acc == NULL)
 			acc_reopen_due();
 		handshake_due();
@@ -1027,6 +1107,7 @@ int aoa_start(const char *sd_path)
 	pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
 	pthread_cond_init(&qcond, &ca);
 	pthread_condattr_destroy(&ca);
+	video_set_notify(wake);
 	rc = pthread_create(&mgr_tid, NULL, manager, NULL);
 	if (rc != 0) {
 		log_msg("usb: manager thread: %s", strerror(rc));

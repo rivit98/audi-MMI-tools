@@ -6,8 +6,8 @@
  * its VFB surface via a gf 3D target on the topmost hardware layer. Every
  * step and its result is written to the log.
  */
-#ifndef RIVIT_GFX_H
-#define RIVIT_GFX_H
+#ifndef COMMON_GFX_H
+#define COMMON_GFX_H
 
 #include <EGL/egl.h>
 #include <gf/gf3d.h>

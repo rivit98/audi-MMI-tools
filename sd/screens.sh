@@ -1,7 +1,6 @@
 # screens.sh - run.sh's status screens, as layouts for bin/pngondemand
 # (the layout language: src/pngondemand/README.md). Sourced by run.sh on
-# the car (ksh) and by tests/screens_preview.sh on the host (sh), so plain
-# POSIX sh only, and echo without backslashes (ksh's echo expands them).
+# the car (ksh), so echo without backslashes (ksh's echo expands them).
 #
 # Each screen_* function prints one layout on stdout; run.sh renders it
 # right before showing it, so the screens can say what actually happened:
@@ -31,9 +30,9 @@ verdict_info() {
     OK)      VCOL=g; VWHY="exit code 0, no FAIL lines in its output" ;;
     WARN)    VCOL=y; VWHY="exit code 0, but its output has FAIL lines" ;;
     FAIL)    VCOL=r; VWHY="it exited with a non-zero exit code" ;;
-    CRASH)   VCOL=r; VWHY="killed by a signal: see its slog and core files in var/" ;;
+    CRASH)   VCOL=r; VWHY="killed by a signal: it crashed" ;;
     TIMEOUT) VCOL=y; VWHY="it ran over its ${TIMEOUT} s timeout and was stopped" ;;
-    MISSING) VCOL=d; VWHY="bin/$2 is not on the card" ;;
+    MISSING) VCOL=d; VWHY="the program is not on the card" ;;
     *)       VCOL=d; VWHY="" ;;
     esac
 }
@@ -85,12 +84,10 @@ _order() {
 screen_start() {
     _napps
     _frame "first test in ${PRE_S} s"
-    _big c "rivit_app"
-    _big w "MMI 3G+ native app tests"
+    _big c "MMI 3G+ native app tests"
     echo "para small w ${_N} test programs run one after another, each with a screen before it (what it does, what you should see) and one after it (the result). This takes a few minutes."
     _ln w
-    _ln y "Do not remove the SD card until the \"all done\" screen"
-    _ln y "has gone. Results are written to var/ on the card."
+    _ln y "Do not remove the SD card until the \"all done\" screen has gone."
     _ln w
     _order 0 -1
 }
@@ -104,7 +101,7 @@ screen_next() {   # <i> <app>
     echo "para small w ${TEXT}"
     _ln w
     echo "para small d runs: $2 <sd> ${ARGS}"
-    _ln d "timeout: ${TIMEOUT} s   output: var/$2_out.log"
+    _ln d "timeout: ${TIMEOUT} s"
     _ln w
     _order "$1" "$1"
 }
@@ -123,11 +120,6 @@ screen_result() {   # <i> <app> <verdict>
     _ln w "exit code ${RC}, ran ${SECS} s, ${FAILS} FAIL lines"
     _ln d "${TITLE}"
     _ln w
-    _ln d "exit code, run time, stdout + stderr:"
-    _ln w "    var/$2_out.log"
-    _ln d "system log after the run:"
-    _ln w "    var/$2_slog.txt"
-    _ln w
     _order $(($1 + 1)) -1
 }
 
@@ -135,11 +127,8 @@ screen_done() {   # <k>
     _napps
     if [ "$1" = "${_N}" ]; then _c=g; elif [ "$1" -gt 0 ]; then _c=y; else _c=r; fi
     _frame "back to the MMI in ${FINAL_S} s"
-    _big c "rivit_app: all done"
+    _big c "All done"
     _big "${_c}" "$1 of ${_N} apps OK"
-    _ln d "verdicts per app: var/summary.txt"
-    _ln d "each app's output: var/<app>_out.log"
-    _ln d "run.sh log: var/rivit_app.log"
     _ln w
     _order "${_N}" -1
 }

@@ -11,24 +11,36 @@
  * own MME uses (outputdevices table in efs-system's mme SQL): io-media
  * mixer inputs "mixer:DSPOUT_*?delay=130". They are tried in turn until
  * one attaches; the one that worked is kept for the next clips. Meanwhile
- * we register a layer manager
- * *video* displayable (cid 41) and show only it: flags LMGR_VIDEO plus the
- * capture unit bit (layermanagerV2 CVideoDisplayable, 0x08053238: bit 0 =
- * video, bit 8 = VCAP 0, bit 9 = VCAP 1). First half of the clip on VCAP 0,
- * second half on VCAP 1; which one carries the decoder is not known.
+ * we register a layer manager *video* displayable (cid 41) and show only
+ * it: flags LMGR_VIDEO plus the capture unit bit (layermanagerV2
+ * CVideoDisplayable, 0x08053238: bit 0 = video, bit 8 = VCAP 0, bit 9 =
+ * VCAP 1), then ask dev-videoctrl to select that capture unit's input and
+ * enable it (see vc_capture). attempts[] are the two candidate paths, one
+ * after the other while the clip plays.
  *
  * The driver is asked to turn the knob once whenever the moving picture is
- * visible; the /dev/ipc/ch8 messages per half are the "seen" signal.
+ * visible; the /dev/ipc/ch8 messages per attempt are the "seen" signal.
  * Evidence per clip in hello6/:
  *   play_<k>.log          testapp-file's io-media events (TIME = progress)
+ *   query_<k>.log         io-media's view of the playing graph, before the
+ *                         attempts (see query_graph)
  *   hogs_<k>.txt          hbhogs CPU load per thread during playback
- * and io-media's own slog lines ("Configuring ... Width", "Acquiring
- * Layer ...") end up in var/hello6_slog.txt (run.sh).
+ * and io-media's / dev-videoctrl's own slog lines ("NEDL: Enabling Capture",
+ * "VP2: vcap enabled", ...) end up in hello6/slog_video.txt (main.c).
+ *
+ * 13.10: every clip but the 800-wide, fragmented and MPEG-PS ones played to
+ * its end (TIME events up to 8 s, INPUT_EOF) and both VCAPs stayed black.
+ * 19.10: the query showed io-media did take clip 1 as video ("video ('MPG ',
+ * 25Hz 720x576)", get_video_info 720x576), and every capture unit stayed
+ * black again: capture was never enabled (vc_capture). 19.10 v2: clip 1
+ * on screen through attempt 2 (VCAP 0 input 1), attempt 1 black. Now
+ * every clip runs again, each through both attempts.
  *
  * The two "growing" clips are written to the card while they play, at
  * real-time rate after a 2 s head start: can io-media read a file that is
  * still being written (the cheapest stand-in for a live stream)?
  */
+#include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -51,9 +63,26 @@
 #define LMGR_VCAP1   0x200
 #define LABEL_MS     6000
 #define START_MS     1000    /* player start-up before the first displayable */
-#define HALF_MS      3500    /* START_MS + 2 halves < CLIP_S */
-#define END_WAIT_MS  6000    /* for the player to finish by itself */
+#define BIND_MS      500     /* layer manager binds the VCAP when it shows us */
+#define ATTEMPT_MS   10000   /* START_MS + query + 2 attempts < the clip */
+#define QUERY_MS     2500    /* testapp-cmdline: run the script and quit */
+#define END_WAIT_MS  8000    /* for the player to finish by itself */
 #define HEAD_S       2       /* growing clips: seconds written before playing */
+
+/* Ways to put the decoder's picture on screen, tried in this order while
+ * the clip plays. vp/source are dev-videoctrl's (/etc/videoctrl-Audi3G.cfg):
+ * VP 1 = VCAP 0, whose input 1 is the DM642's video port; VP 2 = VCAP 1,
+ * fed only by "Partial Decode". io-media runs with NMSDK_DSP_PD=1 (srv-starter
+ * environment) and its render manager serves VCAP 1 itself (nMSDKIPC:
+ * CaptureUnitAcquire, LayerAcquire, VideoEnable), so VCAP 1 goes first. */
+static const struct attempt {
+	int vcap, vp, source;
+	const char *what;
+} attempts[] = {
+	{ 1, 2, 0, "VCAP 1 = partial decode" },
+	{ 0, 1, 1, "VCAP 0 input 1 = DM642 video port" },
+};
+#define NATTEMPTS ((int)(sizeof(attempts) / sizeof(attempts[0])))
 
 struct result {
 	int ran, url_style;          /* 0 plain path, 1 file:// */
@@ -61,10 +90,73 @@ struct result {
 	int player_status, stopped;
 	int time_events, errors;
 	long long max_pos_ms;
-	unsigned knob[2];
-	int reg_rc[2], reg_ok[2], show_rc[2];
+	unsigned knob[NATTEMPTS];
+	int reg_rc[NATTEMPTS], reg_ok[NATTEMPTS], show_rc[NATTEMPTS];
+	int vc_rc[NATTEMPTS];        /* first non-zero videoctrl devctl rc, -1 no fd */
+	int video;                   /* from the query: 1 video stream, 0 none, -1 ? */
+	unsigned vw, vh;             /* iom_get_video_info */
 	char error[100];
 };
+
+/* ------------------------------------------------------------------ */
+/* dev-videoctrl                                                       */
+
+/* /dev/videoctrl, dev-videoctrl's resource manager. The HMI
+ * (MMI3GApplication CVideoControlInterface) drives it with
+ * DEVCTL_VP_SET_SOURCE, DEVCTL_VP_ENABLE and DEVCTL_UPDATE; codes and
+ * payloads from dev-videoctrl's io_devctl (0x08042640, P1001):
+ *   {int vp, int value}, exactly 8 bytes: each stores the value for the VP
+ *   and marks it pending; UPDATE (4 bytes, 0) applies every pending value
+ *   (VCAP VPs: gf_vcap_set_input_source / gf_vcap_enable or _disable, then
+ *   gf_vcap_update) and slogs "VP<n>: source changed to <s>" / "VP<n>: vcap
+ *   enabled".
+ * The layer manager only attaches the VCAP and binds it to the video layer
+ * (CVideoDisplayable::renderLayer); nobody enables capture unless the HMI
+ * asks dev-videoctrl, which is why a video displayable alone stayed black on
+ * 12.10 and 13.10. Note: a payload dev-videoctrl rejects is ignored and
+ * still answered with EOK; only the slog lines confirm. */
+#define VC_PATH            "/dev/videoctrl"
+#define VC_DCMD_SET_SOURCE 0x80080501u /* vp, input                     */
+#define VC_DCMD_UPDATE     0x80040507u /* 0: apply the pending values   */
+#define VC_DCMD_ENABLE     0x8008050bu /* vp, 0 = disable, 1 = enable   */
+
+static int vc_fd = -1;
+
+static int vc_set(unsigned dcmd, int vp, int value)
+{
+	int data[2] = { vp, value };
+
+	return vc_fd < 0 ? -1 : devctl(vc_fd, (int)dcmd, data, sizeof(data), NULL);
+}
+
+static int vc_update(void)
+{
+	int zero = 0;
+
+	return vc_fd < 0 ? -1 : devctl(vc_fd, (int)VC_DCMD_UPDATE, &zero, sizeof(zero), NULL);
+}
+
+/* Select the attempt's input and switch its capture unit on (on = 1) or
+ * off again (on = 0; VCAP 0 then goes back to input 0, the ADV7180, as
+ * dev-videoctrl sets it up at boot). Returns the first non-zero rc. */
+static int vc_capture(const struct attempt *a, int on)
+{
+	int rc_src = 0, rc_en, rc_up;
+
+	if (vc_fd < 0)
+		vc_fd = open(VC_PATH, O_RDWR);
+	if (vc_fd < 0) {
+		log_msg("  %s: %s", VC_PATH, strerror(errno));
+		return -1;
+	}
+	if (on || a->source != 0)
+		rc_src = vc_set(VC_DCMD_SET_SOURCE, a->vp, on ? a->source : 0);
+	rc_en = vc_set(VC_DCMD_ENABLE, a->vp, on);
+	rc_up = vc_update();
+	log_msg("  videoctrl VP %d: source %d rc=%d, %s rc=%d, update rc=%d", a->vp,
+	        on ? a->source : 0, rc_src, on ? "enable" : "disable", rc_en, rc_up);
+	return rc_src ? rc_src : rc_en ? rc_en : rc_up;
+}
 
 /* ------------------------------------------------------------------ */
 /* growing file                                                        */
@@ -156,8 +248,9 @@ static int hold(unsigned ms, struct grow *g)
 /* ------------------------------------------------------------------ */
 /* video displayable                                                   */
 
-static void show_video(int vcap, struct result *r)
+static void show_video(int i, struct result *r)
 {
+	const int vcap = attempts[i].vcap;
 	const int flags = LMGR_VIDEO | (vcap ? LMGR_VCAP1 : LMGR_VCAP0);
 	int cid = VCID, rc, ok = 0;
 
@@ -165,12 +258,12 @@ static void show_video(int vcap, struct result *r)
 	rc = lm_register_displayable(VCID, SCREEN_W, SCREEN_H, flags, &ok);
 	log_msg("  register video displayable %d, flags 0x%03x (VCAP %d): rc=%d %s, result=%d",
 	        VCID, flags, vcap, rc, rc ? strerror(rc) : "ok", ok);
-	r->reg_rc[vcap] = rc;
-	r->reg_ok[vcap] = rc == 0 && ok;
-	r->show_rc[vcap] = -1;
-	if (r->reg_ok[vcap]) {
+	r->reg_rc[i] = rc;
+	r->reg_ok[i] = rc == 0 && ok;
+	r->show_rc[i] = -1;
+	if (r->reg_ok[i]) {
 		rc = lm_show_displayables(0, &cid, 1);
-		r->show_rc[vcap] = rc;
+		r->show_rc[i] = rc;
 		log_msg("  lm_show_displayables(0, {%d}): rc=%d %s", VCID, rc,
 		        rc ? strerror(rc) : "ok");
 	}
@@ -215,6 +308,70 @@ static void parse_player_log(const char *path, struct result *r)
 		}
 	}
 	fclose(f);
+}
+
+/* testapp-cmdline commands for query_graph, one per line. */
+static const char query_script[] =
+	"GetStatus\n"
+	"GetTrackInfo\n"
+	"GetVideoInfo\n"
+	"GetErrorInfo\n"
+	"quit\n";
+
+/* Ask io-media about the clip's graph while it plays. testapp-cmdline
+ * attaches to testapp-file's graph by name (-a hello6; graph type
+ * trackplayer is its default) without an audio output (-O) or an event
+ * reader (-e), runs query_script and quits. Quitting closes only its own
+ * handle: testapp-file still holds the graph. Output in query_<k>.log;
+ * r->video from GetTrackInfo (", video ('<codec>', ...)" or ", no video"),
+ * r->vw/vh from GetVideoInfo. */
+static void query_graph(int k, struct result *r)
+{
+	const char *cmdline = tool_path("testapp-cmdline");
+	char script[256], qlog[256], name[32], line[300];
+	pid_t pid;
+	int status = 0;
+	FILE *f;
+
+	r->video = -1;
+	if (cmdline == NULL)
+		return;
+	out_path(script, sizeof(script), "iomquery.txt");
+	f = fopen(script, "w");
+	if (f == NULL)
+		return;
+	fputs(query_script, f);
+	fclose(f);
+	snprintf(name, sizeof(name), "query_%d.log", k + 1);
+	out_path(qlog, sizeof(qlog), name);
+	{
+		char *argv[] = { (char *)cmdline, "-a", "hello6", "-O", "-e", script, NULL };
+
+		pid = proc_start(qlog, argv);
+	}
+	if (pid < 0) {
+		log_msg("  query: could not start %s: %s", cmdline, strerror(errno));
+		return;
+	}
+	if (proc_wait(pid, QUERY_MS, &status) != 0)
+		status = proc_stop(pid);
+
+	f = fopen(qlog, "r");
+	while (f != NULL && fgets(line, sizeof(line), f) != NULL) {
+		const char *p;
+
+		if (strstr(line, ", no video") != NULL)
+			r->video = 0;
+		else if (strstr(line, ", video ('") != NULL)
+			r->video = 1;
+		p = strstr(line, "get_video_info() returned w=");
+		if (p != NULL)
+			sscanf(p, "get_video_info() returned w=%u h=%u", &r->vw, &r->vh);
+	}
+	if (f != NULL)
+		fclose(f);
+	log_msg("  query (%s): video stream %s, video info %ux%u", proc_status_str(status),
+	        r->video < 0 ? "unknown" : r->video ? "yes" : "NO", r->vw, r->vh);
 }
 
 /* testapp-file -o candidates, from the unit's MME outputdevices table.
@@ -278,9 +435,10 @@ static int run_clip(int k, const struct clip *c, struct result *r)
 	char title[96], body[700], name[64];
 	struct grow g, *gp = NULL;
 	pid_t pid, hogs_pid = -1;
-	int status = 0, half, stop = 0, reaped = 0;
+	int status = 0, i, stop = 0, reaped = 0;
 
 	memset(r, 0, sizeof(*r));
+	r->video = -1;
 	snprintf(src, sizeof(src), "%s/clips/%s", sd_card_path(), c->file);
 	log_msg("== video %d/%d: %s (%s)", k + 1, NCLIPS, c->title, c->file);
 	if (player == NULL) {
@@ -366,19 +524,32 @@ static int run_clip(int k, const struct clip *c, struct result *r)
 			first_output = r->output;
 	}
 
+	if (!stop)
+		query_graph(k, r);
 	if (lm_open() != 0) {
 		log_msg("FAIL lm_open for the video displayable");
 	} else {
-		for (half = 0; half < 2 && !stop; half++) {
+		/* Show the displayable first (the layer manager binds its VCAP
+		 * to the video layer), then have dev-videoctrl select the input
+		 * and enable capture, as the HMI does. Capture off again before
+		 * the displayable goes. */
+		for (i = 0; i < NATTEMPTS && !stop; i++) {
+			const struct attempt *a = &attempts[i];
 			unsigned k0;
 
-			show_video(half, r);
-			k0 = knob_events();
-			stop = hold(HALF_MS, gp);
-			r->knob[half] = knob_events() - k0;
-			log_msg("  VCAP %d: %u knob events", half, r->knob[half]);
+			log_msg("  -- attempt %d/%d: %s", i + 1, NATTEMPTS, a->what);
+			show_video(i, r);
+			stop = hold(BIND_MS, gp);
+			if (!stop) {
+				r->vc_rc[i] = vc_capture(a, 1);
+				k0 = knob_events();
+				stop = hold(ATTEMPT_MS, gp);
+				r->knob[i] = knob_events() - k0;
+				log_msg("  %s: %u knob events", a->what, r->knob[i]);
+				vc_capture(a, 0);
+			}
+			hide_video();
 		}
-		hide_video();
 		lm_close();
 	}
 
@@ -407,10 +578,10 @@ done:
 void video_tests(void)
 {
 	struct result res[NCLIPS];
-	int k, n = 0;
+	int k, i, n = 0;
 
 	memset(res, 0, sizeof(res));
-	log_msg("== video tests (%d clips)", NCLIPS);
+	log_msg("== video tests (%d of %d clips)", NCLIPS, NCLIPS);
 	for (k = 0; k < NCLIPS; k++) {
 		n = k + 1;
 		if (run_clip(k, &clips[k], &res[k]))
@@ -421,8 +592,13 @@ void video_tests(void)
 		lm_unregister_displayable(VCID);
 		lm_close();
 	}
+	if (vc_fd >= 0)
+		close(vc_fd);
+	vc_fd = -1;
 
-	summary_add("video: TIME = io-media progress events, knob = turns seen per VCAP");
+	summary_add("video: TIME = io-media progress events, knob = turns seen per attempt");
+	for (i = 0; i < NATTEMPTS; i++)
+		summary_add("  attempt %d: %s", i + 1, attempts[i].what);
 	for (k = 0; k < n; k++) {
 		const struct result *r = &res[k];
 
@@ -430,17 +606,19 @@ void video_tests(void)
 			summary_add("%2d %-22s not run", k + 1, clips[k].file);
 			continue;
 		}
-		summary_add("%2d %-22s TIME %2d pos %4.1fs knob %u/%u reg %s/%s%s",
+		summary_add("%2d %-22s TIME %2d pos %4.1fs vid %s %ux%u knob %u/%u%s",
 		            k + 1, clips[k].file, r->time_events, r->max_pos_ms / 1000.0,
-		            r->knob[0], r->knob[1], r->reg_ok[0] ? "ok" : "NO",
-		            r->reg_ok[1] ? "ok" : "NO", r->url_style ? " file://" : "");
-		log_msg("RESULT video_%d %s: time_events=%d pos_ms=%lld errors=%d knob_vcap0=%u "
-		        "knob_vcap1=%u reg0=%d/%d reg1=%d/%d show0=%d show1=%d player=%s url=%s "
-		        "output=%s",
+		            r->video < 0 ? "?" : r->video ? "yes" : "NO", r->vw, r->vh,
+		            r->knob[0], r->knob[1], r->url_style ? " file://" : "");
+		log_msg("RESULT video_%d %s: time_events=%d pos_ms=%lld errors=%d video=%d "
+		        "video_info=%ux%u player=%s url=%s output=%s",
 		        k + 1, clips[k].file, r->time_events, r->max_pos_ms, r->errors,
-		        r->knob[0], r->knob[1], r->reg_rc[0], r->reg_ok[0], r->reg_rc[1],
-		        r->reg_ok[1], r->show_rc[0], r->show_rc[1],
-		        proc_status_str(r->player_status), r->url_style ? "file://" : "path",
+		        r->video, r->vw, r->vh, proc_status_str(r->player_status),
+		        r->url_style ? "file://" : "path",
 		        r->output < 0 ? "none" : outputs[r->output] ? outputs[r->output] : "default");
+		for (i = 0; i < NATTEMPTS; i++)
+			log_msg("RESULT video_%d attempt %d (%s): knob=%u reg=%d/%d show=%d "
+			        "videoctrl=%d", k + 1, i + 1, attempts[i].what, r->knob[i],
+			        r->reg_rc[i], r->reg_ok[i], r->show_rc[i], r->vc_rc[i]);
 	}
 }

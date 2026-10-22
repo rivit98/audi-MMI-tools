@@ -8,7 +8,8 @@
 # io-media-nvidia accepts ("Baseline profile H.264 bitstreams exceeding
 # level 3 are not supported") and what a phone's MediaCodec would send.
 #
-# hello6 (src/hello6/video.c) has the same list and D (CLIP_S).
+# hello6 (src/hello6/texts.h) has the same list and D (CLIP_S), long
+# enough for hello6's two capture-unit attempts per clip (~25 s).
 set -euo pipefail
 
 if [[ $# -ne 1 || -z "$1" ]]; then
@@ -16,13 +17,13 @@ if [[ $# -ne 1 || -z "$1" ]]; then
   exit 2
 fi
 OUT=$1
-D=8
+D=30
 FPS=25
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 
 # video filter: testsrc2 + label + frame counter
-vf() { # vf <w> <h> <label>
-  echo "testsrc2=size=$1x$2:rate=$FPS:duration=$D,\
+vf() { # vf <w> <h> <label> [seconds]
+  echo "testsrc2=size=$1x$2:rate=$FPS:duration=${4:-$D},\
 drawtext=fontfile=$FONT:text='$3':x=(w-tw)/2:y=h/10:fontsize=h/12:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=6,\
 drawtext=fontfile=$FONT:text='%{n}':x=(w-tw)/2:y=(h-th)/2:fontsize=h/4:fontcolor=yellow:box=1:boxcolor=black@0.7:boxborderw=8"
 }
@@ -37,7 +38,7 @@ SIL44=(-f lavfi -t "$D" -i anullsrc=r=44100:cl=stereo)
 SIL48=(-f lavfi -t "$D" -i anullsrc=r=48000:cl=stereo)
 
 # c1: DVD-style control. MPEG-2 PAL 720x576 + MP2 in MPEG-PS.
-ff -f lavfi -i "$(vf 720 576 'c1 MPEG-2 720x576')" "${SIL48[@]}" \
+ff -f lavfi -i "$(vf 720 576 'c1 MPEG-2 720x576')" -f lavfi -t "$D" -i anullsrc=r=48000:cl=stereo \
   -c:v mpeg2video -b:v 4000k -maxrate 6000k -bufsize 1835k -g 12 -bf 2 -pix_fmt yuv420p \
   -c:a mp2 -b:a 192k -shortest -f vob "$OUT/c1_mpeg2_576.mpg"
 
