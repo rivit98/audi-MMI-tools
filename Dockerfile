@@ -16,7 +16,7 @@ FROM debian:sid-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         gcc-16-sh4-linux-gnu g++-16-sh4-linux-gnu binutils-sh4-linux-gnu make python3 file \
-        gcc libc6-dev liblz4-dev \
+        gcc g++ libc6-dev liblz4-dev \
         libgles-dev libegl-dev \
  && rm -rf /var/lib/apt/lists/*
 
@@ -27,6 +27,7 @@ COPY --from=fwlibs          . /tmp/in/fwlibs/
 COPY sdk/ /opt/mmi-sdk/bin/
 
 RUN chmod +x /opt/mmi-sdk/bin/shle-nto-gcc /opt/mmi-sdk/bin/build-sysroot.sh \
+ && ln -s shle-nto-gcc /opt/mmi-sdk/bin/shle-nto-g++ \
  && /opt/mmi-sdk/bin/build-sysroot.sh /tmp/in /opt/mmi-sdk/sysroot \
  && rm -rf /tmp/in
 

@@ -55,25 +55,14 @@ void model_set_state(enum link_state state, const char *detail)
 	pthread_mutex_unlock(&lock);
 }
 
-void model_add_message(unsigned seq, const char *text, unsigned len)
+void model_set_details(int show)
 {
-	struct model_msg *msg;
-
-	if (len > PROTO_MAX_PAYLOAD)
-		len = PROTO_MAX_PAYLOAD;
 	pthread_mutex_lock(&lock);
-	if (model.nmsgs == MODEL_MAX_MSGS) {          /* drop the oldest */
-		model.first = (model.first + 1) % MODEL_MAX_MSGS;
-		model.nmsgs--;
+	if (model.details != !!show) {
+		log_msg("details over a landscape picture: %s", show ? "on" : "off");
+		model.details = !!show;
+		model.version++;
 	}
-	msg = model_msg_at(&model, model.nmsgs);
-	msg->seq = seq;
-	msg->ms = log_ms();
-	memcpy(msg->text, text, len);
-	msg->text[len] = 0;
-	model.nmsgs++;
-	model.rx_count++;
-	model.version++;
 	pthread_mutex_unlock(&lock);
 }
 

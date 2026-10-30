@@ -21,6 +21,24 @@ at the end.
 
 ## On the car
 
+**2026-10-25** (all ten clips, both ways, 428 s) repeated 21.10 exactly,
+on the log and on the phone video:
+
+- **On screen through VCAP 0 input 1:** clips 1 (MPEG-2 720×576), 2
+  (MPEG-4 640×480 AVI), 3 (H.264 720×480), 5 (H.264 720×336) and 6 (the
+  same without audio). Each played its 30 s to the end (47 TIME events),
+  and the driver turned the knob once for each.
+- **VCAP 1 stayed black for all ten** (no knob turn, nothing on the video).
+- **Never started:** clip 4 (H.264 800×480), 7 (fragmented MP4), 8 (H.264
+  in MPEG-PS) and the growing files 9 and 10 (the same containers, written
+  while playing). Each time io-media's `GetTrackInfo` failed with
+  `iom_errno=0x80002`, no TIME event came, and hello6 killed the player
+  after its cap.
+- During clip 2's VCAP 1 attempt the car was put in reverse: the MMI's
+  own rear-view camera took the screen (with its parking overlay) and gave
+  it back afterwards. hello6 didn't notice; nothing else was affected.
+- The car was driven during the test; nothing depended on that.
+
 **Works**
 - **Video decode and display:** these clips play on screen:
   - MPEG-2 720×576, seen live at 25 fps, 4:3, centred, with correct

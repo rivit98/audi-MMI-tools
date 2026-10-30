@@ -257,7 +257,29 @@ fixed sequence done by the user against the full 27-byte dumps:
   message on release (~200–350 ms later).
 - The HMI still acts on the knobs and buttons while our app is on screen
   (user's observation). Keeping input away from the HMI is open
-  (`docs/TODO.md`).
+  (`docs/TODO.md`). On 2026-10-25 one MENU press in hello7 brought the
+  HMI's main menu up over our displayable, and it stayed on top for the
+  rest of hello7's run (phone video): the HMI re-shows its own screens
+  when it handles a button, our layer doesn't come back by itself.
+- Bytes 16–26 are **state, not controls** [inferred]: byte 16 was `00` on
+  21.10 and `03` in every message on 25.10, byte 26 `11` all of 25.10,
+  and bytes 23/25 changed with no control touched (around the MEDIA step
+  of hello5). hello7 no longer decodes them. 25.10 also brought 29- and
+  33-byte messages with byte 14 = `02`, and unnamed button bits byte 1
+  `0x04`/`0x10`/`0x20` and byte 0 `0x01`/`0x02`/`0x08`/`0x10`/`0x40`
+  (src/hello7/README.md).
+- **Byte 15 looks like the unit's power state** [inferred]. It was `02` in
+  all 282 messages logged up to 28.10. On 2026-10-28, with nothing
+  touched, it went `02` (in a 29-byte message with byte 14 = `02`) →
+  `03` 0.6 s later → `00` 3 s later, and then the run ended:
+  hello5's log, `run.log` and the next app all stopped there. At the
+  first of these messages the phone video has a loud click, the radio
+  stops, and a tone falls from ~1 kHz to ~700 Hz over 2.5 s, like a motor
+  running down. The car most likely switched off (ignition off or the
+  unit going to standby), and the SD writes stopped with it.
+  If that holds, ch8 gives an app a few seconds' warning to save its state
+  and exit. To confirm: switch the ignition off on purpose during a run
+  and compare.
 
 **No key or button stops an app.** Runs end on their own timer, a signal, SD
 removal or the watchdog — a stray press during a test cannot cut it short.
@@ -367,9 +389,9 @@ unit's `testapp-file` does). Not known yet: whether it mixes with the radio
 or replaces it while playing, and what it does while the MME plays music
 (the MME holds `TDM1_51_SAD`).
 
-**Next run: what `TDM1_20_SAD` does next to the car's own audio.** hello5
-now runs steps instead of the group survey (steps `mnvt`; the survey is
-step `g`). Each step plays a ping train, a 0.5 s ping every 2 s, on
+**What `TDM1_20_SAD` does next to the car's own audio.** hello5 runs
+steps instead of the group survey (steps `mntv` since 25.10, `mnvt`
+before; the survey is step `g`). Each step plays a ping train, a 0.5 s ping every 2 s, on
 `TDM1_20_SAD`. hello5 renders the train itself (`src/hello5/pulse.c`) into
 `/tmp`, so the run also shows whether io-media plays an app's file from
 RAM. If it doesn't, the step retries from the card. The silences between
@@ -379,8 +401,49 @@ the pings carry the answer:
 |---|---|---|
 | m | radio on | is the radio still playing between the pings (mixed), or not (replaced)? |
 | n | radio on; hello5's own io-media client plays 9 pings at its own volume 100 / 30 / 100, then 3 one-ping files queued | does an app's own volume work? are the queued files gapless? when does io-media say it is playing? |
-| v | turns the volume knob 3 down, then 3 up, during the pings | do the pings follow the car's volume? (clicks counted on screen and logged) |
 | t | presses MEDIA and starts music | does the output still attach while the MME plays, and does the music keep playing between the pings? |
+| v | turns the volume knob 3 down, then 3 up, during the pings | do the pings follow the car's volume? (clicks counted on screen and logged) |
+
+**2026-10-25 (steps `mnvt`), from the phone video's sound** (the listener
+heard only step `m`; the 880 Hz pings were found in the recording at the
+times the screen showed them):
+
+- `m`: all 6 pings audible, ~15 dB over the cabin noise; `testapp-file`
+  plays our file from `/tmp`. The radio isn't audible in the video, so
+  mix vs replace is still open.
+- `n`: all 12 pings audible at `m`'s level: **hello5's own io-media client
+  (`iom.c`) plays sound** through `TDM1_20_SAD`. STATUS playing +24 ms
+  after play, first TIME +480 ms. Volume 30 changed the level by ~3 dB at
+  most (not conclusive; the next run uses 0). Queued files play, but
+  **each adds ~350 ms of silence**: no gapless queueing by
+  `INPUT_EOF`/attach. io-media sends **one `FINISHED` per queue**, not per
+  file; hello5 misread that and replayed the last file (fixed).
+- `v`: ping 1 audible, then the knob was turned fast (148 detents down,
+  37 up counted) and pings 2–10 were gone: following the volume, or the
+  volume at ~0, can't be told apart.
+- `t`: no pings and no music audible, most likely the volume still down
+  from `v`. Hence the new order, `v` last.
+
+**2026-10-28 (steps `mntv`, ended during `t`'s countdown), from the phone
+video's sound** (`src/hello5/README.md` has the details). The radio was
+audible this time, music with a bass beat:
+
+- **`TDM1_20_SAD` replaces the radio, it doesn't mix.** For the whole
+  12 s of step `m`'s file, everything between the pings is at the
+  recording's noise floor (15–25 dB below the radio). The radio comes back
+  ~0.2 s after the file ends. In step `n` the radio's bass alone faded
+  back in from ~10 s on, under the pings. That is unexplained.
+- **The graph's volume `devctl` has no effect on this output.** At volume
+  0, pings 4–6 were as loud as the rest (±0.5 dB). Volume 30 on 25.10
+  read the same. Candidate: the mixer URL's `volume_ctrl` key
+  [unverified].
+- **Each queued file adds ~350 ms of silence** (2.38/2.39/2.33 s instead
+  of 2.0), the same as on 25.10.
+
+What this means for an app with sound: it can play through
+`TDM1_20_SAD`, but the user's radio or music pauses while it does, and
+its level is the car's volume. That suits short prompts and a
+full-screen media app, but not background sound over the radio.
 
 **io-media from our own code (from `testapp-file`'s disassembly, P1001
 efs-system).** `testapp-file` links no io-media library (NEEDED is only

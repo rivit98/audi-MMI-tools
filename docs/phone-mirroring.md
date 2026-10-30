@@ -700,3 +700,19 @@ into a format io-media will start on. In order:
 Option 1 (raw tiles over AOA) does not depend on any of this. With
 usb_tx_test working on the car (21.10, `docs/usb-stack.md`), it is the
 quickest path to a first mirror.
+
+### 7.6 25.10 results: 21.10 repeated
+
+Run `dev/25.10.2026/` (hello6 phase `v`, after hello8 and hello5), with a
+phone video this time. The same ten clips, both attempts each: the result
+is 21.10's, clip for clip. Clips 1, 2, 3, 5 and 6 played their 30 s (47
+TIME events) and were **on screen through VCAP 0 input 1**, one knob
+click each and visible in the video (the moving test picture with its
+name and counter). VCAP 1 stayed black for all ten. Clips 4 and 7–10
+failed at once with `iom_errno 0x80002` and no TIME event, as before.
+
+Nothing new for option 2a, then: the container question above is still
+the open one. The same day the screen streaming over AOA (option 1's
+transport, JPEG pictures) was tried for the first time and sent no
+picture, because of a bug in the phone app's link handling, fixed since
+(`src/usb_tx_test/README.md`).

@@ -2,7 +2,7 @@
  * hello5 - sound from our app: which audio output reaches the speakers and
  * how it behaves there. (Its knob/button log, stage 2, is hello7 now.)
  *
- * hello5 runs a list of steps (argument "steps", default "mnvt"), in
+ * hello5 runs a list of steps (argument "steps", default "mntv"), in
  * order. Steps m, n, v and t play a ping train that hello5 renders itself
  * (pulse.c: a 0.5 s ping every 2 s) on the one output heard so far, mixer
  * m2 DSPOUT_TDM1_20_SAD: m, v and t through the unit's testapp-file, n
@@ -12,7 +12,7 @@
  * answer is:
  *   m  radio on: is the radio still playing between the pings (our stream
  *      mixed in), or silent (our stream replaces it while it plays)?
- *   n  radio on, our own graph: 9 pings with our volume turned down to 30
+ *   n  radio on, our own graph: 9 pings with our volume turned down to 0
  *      for pings 4-6 (does an app's own volume work?), then 3 one-ping
  *      files queued one after another the way testapp-file chains its
  *      URLs (do they keep the 2 s beat, i.e. can an app queue sound
@@ -81,6 +81,21 @@
  *          steps: m, n, v and t ask what the TDM1 2.0 SAD output does
  *          next to the radio, the volume knob and the music, and whether
  *          our own client can drive it.
+ *   25.10  steps m, n, v, t (the phone video's sound, 880 Hz band, is the
+ *          better witness here than the listener, who heard only step m):
+ *          m  all 6 pings recorded, ~15 dB over the cabin noise.
+ *          n  all 12 pings recorded at step m's level: our own io-media
+ *             client plays. Volume 30 for pings 4-6 was ~3 dB down at most
+ *             and pings 7-9 did not come back up: not conclusive, so it
+ *             is 0 now. Each queued file added ~350 ms of silence (pings
+ *             10-12 2.35 s apart): no gapless queueing. hello5 then
+ *             replayed the last file on FINISHED (fixed: one FINISHED per
+ *             queue, not per file).
+ *          v  ping 1 recorded; the knob was turned at once and counted 148
+ *             clicks down, 37 up; pings 2-10 not recorded. So the pings
+ *             follow the car volume, or the volume ended at 0.
+ *          t  nothing recorded, probably because v left the volume down.
+ *             So v now runs last (default "mntv").
  *
  * For an io-audio device each chime also measures whether the hardware
  * consumed it: after the write, snd_pcm_plugin_prepare() is polled until it
@@ -111,7 +126,7 @@
  * (src/common/quit.c). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
- *   steps: any of "mnvtg", run in that order (default mnvt)
+ *   steps: any of "mnvtg", run in that order (default mntv)
  *   outputs: step g's groups, comma-separated, one group each: mK =
  *   mixers[K], a number = an io-audio dindex (default m2,m1,m6,m4,m7)
  * Step g plays <sd_path>/beep.wav.
@@ -135,7 +150,7 @@
 #include "iom.h"
 #include "pulse.h"
 
-#define DEFAULT_STEPS   "mnvt"
+#define DEFAULT_STEPS   "mntv"
 #define DEFAULT_OUTPUTS "m2,m1,m6,m4,m7"
 #define MAX_GROUPS      6
 #define LEAD_MS         2000    /* silence before the first group */
@@ -843,7 +858,8 @@ static int play_testapp(const struct step *s, const char *log_file, struct play 
 
 /* ---- step n: the train through our own io-media client (iom.c) ---- */
 
-#define NATIVE_LOW_VOLUME 30    /* for pings 4-6 */
+#define NATIVE_LOW_VOLUME 0     /* for pings 4-6: 30 was not clearly
+                                   quieter on 2026-10-25, 0 is decisive */
 #define NATIVE_TIME_MS    500   /* TIME event period */
 
 static uint64_t rd64(const unsigned char *p)
@@ -869,7 +885,7 @@ struct native {
 	const char *chain_file;
 	unsigned    playing_ms; /* first STATUS state 4 (playing), since play */
 	unsigned    to_attach;  /* chain inputs still to attach */
-	unsigned    to_finish;  /* tracks still to finish */
+	int         finished;   /* FINISHED: the whole queue has played */
 	uint64_t    next_track;
 };
 
@@ -907,8 +923,7 @@ static void native_event(struct native *n, uint32_t type,
 		rc = iom_attach_input(&n->g, n->next_track, n->chain_file);
 		if (rc != EOK) {
 			native_error(&n->g, "attach input", rc);
-			n->to_finish -= n->to_attach;   /* those never come */
-			n->to_attach = 0;
+			n->to_attach = 0;               /* those never come */
 			return;
 		}
 		log_msg("step n: +%u ms queued track %llu", t,
@@ -917,13 +932,13 @@ static void native_event(struct native *n, uint32_t type,
 		n->to_attach--;
 		return;
 	case IOM_EV_FINISHED:
-		if (n->to_finish > 0)
-			n->to_finish--;
-		log_msg("step n: +%u ms FINISHED, %u track(s) to go", t, n->to_finish);
-		if (n->to_finish > 0 && (rc = iom_play(&n->g)) != EOK) {
-			native_error(&n->g, "play next", rc);
-			n->to_finish = 0;
-		}
+		/* One FINISHED for the whole queue: inputs attached on INPUT_EOF
+		 * play on in the same session. (On 2026-10-25 hello5 expected one
+		 * per track and played again on it, which replayed the last
+		 * track until the cap.) */
+		n->finished = 1;
+		log_msg("step n: +%u ms FINISHED%s", t,
+		        n->to_attach ? ", inputs never attached" : "");
 		return;
 	case IOM_EV_ERROR:
 		native_error(&n->g, "ERROR event", EIO);
@@ -950,7 +965,6 @@ static int native_play(const char *file, const char *chain_file,
 	memset(&n, 0, sizeof(n));
 	n.chain_file = chain_file;
 	n.to_attach = chain;
-	n.to_finish = 1 + chain;
 	n.next_track = 2;
 	snprintf(name, sizeof(name), "hello5_%d_%u", getpid(), ++graphs);
 	rc = iom_create(&n.g, name);
@@ -992,7 +1006,7 @@ static int native_play(const char *file, const char *chain_file,
 		return 0;
 	}
 	log_msg("step n: play");
-	while (n.to_finish > 0) {
+	while (!n.finished) {
 		t = log_ms() - t0;
 		if (t >= clip + STEP_SLACK_MS || quit_poll() != QUIT_NONE) {
 			r->stopped = 1;
@@ -1031,7 +1045,7 @@ static int native_play(const char *file, const char *chain_file,
 			nap(20);
 	}
 	r->run_ms = log_ms() - t0;
-	r->eof = n.to_finish == 0 && !r->stopped;
+	r->eof = n.finished && n.to_attach == 0 && !r->stopped;
 	cur_volume = -1;
 	iom_close(&n.g);
 	log_msg("step n: done after %u ms (pings %u ms), STATUS playing at +%u ms%s",
@@ -1058,12 +1072,13 @@ static const struct step step_list[] = {
 	  play_testapp },
 	{ 'n', "hello5's own player",
 	  "Pings every 2 s for 24 s, played by hello5 itself this time. Pings "
-	  "4, 5 and 6 should be QUIETER: hello5 turns its own volume down.",
-	  "LISTEN: are pings 4-6 quieter? Do 10-12 keep the 2 s beat?", 8, 9, 3,
+	  "4, 5 and 6 should be SILENT: hello5 turns its own volume to 0.",
+	  "LISTEN: are pings 4-6 missing? Do 10-12 keep the 2 s beat?", 8, 9, 3,
 	  play_native },
 	{ 'v', "volume knob",
-	  "Pings every 2 s for 20 s. While they play, turn the VOLUME knob 3 "
-	  "clicks DOWN, wait a few pings, then 3 clicks UP.",
+	  "Pings every 2 s for 20 s. While they play, turn the VOLUME knob "
+	  "slowly, ONE click at a time: 3 clicks DOWN, wait a few pings, then 3 "
+	  "clicks UP.",
 	  "LISTEN: do the pings get quieter and louder with the radio?", 10, 10, 0,
 	  play_testapp },
 	{ 't', "music",

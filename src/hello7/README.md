@@ -10,16 +10,39 @@ Knob and button tester. It decodes every `/dev/ipc/ch8` message
 Any bit no known control explains shows as `unknown b<byte> 0x<bits>`. To
 name a new button, press it on its own.
 
-It is a tool, not a test, so it isn't in the default run.
+It is a tool, not a test, so it isn't in the default run. It was in the
+default run once (2026-10-25) and taken out again: the MMI handles every
+button too, and one press of MENU switched the screen to the MMI's own
+menus for the rest of hello7's run.
 
 - **Run:** `hello7 <sd_path> [seconds]` (default 60), or
   `make sd SD_APPS="hello7 ..."`.
 - **Output:** `hello7.log`: every message in full (27 bytes) with its
   decoding and the time since the previous one, then `RESULT` counts.
-- **Status:** hello7 itself has not run on the car yet. The facts below
-  come from the same ch8 log in hello5.
+- **Status:** ran once, 2026-10-25 (below). The older facts come from the
+  same ch8 log in hello5.
 
 ## On the car
+
+**2026-10-25, first run (60 s, 44 messages):**
+- Decoded right: main knob right/left (1 each), volume up 2 / down 4,
+  MENU (byte 3 `0x04`), top-left soft key (byte 1 `0x02`), `b1 0x40` (5),
+  `b1 0x80` (1).
+- New bits, one press each: byte 1 `0x04`, `0x10`, `0x20`; byte 0 `0x10`,
+  `0x08`, `0x01`, `0x02`, `0x40`. Nobody wrote down which button was
+  which, so they are still unnamed.
+- Three longer messages (29 and 33 bytes) with byte 14 = `02` instead of
+  `01`, one right after a button release.
+- **Every** message had byte 16 = `0x03` (it was `0x00` on 21.10) and
+  byte 26 = `0x11`, in hello5's log of the same day too, where bytes 23
+  and 25 also changed with no control touched. hello7 showed them as
+  "unknown" bits, so the 112 "unknown" presses are mostly those. Bytes
+  16–26 look like state of the unit, not controls [inferred]: `keys.c` no
+  longer decodes them (they stay in the raw log).
+- **The MMI took the screen back:** after the MENU press at +18.7 s the
+  MMI's main menu came up over hello7 (phone video), and the following
+  presses moved through the MMI's own screens (Setup MMI, radio, Audi
+  drive select) until hello7 ended. hello7 kept logging the whole time.
 
 **Works**
 - **Reading `/dev/ipc/ch8`:** messages are 27 bytes, and bytes 14–15 are

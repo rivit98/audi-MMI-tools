@@ -6,27 +6,26 @@ package mmi3g.usbtx
  *
  *   type u8 | len u16 LE | payload[len]      (len <= MAX_PAYLOAD)
  *
- *   HELLO 0x01 (both, "who I am", answered by HELLO_REPLY), TEXT 0x02
- *   (phone: seq u16 LE + UTF-8), ACK 0x03 (MMI: seq u16 LE),
- *   HELLO_REPLY 0x04 (both).
+ *   HELLO 0x01 (both, "who I am", answered by HELLO_REPLY), HELLO_REPLY
+ *   0x04 (both). 0x02 / 0x03 were TEXT / ACK, retired on 2026-10-25.
  *
  *   Video, one JPEG per picture (all integers LE):
  *   VIDEO_CAPS 0x05 (MMI: landW u16, landH u16, portW u16, portH u16,
  *   maxBytes u32, formats u8), VIDEO_START 0x06 (phone: id u16, w u16,
  *   h u16, format u8, size u32), VIDEO_DATA 0x07 (phone: id u16 + bytes),
  *   VIDEO_ACK 0x08 (MMI: id u16, status u8, decodeMs u16), VIDEO_STOP 0x09
- *   (phone, empty).
+ *   (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 = the MMI's
+ *   status bar over a landscape picture, 0 = the picture alone).
  */
 object Proto {
     const val HELLO = 0x01
-    const val TEXT = 0x02
-    const val ACK = 0x03
     const val HELLO_REPLY = 0x04
     const val VIDEO_CAPS = 0x05
     const val VIDEO_START = 0x06
     const val VIDEO_DATA = 0x07
     const val VIDEO_ACK = 0x08
     const val VIDEO_STOP = 0x09
+    const val VIDEO_DETAILS = 0x0A
 
     const val FMT_JPEG = 1
 
@@ -37,7 +36,6 @@ object Proto {
 
     const val HDR = 3
     const val MAX_PAYLOAD = 2048
-    const val MAX_TEXT_BYTES = MAX_PAYLOAD - 2
 
     fun encode(type: Int, payload: ByteArray): ByteArray {
         require(payload.size <= MAX_PAYLOAD) { "payload ${payload.size} > $MAX_PAYLOAD" }
@@ -48,16 +46,6 @@ object Proto {
         payload.copyInto(out, HDR)
         return out
     }
-
-    /** TEXT frame, or null if the UTF-8 text is over MAX_TEXT_BYTES. */
-    fun textOrNull(seq: Int, text: String): ByteArray? {
-        val utf8 = text.toByteArray(Charsets.UTF_8)
-        if (utf8.size > MAX_TEXT_BYTES) return null
-        return encode(TEXT, byteArrayOf((seq and 0xff).toByte(), ((seq shr 8) and 0xff).toByte()) + utf8)
-    }
-
-    fun text(seq: Int, text: String): ByteArray =
-        requireNotNull(textOrNull(seq, text)) { "text too long" }
 
     /** The boxes a landscape / portrait picture must fit in (VIDEO_CAPS). */
     data class VideoCaps(val landW: Int, val landH: Int, val portW: Int, val portH: Int,
@@ -73,6 +61,9 @@ object Proto {
 
     fun videoAckOrNull(p: ByteArray): VideoAck? =
         if (p.size < 5) null else VideoAck(u16(p, 0), p[2].toInt() and 0xff, u16(p, 3))
+
+    fun videoDetails(show: Boolean): ByteArray =
+        encode(VIDEO_DETAILS, byteArrayOf(if (show) 1 else 0))
 
     /** One picture as VIDEO_START + VIDEO_DATA frames, back to back. */
     fun picture(id: Int, w: Int, h: Int, jpeg: ByteArray): ByteArray {

@@ -14,16 +14,16 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
+import android.os.SystemClock
 import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ScrollView
+import android.widget.CompoundButton
+import android.widget.SeekBar
 import android.widget.TextView
 
 /**
  * usb_tx_test sender: connects to the MMI (an Android Open Accessory host
- * running src/usb_tx_test) and sends the typed text.
+ * running src/usb_tx_test) and streams the phone's screen to it. (Typed
+ * text messages were dropped on 2026-10-25: src/usb_tx_test/README.md.)
  *
  * Android starts this activity when the MMI switches the phone into
  * accessory mode (USB_ACCESSORY_ATTACHED, matched by
@@ -31,9 +31,20 @@ import android.widget.TextView
  * opened by hand it looks for an already attached accessory in onResume.
  *
  * "Stream screen" asks for screen capture and starts CaptureService, which
- * sends the screen to the MMI (~2 pictures a second) through the link
- * published in [Streaming.link]. Back only moves the app to the background,
+ * sends the screen to the MMI (at most "Max fps" pictures a second, 5 by
+ * default; the MMI's acks slow it down further) through the link
+ * published in [Streaming.link]. "Details on the MMI" puts the MMI's status
+ * bar (state, fps, timings) over a landscape picture; off, the picture has
+ * the screen to itself. Portrait always shows the MMI's status panel. The
+ * switch is remembered and sent again on every connection (the MMI starts
+ * with it off). Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
+ *
+ * Turning the phone must not recreate the activity (configChanges in the
+ * manifest): on 2026-10-25 every rotation closed the link and opened a new
+ * one, and the old activity's late onClosed then cleared Streaming.link,
+ * so the capture service waited for an MMI that was connected all along.
+ * The link setter, too, only ever clears the link it set itself.
  */
 class MainActivity : Activity(), AccessoryLink.Listener {
     private enum class Status(val colour: Int, val title: String) {
@@ -46,11 +57,9 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var usb: UsbManager
     private lateinit var statusView: TextView
     private lateinit var detailView: TextView
-    private lateinit var input: EditText
-    private lateinit var sendButton: Button
-    private lateinit var sentList: LinearLayout
-    private lateinit var sentScroll: ScrollView
     private lateinit var streamButton: Button
+    private lateinit var detailsSwitch: CompoundButton
+    private lateinit var fpsLabel: TextView
     private lateinit var videoView: TextView
     private val ui = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
@@ -62,11 +71,14 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     private var link: AccessoryLink? = null
         set(value) {
+            if (value != null || Streaming.link === field) Streaming.link = value
             field = value
-            Streaming.link = value
         }
     private var status = Status.WAITING
-    private val sentViews = HashMap<Int, TextView>()
+    // pictures the MMI showed a second, over ~2 s windows
+    private var rateShown = 0
+    private var rateSince = 0L
+    private var rate = 0.0
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -90,14 +102,32 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         usb = getSystemService(Context.USB_SERVICE) as UsbManager
         statusView = findViewById(R.id.status)
         detailView = findViewById(R.id.detail)
-        input = findViewById(R.id.input)
-        sendButton = findViewById(R.id.send)
-        sentList = findViewById(R.id.sent_list)
-        sentScroll = findViewById(R.id.sent_scroll)
         streamButton = findViewById(R.id.stream)
         videoView = findViewById(R.id.video_status)
-        sendButton.setOnClickListener { send() }
         streamButton.setOnClickListener { toggleStreaming() }
+        detailsSwitch = findViewById(R.id.details)
+        detailsSwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(PREF_DETAILS, false)
+        detailsSwitch.setOnCheckedChangeListener { _, on ->
+            getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_DETAILS, on).apply()
+            link?.sendDetails(on)
+        }
+        fpsLabel = findViewById(R.id.fps_label)
+        Streaming.maxFps = getPreferences(MODE_PRIVATE).getInt(PREF_FPS, CaptureService.DEFAULT_FPS)
+            .coerceIn(CaptureService.MIN_FPS, CaptureService.MAX_FPS)
+        showFps()
+        findViewById<SeekBar>(R.id.fps).apply {
+            max = CaptureService.MAX_FPS - CaptureService.MIN_FPS     // no setMin before API 26
+            progress = Streaming.maxFps - CaptureService.MIN_FPS
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                    Streaming.maxFps = value + CaptureService.MIN_FPS
+                    getPreferences(MODE_PRIVATE).edit().putInt(PREF_FPS, Streaming.maxFps).apply()
+                    showFps()
+                }
+                override fun onStartTrackingTouch(bar: SeekBar) {}
+                override fun onStopTrackingTouch(bar: SeekBar) {}
+            })
+        }
 
         val filter = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED)
@@ -158,21 +188,34 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         }
     }
 
+    private fun showFps() {
+        fpsLabel.text = getString(R.string.max_fps, Streaming.maxFps)
+    }
+
     private fun showVideo() {
         val l = link
         val caps = l?.videoCaps
         streamButton.text = getString(if (Streaming.running) R.string.stream_stop else R.string.stream_start)
         streamButton.isEnabled = Streaming.running || caps != null
+        detailsSwitch.isEnabled = caps != null
         videoView.text = when {
             Streaming.running && l != null -> {
                 val v = l.video
-                "Video: ${Streaming.status}; sent ${v.sent}, shown ${v.shown}, " +
+                val now = SystemClock.elapsedRealtime()
+                if (v.shown < rateShown || rateSince == 0L) {
+                    rateShown = v.shown; rateSince = now
+                } else if (now - rateSince >= 2000) {
+                    rate = (v.shown - rateShown) * 1000.0 / (now - rateSince)
+                    rateShown = v.shown; rateSince = now
+                }
+                "Video: ${Streaming.status}; %.1f fps (max ${Streaming.maxFps}); ".format(rate) +
+                    "sent ${v.sent}, shown ${v.shown}, " +
                     "bad ${v.bad}, dropped ${v.dropped}; MMI decode ${v.decodeMs} ms, " +
                     "round trip ${v.roundTripMs} ms"
             }
             Streaming.running -> "Video: ${Streaming.status}"
             l == null -> "Video: not connected"
-            caps == null -> "Video: this MMI app shows text only"
+            caps == null -> "Video: the MMI app sent no video caps (an old usb_tx_test?)"
             else -> "Video: off. MMI shows up to ${caps.landW}x${caps.landH} " +
                 "(landscape) / ${caps.portW}x${caps.portH} (portrait)"
         }
@@ -218,50 +261,23 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         setStatus(Status.OPEN, "${l.description}: open usb_tx_test on the MMI (SD card)")
     }
 
-    private fun send() {
-        val l = link ?: return
-        val text = input.text.toString()
-        if (text.isEmpty()) return
-        val seq = l.sendText(text)
-        if (seq < 0) {
-            input.error = "Too long: max ${Proto.MAX_TEXT_BYTES} bytes of UTF-8"
-            return
-        }
-        input.text.clear()
-        addSent(seq, text)
-    }
-
-    private fun addSent(seq: Int, text: String) {
-        val v = TextView(this).apply {
-            setPadding(0, 8, 0, 8)
-            textSize = 16f
-            this.text = "…  #$seq  $text"
-        }
-        sentViews[seq] = v
-        sentList.addView(v)
-        sentScroll.post { sentScroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
     private fun setStatus(s: Status, detail: String) {
         status = s
         statusView.text = s.title
         statusView.setBackgroundColor(s.colour)
         statusView.setTextColor(Color.WHITE)
         detailView.text = detail
-        sendButton.isEnabled = s == Status.OPEN || s == Status.CONNECTED
     }
 
     // AccessoryLink.Listener (main thread)
 
     override fun onPeerHello(peer: String) {
         setStatus(Status.CONNECTED, peer)
+        link?.sendDetails(detailsSwitch.isChecked)
     }
 
-    override fun onAck(seq: Int) {
-        sentViews.remove(seq)?.let { it.text = "✓" + it.text.toString().removePrefix("…") }
-    }
-
-    override fun onClosed(reason: String) {
+    override fun onClosed(closed: AccessoryLink, reason: String) {
+        if (closed !== link) return     // an older link, already replaced
         link = null
         setStatus(Status.WAITING, "Disconnected: $reason. Plug the phone into the car's USB port")
     }
@@ -269,5 +285,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     companion object {
         private const val ACTION_PERMISSION = "mmi3g.usbtx.USB_PERMISSION"
         private const val REQ_CAPTURE = 1
+        private const val PREF_DETAILS = "details"
+        private const val PREF_FPS = "max_fps"
     }
 }

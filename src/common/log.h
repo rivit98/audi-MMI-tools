@@ -13,5 +13,8 @@ void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* Milliseconds since log_open(), CLOCK_MONOTONIC. */
 unsigned log_ms(void);
+/* The same in microseconds. Wraps after ~71 min: use differences only. As
+ * fine as the system clock (clock_getres; the QNX tick, often 1 ms). */
+unsigned log_us(void);
 
 #endif

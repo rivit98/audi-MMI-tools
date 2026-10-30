@@ -24,6 +24,15 @@ unsigned log_ms(void)
 	return ms_since(&log_t0);
 }
 
+unsigned log_us(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned)((now.tv_sec - log_t0.tv_sec) * 1000000 +
+	                  (now.tv_nsec - log_t0.tv_nsec) / 1000);
+}
+
 int log_open(const char *path)
 {
 	clock_gettime(CLOCK_MONOTONIC, &log_t0);

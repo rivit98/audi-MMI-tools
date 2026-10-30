@@ -3,6 +3,7 @@ package mmi3g.usbtx
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ProtoTest {
@@ -23,38 +24,43 @@ class ProtoTest {
     fun encodeMatchesTheCLayout() {
         // type u8 | len u16 LE | payload  (src/usb_tx_test/proto.h)
         assertArrayEquals(
-            byteArrayOf(2, 4, 0, 5, 0, 'h'.code.toByte(), 'i'.code.toByte()),
-            Proto.encode(Proto.TEXT, byteArrayOf(5, 0, 'h'.code.toByte(), 'i'.code.toByte())),
+            byteArrayOf(7, 4, 0, 5, 0, 'h'.code.toByte(), 'i'.code.toByte()),
+            Proto.encode(Proto.VIDEO_DATA, byteArrayOf(5, 0, 'h'.code.toByte(), 'i'.code.toByte())),
         )
-        assertArrayEquals(byteArrayOf(3, 0, 0), Proto.encode(Proto.ACK, ByteArray(0)))
+        assertArrayEquals(byteArrayOf(9, 0, 0), Proto.encode(Proto.VIDEO_STOP, ByteArray(0)))
     }
 
     @Test
-    fun textFrameCarriesSeqAndUtf8() {
-        val f = Proto.text(0x0102, "zażółć")
+    fun videoDetailsIsOneByte() {
+        assertArrayEquals(byteArrayOf(0x0A, 1, 0, 1), Proto.videoDetails(true))
+        assertArrayEquals(byteArrayOf(0x0A, 1, 0, 0), Proto.videoDetails(false))
+    }
+
+    @Test
+    fun helloCarriesUtf8() {
+        val f = Proto.encode(Proto.HELLO, "zażółć".toByteArray())
         val got = decodeAll(Proto.Decoder(), f, 1)
         assertEquals(1, got.size)
-        assertEquals(Proto.TEXT, got[0].type)
-        assertEquals(0x0102, Proto.u16(got[0].payload, 0))
-        assertEquals("zażółć", String(got[0].payload, 2, got[0].payload.size - 2, Charsets.UTF_8))
+        assertEquals(Proto.HELLO, got[0].type)
+        assertEquals("zażółć", String(got[0].payload, Charsets.UTF_8))
     }
 
     @Test
-    fun textTooLongIsRejected() {
-        assertNull(Proto.textOrNull(1, "x".repeat(Proto.MAX_TEXT_BYTES + 1)))
-        assertEquals(Proto.HDR + Proto.MAX_PAYLOAD, Proto.textOrNull(1, "x".repeat(Proto.MAX_TEXT_BYTES))!!.size)
-        // a 2-byte character that would cross the limit
-        assertNull(Proto.textOrNull(1, "x".repeat(Proto.MAX_TEXT_BYTES - 1) + "ż"))
+    fun payloadOverMaxIsRejected() {
+        assertEquals(Proto.HDR + Proto.MAX_PAYLOAD, Proto.encode(Proto.HELLO, ByteArray(Proto.MAX_PAYLOAD)).size)
+        assertThrows(IllegalArgumentException::class.java) {
+            Proto.encode(Proto.HELLO, ByteArray(Proto.MAX_PAYLOAD + 1))
+        }
     }
 
     @Test
     fun mergedAndSplitFrames() {
         val bytes = Proto.encode(Proto.HELLO, "mmi".toByteArray()) +
-            Proto.encode(Proto.ACK, byteArrayOf(7, 0)) +
+            Proto.encode(Proto.VIDEO_ACK, byteArrayOf(7, 0)) +
             Proto.encode(Proto.HELLO_REPLY, ByteArray(0))
         for (chunk in listOf(1, 2, 5, bytes.size)) {
             val got = decodeAll(Proto.Decoder(), bytes, chunk)
-            assertEquals(listOf(Proto.HELLO, Proto.ACK, Proto.HELLO_REPLY), got.map { it.type })
+            assertEquals(listOf(Proto.HELLO, Proto.VIDEO_ACK, Proto.HELLO_REPLY), got.map { it.type })
             assertEquals("mmi", String(got[0].payload))
             assertEquals(7, Proto.u16(got[1].payload, 0))
             assertEquals(0, got[2].payload.size)
@@ -64,12 +70,12 @@ class ProtoTest {
     @Test
     fun oversizedFrameIsSkipped() {
         val big = Proto.MAX_PAYLOAD + 10
-        val bad = byteArrayOf(Proto.TEXT.toByte(), (big and 0xff).toByte(), (big shr 8).toByte()) +
+        val bad = byteArrayOf(Proto.VIDEO_DATA.toByte(), (big and 0xff).toByte(), (big shr 8).toByte()) +
             ByteArray(big) { 0x55 }
         val dec = Proto.Decoder()
-        val got = decodeAll(dec, bad + Proto.encode(Proto.ACK, byteArrayOf(9, 0)), 700)
+        val got = decodeAll(dec, bad + Proto.encode(Proto.VIDEO_ACK, byteArrayOf(9, 0)), 700)
         assertEquals(1, dec.oversized)
-        assertEquals(listOf(Proto.ACK), got.map { it.type })
+        assertEquals(listOf(Proto.VIDEO_ACK), got.map { it.type })
         assertEquals(9, Proto.u16(got[0].payload, 0))
     }
 

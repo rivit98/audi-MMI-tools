@@ -27,9 +27,13 @@ import java.io.ByteArrayOutputStream
 
 /**
  * Screen streaming to the MMI: the phone's screen (MediaProjection) as
- * JPEG pictures, at most every [INTERVAL_MS] and never more than one in
- * flight (AccessoryLink.sendPicture). Runs as a foreground service so it
- * keeps going while another app is in front - that is the point of it.
+ * JPEG pictures, at most [Streaming.maxFps] a second and never more than
+ * AccessoryLink.MAX_IN_FLIGHT in flight. The next picture goes as soon as
+ * one in flight is acked and 1/maxFps has passed since the last was sent,
+ * so a slow MMI sets the rate itself (a fixed tick would skip every other
+ * one when an ack takes a little longer than the interval). Runs as a
+ * foreground service so it keeps going while another app is in front -
+ * that is the point of it.
  *
  * The capture is a virtual display mirroring the screen, sized to fit the
  * MMI's box for the current orientation (VideoFit); a rotation resizes it.
@@ -47,6 +51,7 @@ class CaptureService : Service() {
     private var padded: Bitmap? = null
     private var nextId = 1
     private var last: Picture? = null
+    private var lastSent = false
     private var lastLink: AccessoryLink? = null
 
     private class Picture(val w: Int, val h: Int, val jpeg: ByteArray)
@@ -115,17 +120,21 @@ class CaptureService : Service() {
 
     // --- capture thread ----------------------------------------------------
 
+    /** Sent a picture: wait out the fps limit. Else (MMI has its fill, screen
+     * unchanged, no MMI) look again shortly. */
     private fun tick() {
+        var next = POLL_MS
         try {
-            capture()
+            if (capture()) next = 1000L / Streaming.maxFps.coerceIn(MIN_FPS, MAX_FPS)
         } catch (e: RuntimeException) {
             Log.w(TAG, "capture", e)
             Streaming.status = "capture error: ${e.message}"
         }
-        if (projection != null) handler.postDelayed(::tick, INTERVAL_MS)
+        if (projection != null) handler.postDelayed(::tick, next)
     }
 
-    private fun capture() {
+    /** True if a picture was sent. */
+    private fun capture(): Boolean {
         val link = Streaming.link
         val caps = link?.videoCaps
         if (link == null || caps == null || !caps.jpeg) {
@@ -134,12 +143,15 @@ class CaptureService : Service() {
                 caps == null -> "MMI app has no video (old usb_tx_test?)"
                 else -> "MMI takes no JPEG"
             }
-            return
+            return false
         }
         val screen = screenSize()
         val want = VideoFit.fit(screen.w, screen.h, caps)
         if (want != size) resize(want)
-        val r = reader ?: return
+        val r = reader ?: return false
+        // Not while the MMI has its fill: an image taken now could not be
+        // sent, and a static screen makes no new one to replace it.
+        if (!link.readyForPicture()) return false
 
         val pic = r.acquireLatestImage()?.use { image ->
             val plane = image.planes[0]
@@ -158,17 +170,20 @@ class CaptureService : Service() {
         }
         // A static screen makes no new images: a new link (replug) gets the
         // last picture again, otherwise the MMI keeps the one it shows.
-        val toSend = pic ?: last.takeIf { link !== lastLink } ?: return
+        val toSend = pic ?: last.takeIf { link !== lastLink || !lastSent } ?: return false
+        last = toSend
+        lastSent = false
         if (toSend.jpeg.size > caps.maxBytes) {
             Streaming.status = "picture ${toSend.jpeg.size} B > MMI max ${caps.maxBytes} B"
-            return
+            lastSent = true                  // never fits: don't retry it
+            return false
         }
-        if (link.sendPicture(nextId, toSend.w, toSend.h, toSend.jpeg)) {
-            nextId = if (nextId == 0xffff) 1 else nextId + 1
-            lastLink = link
-            Streaming.status = "${toSend.w}x${toSend.h}, ${toSend.jpeg.size / 1024} KB"
-        }
-        last = toSend
+        if (!link.sendPicture(nextId, toSend.w, toSend.h, toSend.jpeg)) return false
+        nextId = if (nextId == 0xffff) 1 else nextId + 1
+        lastLink = link
+        lastSent = true
+        Streaming.status = "${toSend.w}x${toSend.h}, ${toSend.jpeg.size / 1024} KB"
+        return true
     }
 
     private fun screenSize(): VideoFit.Size {
@@ -231,7 +246,10 @@ class CaptureService : Service() {
         private const val ACTION_STOP = "mmi3g.usbtx.STOP_CAPTURE"
         private const val EXTRA_CODE = "code"
         private const val EXTRA_DATA = "data"
-        const val INTERVAL_MS = 500L       // 2 pictures a second at most
+        const val DEFAULT_FPS = 5
+        const val MIN_FPS = 1
+        const val MAX_FPS = 15
+        private const val POLL_MS = 20L   // waiting for an ack or a new image
         const val QUALITY = 60
 
         fun start(context: Context, resultCode: Int, data: Intent) {
@@ -253,4 +271,6 @@ object Streaming {
     @Volatile var link: AccessoryLink? = null
     @Volatile var running = false
     @Volatile var status = ""
+    /** Pictures a second at most, set by the activity (its slider). */
+    @Volatile var maxFps = CaptureService.DEFAULT_FPS
 }

@@ -47,40 +47,43 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <ScrollView
-        android:id="@+id/sent_scroll"
+    <Switch
+        android:id="@+id/details"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:enabled="false"
         android:paddingStart="16dp"
-        android:paddingEnd="16dp">
-
-        <LinearLayout
-            android:id="@+id/sent_list"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:text="@string/details" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
 
-        <EditText
-            android:id="@+id/input"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/hint"
-            android:inputType="textMultiLine|textCapSentences"
-            android:maxLines="4" />
-
-        <Button
-            android:id="@+id/send"
+        <TextView
+            android:id="@+id/fps_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/send" />
+            android:minEms="5"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/fps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
     </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:text="@string/how_to"
+        android:textSize="14sp" />
 </LinearLayout>

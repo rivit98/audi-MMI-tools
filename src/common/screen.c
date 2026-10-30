@@ -18,9 +18,11 @@
 #include "lmgr.h"
 #include "log.h"
 #include "screen.h"
+#include "vfbcopy.h"
 
 #define CID            40
 #define REGISTER_FLAGS 2
+#define SCREEN_FULL_EVERY_MS 30000
 
 static gf_dev_t dev;
 static gf_display_t display;
@@ -29,10 +31,14 @@ static struct vfb_slot {
 	unsigned          sid;
 	gf_surface_t      surface;
 	gf_surface_info_t si;
+	uint32_t         *shadow;   /* partial: what the surface holds */
+	int               shadow_ok;
+	unsigned          full_at;  /* log_ms() of its last full copy */
 } slot[2];
 static int cur;                 /* slot of the current VFB (back surface) */
 static struct canvas back;
-static int lm_is_open, registered;
+static int lm_is_open, registered, partial;
+static struct screen_stats stats;
 
 static void show_cid_and_hmi(void)
 {
@@ -43,11 +49,15 @@ static void show_cid_and_hmi(void)
 	        rc ? strerror(rc) : "ok");
 }
 
+/* The surface goes; its shadow buffer is kept for the next one. */
 static void free_slot(int i)
 {
+	uint32_t *shadow = slot[i].shadow;
+
 	if (slot[i].surface != NULL)
 		gf_surface_free(slot[i].surface);
 	memset(&slot[i], 0, sizeof(slot[i]));
+	slot[i].shadow = shadow;
 }
 
 /* Attach the gf surface sid into slot i (replacing what was there) and
@@ -139,17 +149,51 @@ struct canvas *screen_canvas(void)
 	return &back;
 }
 
-int screen_present(void)
+void screen_set_partial(int on)
 {
-	const struct vfb_slot *v = &slot[cur];
-	struct lm_vfb vfb;
-	int y, rc;
+	partial = on;
+}
 
-	if (back.px == NULL || v->surface == NULL)
-		return -1;
-	for (y = 0; y < back.h && y < v->si.h; y++)
-		memcpy(v->si.vaddr + (unsigned)y * v->si.stride, back.px + y * back.stride,
-		       (size_t)(back.w < v->si.w ? back.w : v->si.w) * 4);
+const struct screen_stats *screen_last_stats(void)
+{
+	return &stats;
+}
+
+/* back -> the VFB of slot v; all of it, or (partial) only what differs
+ * from its shadow. Fills stats.bytes/rows/full. */
+static void copy_to_vfb(struct vfb_slot *v)
+{
+	int w = back.w < v->si.w ? back.w : v->si.w;
+	int h = back.h < v->si.h ? back.h : v->si.h;
+	unsigned now = log_ms();
+	struct vfb_copied c;
+	int full;
+
+	if (partial && v->shadow == NULL)
+		v->shadow = malloc((size_t)back.w * back.h * 4);
+	full = !partial || v->shadow == NULL || !v->shadow_ok ||
+	       now - v->full_at >= SCREEN_FULL_EVERY_MS;
+	/* the shadow is w pixels a row: only usable when the VFB is the
+	 * canvas's size (it always is: both come from the same surface) */
+	if (w != back.w)
+		full = 1;
+	c = vfb_copy(v->si.vaddr, v->si.stride, partial ? v->shadow : NULL, back.px,
+	             back.stride, w, h, full);
+	stats.full = full;
+	stats.bytes = c.bytes;
+	stats.rows = c.rows;
+	if (full && v->shadow != NULL && w == back.w) {
+		v->shadow_ok = 1;
+		v->full_at = now;
+	}
+}
+
+/* Hand the VFB to the layer manager and pick up the next one. */
+static int screen_flip(void)
+{
+	struct lm_vfb vfb;
+	int rc;
+
 	rc = lm_update_vfb(CID);
 	if (rc)
 		return rc;
@@ -167,6 +211,23 @@ int screen_present(void)
 	}
 	cur = !cur;
 	return attach_slot(cur, vfb.sid) ? -1 : 0;
+}
+
+int screen_present(void)
+{
+	struct vfb_slot *v = &slot[cur];
+	unsigned t0;
+	int rc;
+
+	if (back.px == NULL || v->surface == NULL)
+		return -1;
+	t0 = log_us();
+	copy_to_vfb(v);
+	stats.copy_us = log_us() - t0;
+	t0 = log_us();
+	rc = screen_flip();
+	stats.flip_us = log_us() - t0;
+	return rc;
 }
 
 void screen_close(void)
@@ -187,6 +248,9 @@ void screen_close(void)
 	registered = 0;
 	free_slot(0);
 	free_slot(1);
+	free(slot[0].shadow);
+	free(slot[1].shadow);
+	slot[0].shadow = slot[1].shadow = NULL;
 	if (display != NULL)
 		gf_display_detach(display);
 	if (dev != NULL)

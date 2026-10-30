@@ -1,7 +1,8 @@
 /*
- * usb_tx_test - receive text and a slow video stream (the phone's screen,
- * ~2 JPEG pictures a second) from an Android phone over USB (Android Open
- * Accessory) and show them on the MMI screen.
+ * usb_tx_test - receive a slow video stream (the phone's screen, ~2 JPEG
+ * pictures a second) from an Android phone over USB (Android Open
+ * Accessory) and show it on the MMI screen. (It also took text messages
+ * until 2026-10-25; README.md says why they went.)
  *
  *   phone app (android/)  --USB, AOA bulk-->  this  -->  screen + SD log
  *
@@ -13,10 +14,16 @@
  * second for the clock. Pictures are decoded here, on the main thread
  * (video.c); the USB threads only collect them.
  *
- * Writes <sd>/usb_tx_test.log: states, every USBDI result, every message.
- * The previous run's log and slog snapshots are kept as *.prev* / *_prev_*.
+ * Writes <sd>/usb_tx_test.log: states, every USBDI result, every message
+ * but the picture data, and a "perf:" summary every 10 s of streaming;
+ * <sd>/usb_tx_perf.csv: one line of timings per picture (perf.h).
+ * The previous run's files are kept as *.prev* / *_prev_*.
  *
- * usage: usb_tx_test <sd_path>
+ * usage: usb_tx_test <sd_path> [copy=changed|full]
+ *   copy=changed  (default) write only the changed part of each row into
+ *                 the VFB (screen_set_partial)
+ *   copy=full     the whole screen every time, as before 2026-10-28 (to
+ *                 compare)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +33,7 @@
 #include "aoa.h"
 #include "log.h"
 #include "model.h"
+#include "perf.h"
 #include "quit.h"
 #include "screen.h"
 #include "ui.h"
@@ -53,6 +61,7 @@ static void keep_previous_run(const char *sd_path)
 	int n;
 
 	keep(sd_path, "usb_tx_test.log", "usb_tx_test.prev.log");
+	keep(sd_path, "usb_tx_perf.csv", "usb_tx_perf.prev.csv");
 	snprintf(var, sizeof(var), "%s/var", sd_path);
 	for (n = 1; n <= AOA_SLOG_SNAPSHOTS; n++) {
 		snprintf(name, sizeof(name), "usb_slog_%d.txt", n);
@@ -66,20 +75,25 @@ int main(int argc, char *argv[])
 	const char *sd_path;
 	char path[256];
 	unsigned last_version = ~0u, last_second = ~0u, last_present = 0;
-	int shown, fresh;
+	int shown, fresh, i, partial = 1;
 
 	if (argc < 2) {
-		fprintf(stderr, "usage: %s <sd_path>\n", argv[0]);
+		fprintf(stderr, "usage: %s <sd_path> [copy=changed|full]\n", argv[0]);
 		return 2;
 	}
 	sd_path = argv[1];
+	for (i = 2; i < argc; i++)
+		if (strcmp(argv[i], "copy=full") == 0)
+			partial = 0;
 	keep_previous_run(sd_path);
 	snprintf(path, sizeof(path), "%s/usb_tx_test.log", sd_path);
 	if (log_open(path) != 0)
 		fprintf(stderr, "usb_tx_test: cannot open %s, logging to stdout only\n", path);
-	log_msg("usb_tx_test start, pid=%d", getpid());
+	log_msg("usb_tx_test start, pid=%d, copy=%s", getpid(), partial ? "changed" : "full");
 	quit_init(sd_path, 0);            /* no watchdog: runs until SD pull / signal */
 	model_init();
+	perf_init(sd_path);
+	screen_set_partial(partial);
 
 	shown = screen_open() == 0;
 	if (!shown)
@@ -96,22 +110,36 @@ int main(int argc, char *argv[])
 		fresh = video_poll();
 		v = model_version();
 		s = log_ms() / 1000;
-		/* The clock alone redraws at most once a second: a screen copy into
-		 * the VFB costs ~160 ms, and pictures redraw anyway. */
+		/* The clock alone redraws at most once a second: a full screen copy
+		 * into the VFB costs ~160 ms, and pictures redraw anyway. */
 		if (shown && (fresh || v != last_version ||
 		              (s != last_second && log_ms() - last_present >= 1000))) {
+			struct video_present p;
+			const struct screen_stats *st;
+
 			last_version = v;
 			last_second = s;
-			t0 = log_ms();
+			t0 = log_us();
 			ui_render(screen_canvas(), sd_path);
+			p.render_us = log_us() - t0;
 			screen_present();
 			last_present = log_ms();
+			st = screen_last_stats();
+			p.copy_us = st->copy_us;
+			p.flip_us = st->flip_us;
+			p.vfb_bytes = st->bytes;
+			p.vfb_rows = st->rows;
+			p.vfb_full = st->full;
 			if (fresh)
-				video_presented(last_present - t0);
+				video_presented(&p);
 		} else if (fresh) {
-			video_presented(0);           /* headless: still ack it */
+			video_presented(NULL);        /* headless: still ack it */
 		}
-		usleep(fresh ? 10 * 1000 : 50 * 1000);
+		/* Straight on if the next picture is already here (the phone keeps
+		 * two in flight); else until one comes, or 50 ms for the rest. */
+		t0 = log_us();
+		video_wait(50);
+		perf_idle(log_us() - t0);
 	}
 
 	aoa_stop();

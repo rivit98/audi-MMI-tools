@@ -5,9 +5,19 @@
 #
 # Usage is like gcc:  shle-nto-gcc -O2 -o hello hello.c [-lm -lgf ...]
 # -c / -S / -E only compile; otherwise the QNX link line is added.
+#
+# Called as shle-nto-g++ (a link to this script) it is the C++ compiler:
+# GCC 16's libstdc++ headers over the QNX C headers, with the fix-ups in
+# $SYSROOT/usr/include-c++ (README there), and libstdc++ linked statically
+# with libcxxrt-qnx.a (sdk/cxxrt.c), which stands in for the glibc pieces
+# it expects. As with g++, .c files are compiled as C++ unless preceded
+# by -x c.
 
 SYSROOT="${MMI_SYSROOT:-/opt/mmi-sdk/sysroot}"
-CC="${MMI_CC:-sh4-linux-gnu-gcc-16}"
+case "$(basename "$0")" in
+    *++) CXX=1; CC="${MMI_CXX:-sh4-linux-gnu-g++-16}" ;;
+    *)   CXX=0; CC="${MMI_CC:-sh4-linux-gnu-gcc-16}" ;;
+esac
 
 # Code generation: SH4, little endian, FPU in double-precision mode (crt1
 # sets FPSCR.PR=1, which is what -m4 assumes). --isa=sh4 makes the assembler
@@ -21,10 +31,21 @@ CC="${MMI_CC:-sh4-linux-gnu-gcc-16}"
 # become void*: on QNX GF they are gf_dev_t / gf_3d_target_t pointers.
 # GCC fuses sin(x) + cos(x) into glibc's sincos(), which QNX's libm.so.2
 # does not have: taking away the sin/cos builtins stops that.
+# C++: the fix-up headers go around libstdc++'s own (pre: bits/ overrides,
+# post: C headers its <cstdlib> etc. #include_next), and _QNX_SOURCE opens
+# up the C99/POSIX parts of the QNX headers, which key them on
+# __STDC_VERSION__, undefined in C++.
+CXXINC=
+if [ $CXX = 1 ]; then
+    I=/usr/sh4-linux-gnu/include/c++/$($CC -dumpversion)
+    CXXINC="-isystem $SYSROOT/usr/include-c++/pre
+            -isystem $I -isystem $I/sh4-linux-gnu -isystem $I/backward
+            -isystem $SYSROOT/usr/include-c++/post -D_QNX_SOURCE"
+fi
 CFLAGS="-m4 -ml -Wa,--isa=sh4 -fno-pie -fno-stack-protector
         -fno-builtin-sin -fno-builtin-sinf -fno-builtin-sinl
         -fno-builtin-cos -fno-builtin-cosf -fno-builtin-cosl
-        -nostdinc -isystem $SYSROOT/usr/include
+        -nostdinc $CXXINC -isystem $SYSROOT/usr/include
         -isystem $($CC -print-file-name=include)
         -U__linux__ -U__linux -Ulinux -U__gnu_linux__
         -U_FILE_OFFSET_BITS -U_TIME_BITS
@@ -42,17 +63,40 @@ if [ $link = 0 ]; then
 fi
 
 L="$SYSROOT/usr/lib"
+# C++ adds: cxxrt-qnx.o ahead of everything, so its definitions win over
+# libstdc++.a's own (__cxa_get_globals, __cxa_guard_*), then libstdc++,
+# the unwinder and libm (as g++ does) after the user's files. -x none ends
+# any -x c the caller left open, so the archives are not read as C.
+CXXRT=
+CXXLIBS=
+if [ $CXX = 1 ]; then
+    CXXRT="$L/cxxrt-qnx.o"
+    CXXLIBS="-x none $($CC -m4 -ml -print-file-name=libstdc++.a)
+             $($CC -m4 -ml -print-file-name=libgcc_eh.a) -lm"
+fi
 # QNX link order: crt1 crti crtbegin <user objs + libs> -lc libgcc crtend crtn
 # - DT_HASH only (no .gnu.hash): the 2008-era ldqnx predates GNU hash.
 # - 4 KB segment alignment like the stock binaries (ld default is 64 KB).
 # - -z now: resolve everything at load, no reliance on lazy-PLT resolver ABI.
 # - interpreter: QNX's /usr/lib/ldqnx.so.2 (a link to libc.so.2 on target).
-exec $CC $CFLAGS -nostdlib -no-pie \
+# Then qnx-elf-fix.py turns what ld emits that ldqnx doesn't know into what
+# it does (STB_GNU_UNIQUE from libstdc++.a), or fails the build.
+out=a.out
+prev=
+for a in "$@"; do
+    case "$prev" in -o) out="$a" ;; esac
+    case "$a" in -o?*) out="${a#-o}" ;; esac
+    prev="$a"
+done
+$CC $CFLAGS -nostdlib -no-pie \
     -Wl,--dynamic-linker=/usr/lib/ldqnx.so.2 \
     -Wl,-Ttext-segment=0x08040000 \
     -Wl,--hash-style=sysv -Wl,--build-id=none -Wl,-z,norelro -Wl,-z,now \
     -Wl,-z,max-page-size=0x1000 -Wl,-z,noexecstack \
     -Wl,--no-as-needed \
-    "$L/crt1.o" "$L/crti.o" "$L/crtbegin.o" "$L/crtarray.o" \
-    -L"$L" "$@" -lc "$($CC -m4 -ml -print-libgcc-file-name)" \
-    "$L/crtend.o" "$L/crtn.o"
+    "$L/crt1.o" "$L/crti.o" "$L/crtbegin.o" "$L/crtarray.o" $CXXRT \
+    -L"$L" "$@" $CXXLIBS -lc "$($CC -m4 -ml -print-libgcc-file-name)" \
+    "$L/crtend.o" "$L/crtn.o" || exit
+# A binary the fix rejects must not stay behind: make would take it as up
+# to date and put it on the card.
+python3 -I "$(dirname "$0")/qnx-elf-fix.py" "$out" || { rm -f "$out"; exit 1; }

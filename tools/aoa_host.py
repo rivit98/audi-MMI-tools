@@ -6,9 +6,9 @@
 
 Does what src/usb_tx_test/aoa.c does, with libusb on a PC: switches a USB
 Android phone into accessory mode (AOA), then speaks the usb_tx_test
-protocol (src/usb_tx_test/proto.h): HELLO / HELLO_REPLY, prints every TEXT
-and ACKs it. Replug the phone at will; it goes back to waiting, like the
-MMI receiver. Ctrl-C to stop.
+protocol (src/usb_tx_test/proto.h): HELLO / HELLO_REPLY, then the phone's
+screen. Replug the phone at will; it goes back to waiting, like the MMI
+receiver. Ctrl-C to stop.
 
 Video: announces the MMI's boxes (VIDEO_CAPS, 800x480 screen, as
 src/usb_tx_test/video.c), reassembles the phone's pictures, acks each as
@@ -33,12 +33,12 @@ STRINGS = [MANUFACTURER, MODEL, "desk aoa_host.py", "1", "https://github.com/dsp
 HELLO_TEXT = b"usb_tx_test-desk/1"
 
 AOA_VID, AOA_PIDS = 0x18D1, range(0x2D00, 0x2D06)
-HELLO, TEXT, ACK, HELLO_REPLY = 1, 2, 3, 4
-VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_ACK, VIDEO_STOP = 5, 6, 7, 8, 9
+HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired 2026-10-25
+VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_ACK, VIDEO_STOP, VIDEO_DETAILS = 5, 6, 7, 8, 9, 10
 VIDEO_SHOWN, VIDEO_BAD = 0, 1
 HDR, MAX_PAYLOAD = 3, 2048
-SCREEN_W, SCREEN_H, TOPBAR_H, MAX_BYTES = 800, 480, 28, 512 * 1024
-CAPS = struct.pack("<HHHHIB", SCREEN_W, SCREEN_H - TOPBAR_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES, 1)
+SCREEN_W, SCREEN_H, MAX_BYTES = 800, 480, 512 * 1024
+CAPS = struct.pack("<HHHHIB", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES, 1)
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 
 
@@ -179,16 +179,14 @@ def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
         ep_out.write(frame(VIDEO_CAPS, CAPS), timeout=2000)
     elif ftype == HELLO_REPLY:
         print(f"phone HELLO_REPLY: {payload.decode(errors='replace')}")
-    elif ftype == TEXT and len(payload) >= 2:
-        seq = payload[0] | payload[1] << 8
-        print(f"TEXT #{seq}: {payload[2:].decode(errors='replace')}")
-        ep_out.write(frame(ACK, payload[:2]), timeout=2000)
     elif ftype == VIDEO_START and len(payload) >= 11:
         pics.start(payload, ep_out)
     elif ftype == VIDEO_DATA and len(payload) >= 2:
         pics.data_chunk(payload, ep_out)
     elif ftype == VIDEO_STOP:
         print(f"VIDEO_STOP after {pics.shown} pictures")
+    elif ftype == VIDEO_DETAILS and len(payload) >= 1:
+        print(f"VIDEO_DETAILS: status bar over landscape {'on' if payload[0] else 'off'}")
     else:
         print(f"frame type {ftype}, {len(payload)} bytes ignored")
 

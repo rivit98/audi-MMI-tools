@@ -8,8 +8,9 @@
  *
  *   HELLO       0x01  both   "who I am" (UTF-8). Sent by each side when its
  *                            session starts; the peer answers HELLO_REPLY.
- *   TEXT        0x02  phone  seq u16 LE + UTF-8 text
- *   ACK         0x03  MMI    seq u16 LE of the TEXT it received
+ *   (0x02, 0x03)             retired: TEXT / ACK, text messages from the
+ *                            phone, dropped on 2026-10-25. Not to be reused;
+ *                            an old phone app's TEXT is logged and ignored.
  *   HELLO_REPLY 0x04  both   "who I am", answer to HELLO (never answered)
  *
  * Video (2 fps-class screen mirroring, one JPEG per picture):
@@ -24,8 +25,15 @@
  *   VIDEO_DATA  0x07  phone  id u16 + the next bytes of it, in order
  *   VIDEO_ACK   0x08  MMI    id u16, status u8 (VIDEO_*), decode_ms u16:
  *                            the picture is on screen (or was dropped). The
- *                            phone keeps one picture in flight.
- *   VIDEO_STOP  0x09  phone  (empty) streaming ended, back to text only
+ *                            phone keeps at most two pictures in flight.
+ *   VIDEO_STOP  0x09  phone  (empty) streaming ended, back to the status
+ *                            screen
+ *   VIDEO_DETAILS 0x0A phone show u8: 1 = the status bar (state, video
+ *                            stats) over a landscape picture, 0 = the
+ *                            picture alone (the MMI's default). Sent on
+ *                            the MMI's HELLO / HELLO_REPLY and whenever
+ *                            the user flips it. Portrait always has its
+ *                            status panel beside the picture.
  *
  * Frames may be split or merged arbitrarily across USB transfers; the
  * decoder reassembles them. A frame announcing more than PROTO_MAX_PAYLOAD
@@ -37,14 +45,13 @@
 #include <stdint.h>
 
 #define PROTO_HELLO        0x01
-#define PROTO_TEXT         0x02
-#define PROTO_ACK          0x03
 #define PROTO_HELLO_REPLY  0x04
 #define PROTO_VIDEO_CAPS   0x05
 #define PROTO_VIDEO_START  0x06
 #define PROTO_VIDEO_DATA   0x07
 #define PROTO_VIDEO_ACK    0x08
 #define PROTO_VIDEO_STOP   0x09
+#define PROTO_VIDEO_DETAILS 0x0A
 
 #define PROTO_FMT_JPEG     1
 
@@ -56,6 +63,7 @@
 #define PROTO_VIDEO_CAPS_LEN  13
 #define PROTO_VIDEO_START_LEN 11
 #define PROTO_VIDEO_ACK_LEN   5
+#define PROTO_VIDEO_DETAILS_LEN 1
 
 #define PROTO_HDR          3
 #define PROTO_MAX_PAYLOAD  2048

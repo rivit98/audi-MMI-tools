@@ -214,7 +214,7 @@ static void out_done(struct usbd_urb *urb, struct usbd_pipe *pipe, void *arg)
 }
 
 /* Printable copy of a payload for the log: control chars as \n, \xNN. */
-static void log_text(const char *what, unsigned seq, const char *s, unsigned n)
+static void log_text(const char *what, const char *s, unsigned n)
 {
 	static char buf[4 * PROTO_MAX_PAYLOAD + 1];
 	unsigned i, o = 0;
@@ -232,7 +232,7 @@ static void log_text(const char *what, unsigned seq, const char *s, unsigned n)
 		}
 	}
 	buf[o] = 0;
-	log_msg("%s seq=%u len=%u: %s", what, seq, n, buf);
+	log_msg("%s len=%u: %s", what, n, buf);
 }
 
 static void send_caps(struct link *l)
@@ -252,6 +252,8 @@ static void on_video(struct link *l, uint8_t type, const uint8_t *p, unsigned n)
 
 	if (type == PROTO_VIDEO_START) {
 		r = vasm_start(&l->vasm, p, n, &dropped, &bad);
+		if (r == VASM_OK)
+			l->vasm.cur.rx_start_us = log_us();
 		if (dropped >= 0) {
 			log_msg("video: picture %d cut short by the next one", dropped);
 			video_ack((unsigned)dropped, PROTO_VIDEO_DROPPED, 0);
@@ -269,6 +271,7 @@ static void on_video(struct link *l, uint8_t type, const uint8_t *p, unsigned n)
 		break;
 	case VASM_DONE:
 		vasm_take(&l->vasm, &pic);
+		pic.rx_done_us = log_us();
 		video_submit(&pic);
 		break;
 	default:
@@ -292,32 +295,18 @@ static void set_peer(struct link *l, const uint8_t *p, unsigned n)
 static void on_frame(uint8_t type, const uint8_t *p, unsigned n, void *arg)
 {
 	struct link *l = arg;
-	uint8_t ack[2];
 
 	l->rx_frames++;
 	switch (type) {
 	case PROTO_HELLO:
-		log_text("rx HELLO", 0, (const char *)p, n);
+		log_text("rx HELLO", (const char *)p, n);
 		link_send(l, PROTO_HELLO_REPLY, USBTX_HELLO, sizeof(USBTX_HELLO) - 1);
 		send_caps(l);
 		set_peer(l, p, n);
 		break;
 	case PROTO_HELLO_REPLY:
-		log_text("rx HELLO_REPLY", 0, (const char *)p, n);
+		log_text("rx HELLO_REPLY", (const char *)p, n);
 		set_peer(l, p, n);
-		break;
-	case PROTO_TEXT:
-		if (n < 2) {
-			log_msg("rx TEXT too short (%u bytes), ignored", n);
-			break;
-		}
-		log_text("rx TEXT", proto_get_u16(p), (const char *)p + 2, n - 2);
-		model_add_message(proto_get_u16(p), (const char *)p + 2, n - 2);
-		ack[0] = p[0];
-		ack[1] = p[1];
-		link_send(l, PROTO_ACK, ack, 2);
-		if (!l->hello_seen)
-			set_peer(l, (const uint8_t *)"phone app", 9);
 		break;
 	case PROTO_VIDEO_START:
 	case PROTO_VIDEO_DATA:
@@ -329,6 +318,10 @@ static void on_frame(uint8_t type, const uint8_t *p, unsigned n, void *arg)
 		log_msg("rx VIDEO_STOP");
 		vasm_free(&l->vasm);
 		video_stop("the phone stopped streaming");
+		break;
+	case PROTO_VIDEO_DETAILS:
+		if (n >= PROTO_VIDEO_DETAILS_LEN)
+			model_set_details(p[0] != 0);
 		break;
 	default:
 		log_msg("rx unknown frame type 0x%02x, %u bytes, ignored", type, n);

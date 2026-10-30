@@ -13,7 +13,7 @@
  *   3. The phone re-enumerates as 18d1:2d00..2d05. Its accessory interface
  *      (class/subclass ff/ff) gets a bulk IN and OUT pipe; IN is read
  *      continuously with asynchronous usbd_io(), frames go to model.h
- *      (text) and, reassembled by vasm.h, video.h (pictures). The
+ *      (HELLO: the peer) and, reassembled by vasm.h, video.h (pictures). The
  *      MMI's VIDEO_CAPS goes out with its HELLO; VIDEO_ACKs queued by
  *      video.c are sent from the manager thread.
  *   4. Removal or any transfer error tears the connection down and goes

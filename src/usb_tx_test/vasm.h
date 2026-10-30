@@ -17,6 +17,7 @@ struct vpic {
 	uint8_t *data;
 	uint32_t size;
 	unsigned id, w, h, format;
+	unsigned rx_start_us, rx_done_us;   /* log_us(), set by the link (perf) */
 };
 
 struct vasm {

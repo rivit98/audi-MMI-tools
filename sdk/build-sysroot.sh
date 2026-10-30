@@ -33,6 +33,17 @@ grep -q '__aligned__(8)' "$OUT/usr/include/sys/compiler_gnu.h" && {
 cp -r /usr/include/GLES /usr/include/EGL /usr/include/KHR "$OUT/usr/include/"
 cp -r "$HERE/include/." "$OUT/usr/include/"
 
+# 1c. C++: the fix-ups that let GCC 16's libstdc++ headers sit on the QNX C
+#     headers (sdk/include-c++/README.md). c++locale.h is libstdc++'s own
+#     with glibc's __locale_t spelled out (no <xlocale.h> on QNX); it keeps
+#     the type, so the mangled names match libstdc++.a.
+cp -r "$HERE/include-c++" "$OUT/usr/include-c++"
+CXXCFG="/usr/sh4-linux-gnu/include/c++/$(sh4-linux-gnu-g++-16 -dumpversion)/sh4-linux-gnu"
+sed 's/typedef __locale_t\t\t__c_locale;/typedef struct __locale_struct* __c_locale;/' \
+    "$CXXCFG/bits/c++locale.h" > "$OUT/usr/include-c++/pre/bits/c++locale.h"
+grep -q 'struct __locale_struct\* __c_locale' "$OUT/usr/include-c++/pre/bits/c++locale.h" || {
+    echo "c++locale.h: __c_locale patch did not apply" >&2; exit 1; }
+
 # 2. Startup objects, assembled from openqnx lib/c/startup/sh.
 #    crt1/crti/crtn are .S (need cpp), crtbegin/crtend are plain .s.
 for f in crt1 crti crtn; do
@@ -45,6 +56,13 @@ done
 # 3. Our init/fini array runners (see crtarray.c).
 MMI_SYSROOT="$OUT" "$HERE/shle-nto-gcc" -O2 -c "$HERE/crtarray.c" \
     -o "$OUT/usr/lib/crtarray.o"
+
+# 3b. The C++ runtime shim shle-nto-g++ links into every C++ program: the C
+#     half (cxxrt.c) and the C++ half (cxxrt-std.cpp) in one object.
+MMI_SYSROOT="$OUT" "$HERE/shle-nto-gcc" -O2 -Wall -c "$HERE/cxxrt.c" -o /tmp/cxxrt.o
+MMI_SYSROOT="$OUT" "$HERE/shle-nto-g++" -O2 -Wall -c "$HERE/cxxrt-std.cpp" -o /tmp/cxxrt-std.o
+sh4-linux-gnu-ld -r /tmp/cxxrt.o /tmp/cxxrt-std.o -o "$OUT/usr/lib/cxxrt-qnx.o"
+rm /tmp/cxxrt.o /tmp/cxxrt-std.o
 
 # 4. Link-time stubs for the MMI's real shared libraries.
 #    lib<name>.so.N  ->  stub lib<name>.so  with SONAME lib<name>.so.N

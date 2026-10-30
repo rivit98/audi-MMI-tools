@@ -2,17 +2,20 @@
 
 Cross-compile plain C for the MMI 3G+ (QNX 6.3.2, Renesas SH7785 / SH-4A,
 little endian) with Debian's stock SH4 GCC, packaged as a Docker image.
+C++ works too: `shle-nto-g++` links GCC 16's libstdc++ statically
+([`sdk/include-c++/README.md`](sdk/include-c++/README.md)).
 
 | App | What it does |
 |---|---|
 | `hello` | On SD insert, writes `hello.txt` (`hello world`) to the card. Toolchain smoke test. |
-| `lmprobe` | Layer manager test without OpenGL: replays showScreen's devctl sequence, fills the frame buffer with colour bars, logs every raw status. Also carries an on-car proof of the compiler bug below. |
+| `lmprobe` | Layer manager test without OpenGL: replays showScreen's devctl sequence, fills the frame buffer with colour bars, logs every raw status. Passed on the car; its sequence lives on in `src/common/screen.c`. See [src/lmprobe/README.md](src/lmprobe/README.md). |
 | `hello2` | OpenGL ES test. Logs full EGL/GL/gf diagnostics, runs a 20 s animation, and saves screenshots to the card. |
 | `hello3` | GPU canvas: random-colour pixel blocks and a plasma effect, both rendered by the GPU from textures uploaded once, then a fill-rate benchmark. On-screen FPS counter. |
 | `hello4` | 3D pipeline test: automatic pixel-readback probes (depth, culling, perspective, lighting, texture, fog, blend, stencil) shown as PASS/FAIL squares, then lit/textured/fogged 3D scenes and a triangle-rate benchmark. |
-| `hello5` | Sound from our app. Steps (`hello5 <sd> <steps>`, default `mnvt`) play a ping train that hello5 renders itself (`src/hello5/pulse.c`, written to `/tmp`) on the one audible output, io-media mixer `DSPOUT_TDM1_20_SAD`: with the radio (does it mix or replace?), while the volume knob is turned and with music playing, through the unit's `testapp-file`; and through hello5's own io-media client (`src/hello5/iom.c`, the devctls `testapp-file` uses) with its own volume control and queued files, every event timed. Step `g` is the earlier output survey: the bundled chime (`beep.wav`) in groups of 1–6 chimes, one group per output (mixer outputs and io-audio devices through QSA / `libasound`). |
-| `hello7` | Knob and button tester (a tool, not in the default run): decodes every `/dev/ipc/ch8` message (`src/hello7/keys.c`) and shows it live with a counter per control; bits no known control explains show as "unknown" with their byte, to name new buttons. `hello7 <sd> [seconds]`, default 60. Was hello5's stage 2. |
-| `usb_tx_test` | Text and a slow screen stream (~2 JPEG pictures a second) from an Android phone over USB (Android Open Accessory). Shows the link state, received messages and the phone's screen full screen, logs them to the card. Pairs with the phone app in `android/`. Runs until the SD card is pulled. See [usb_tx_test](#usb_tx_test-make-sd-sd_appsusb_tx_test). |
+| `hello5` | Sound from our app. Steps (`hello5 <sd> <steps>`, default `mntv`) play a ping train that hello5 renders itself (`src/hello5/pulse.c`, written to `/tmp`) on the one audible output, io-media mixer `DSPOUT_TDM1_20_SAD`: with the radio (does it mix or replace?), with music playing and while the volume knob is turned, through the unit's `testapp-file`; and through hello5's own io-media client (`src/hello5/iom.c`, the devctls `testapp-file` uses) with its own volume control and queued files, every event timed. Step `g` is the earlier output survey: the bundled chime (`beep.wav`) in groups of 1–6 chimes, one group per output (mixer outputs and io-audio devices through QSA / `libasound`). |
+| `hello8` | C++ test, built with `shle-nto-g++`: 18 checks of the language runtime (static init, exceptions, RTTI) and the standard library (containers, algorithms, strings, smart pointers, math, random, chrono, threads, condition variables, atomics, and gUSA vs LL/SC atomics under thread switches), each shown as PASS/FAIL with what failed. About 35 s, nothing to do. See [hello8](#hello8-make-sd-sd_appshello8). |
+| `hello7` | Knob and button tester (a tool, out of the default run since 2026-10-25, because the MMI handles the buttons too and MENU/BACK bring its own screens over hello7's): decodes every `/dev/ipc/ch8` message (`src/hello7/keys.c`) and shows it live with a counter per control; bits no known control explains show as "unknown" with their byte, to name new buttons. `hello7 <sd> [seconds]`, default 60. Was hello5's stage 2. |
+| `usb_tx_test` | A slow screen stream (JPEG pictures, up to 5 a second by default) from an Android phone over USB (Android Open Accessory). Shows the link state and the phone's screen full screen, logs everything to the card. (Text messages were dropped on 2026-10-25: [src/usb_tx_test/README.md](src/usb_tx_test/README.md).) Pairs with the phone app in `android/`. Runs until the SD card is pulled. See [usb_tx_test](#usb_tx_test-make-sd-sd_appsusb_tx_test). |
 | `pngondemand` | Tool, not a test: renders a text layout (rectangles, text, word-wrapped paragraphs) to a PNG on the car. `run.sh` uses it to draw each status screen right before showing it. See [Screens](#the-test-run). |
 | `hello6` | Checks the phone-mirroring assumptions ([docs/phone-mirroring.md](docs/phone-mirroring.md)): system/GPU info, CPU/VFB/texture-upload/LZ4 benchmarks, then ten test videos through the unit's DM642 decoder on a layer manager video displayable. The default run plays only the videos: about 8 minutes, driver watching. See [hello6](#hello6-make-sd-sd_appshello6). |
 
@@ -128,7 +131,16 @@ library is loaded.
    - libc's own structs (`stat`, `stat64`) are written so this doesn't
      affect them. `gf`'s structs aren't. The static asserts in `gf.h`
      caught the mismatch.
-10. **The SD autorun chain** is in the toolkit already:
+10. **C++ needs its own runtime.** The car's `libstdc++.so.5` (GCC 3.3)
+    and Dinkumware `libcpp.so.4` don't fit GCC 16's headers, so
+    `shle-nto-g++` links Debian's `libstdc++.a` statically. It is built for
+    glibc, so a header overlay and a small runtime shim (TLS-free exception
+    globals, `_dl_find_object` for the unwinder, 64-bit-`time_t` clocks,
+    `condition_variable` rebuilt with QNX's layout) sit between it and
+    QNX's libc. Iostreams, `<format>` and `thread_local` don't work, and
+    atomics are probably not atomic under preemption (gUSA). Details:
+    [`sdk/include-c++/README.md`](sdk/include-c++/README.md).
+11. **The SD autorun chain** is in the toolkit already:
     1. `proc_scriptlauncher` finds `copie_scr.sh` (XOR-encoded by
        `builder/encoder.py`).
     2. That runs `core/copie_scr_plain.sh`.
@@ -223,7 +235,13 @@ MMI3GApplication / your app
 Dockerfile            mmi-sdk image: debian sid + gcc-16-sh4-linux-gnu + sysroot
 Makefile              host entry point (sdk / all / check / sd / shell / clean)
 sdk/
-  shle-nto-gcc        compiler wrapper: QNX headers, crt objects, link flags
+  shle-nto-gcc        compiler wrapper: QNX headers, crt objects, link flags;
+                      as shle-nto-g++ (a link) the C++ compiler
+  qnx-elf-fix.py      run after every link: GNU ELF features ldqnx lacks
+                      (STB_GNU_UNIQUE -> GLOBAL), fails on IFUNC / TLS
+  include-c++/        C++: libstdc++ header fix-ups for QNX; README.md
+  cxxrt.c             C++ runtime shim: glibc pieces libstdc++.a expects
+  cxxrt-std.cpp       C++ runtime shim: libstdc++ members rebuilt for QNX
   build-sysroot.sh    runs in `docker build`: headers, crt, stubs, 6.3.2 patch
   mkstubs.py          stripped device .so → link-time stub (.S)
   fonts/              Terminus Font 8x16 / 16x32 console fonts (SIL OFL, OFL.txt)
@@ -237,6 +255,8 @@ sdk/
 docs/
   platform-notes.md   what the car has confirmed: GPU limits, layer manager,
                       vsync, capture, input, audio ABI. Start here.
+  cpp-apps.md         writing apps in C++: building, what's safe, the
+                      threads/atomics rules, what isn't available
   qnx-sh-fpu-div0.md  why a divide by zero is a fatal SIGFPE on this platform
   gcc-sh4-treg-bug.md GCC 12.2's -O1+ `a == 0 && b == 0` miscompile (fixed in 16)
 src/
@@ -269,6 +289,8 @@ src/
                       video.c, label.c (text screens), texts.h (their text +
                       the clip list), lz4mini.c
   hello7/             knob/button tester: keys.c (ch8 decoding), main.c
+  hello8/             C++ test: checks.cpp (the checks, host-tested too),
+                      main.cpp (log + screen)
   hello*/README.md    what each hello app does, in short
 media/                hello6's test videos: mkclips.sh (ffmpeg, mmi-media image)
 tests/                host unit tests (make test)
@@ -287,6 +309,8 @@ Use the wrapper like gcc in your own builds:
 ```sh
 docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
     shle-nto-gcc -O2 -o app app.c -lGLES_CM -lgf
+docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
+    shle-nto-g++ -O2 -o app app.cpp -lgf
 ```
 
 ## Testing on the car
@@ -296,7 +320,7 @@ General procedure:
 2. Turn the ignition on and wait for the MMI to boot fully. Insert the card.
 3. A start screen comes first. Then each app gets a "Next" screen (what it
    does and what you should see) and a result screen. The default run
-   is hello5, hello6 (about 8 min), then usb_tx_test, which runs until
+   is hello8, hello5, hello6 (about 8 min), then usb_tx_test, which runs until
    the card is pulled: that is the end of the run, so its result screen
    and the "all done" screen never appear. With an `SD_APPS` list that
    doesn't end in usb_tx_test, wait for "all done" before pulling.
@@ -336,7 +360,7 @@ code and run time, are in `var/summary.txt`.
 
 Per-app timeouts, arguments, titles and on-screen descriptions are in
 [`sd/apps.conf`](sd/apps.conf), which `make sd` also copies to the card.
-hello5 runs steps `mnvt` there. The screen times are
+hello5 runs steps `mntv` there. The screen times are
 `PRE_S`/`POST_S`/`FINAL_S` in the Makefile.
 
 **Screens.** They are shown with the toolkit's `core/bin/showScreen`
@@ -594,10 +618,51 @@ per-second line now includes `free=<MB>` (the size of `/proc`), to catch a
 driver leak before a freeze. After a freeze, the last `f<n>` line in
 `hello4.log` is the last frame that finished.
 
+### hello8 (`make sd SD_APPS=hello8`)
+
+The first C++ app (`src/hello8/README.md` lists every check). Each check
+records the first expectation that failed (`line N: expr`); while
+everything passes it notes a measurement instead: time per throw, sort
+and map timings, `sleep_for` accuracy, mutex and `fetch_add` throughput.
+
+- **Before each check** its name goes to the log (`check exceptions ...`),
+  so after a crash or a freeze the last such line names the culprit. The
+  checks that everything else relies on come first (static init, then
+  exceptions); the threaded ones come last.
+- **After `main` returns**, a static object's destructor appends `static
+  destructor ran at exit` to `hello8.log`: the `__cxa_atexit` path.
+- **The log's first lines** give the GCC version, `__cplusplus`, and the
+  sizes of `std::mutex`, `std::condition_variable` and their pthread types
+  as built (QNX's layouts: 8 bytes each, not glibc's 24/48).
+- **The likeliest failure is `atomics`:** lost `fetch_add`s between 4
+  threads would confirm that GCC's gUSA atomics aren't atomic under QNX
+  (`sdk/include-c++/README.md`). It is a count, not a crash, and the other
+  checks don't depend on it.
+- **The same checks run on the build host** with glibc's libstdc++, under
+  ASan/UBSan (`make test`, `tests/test_hello8.cpp`). All pass, so the
+  expectations are right and a FAIL on the car is the car's runtime.
+- **2026-10-25 on the car:** it didn't load (`unknown symbol:
+  _ZNSs4_Rep20_S_empty_rep_storageE`): a `STB_GNU_UNIQUE` symbol from
+  `libstdc++.a`, which QNX 6.3's loader doesn't know. `shle-nto-gcc` now
+  rewrites such symbols after the link (`sdk/qnx-elf-fix.py`).
+- **2026-10-28 on the car: 17 of 17 passed**, the static destructor ran,
+  exit 0. `atomics` was too short (under 2 ms per thread) for the threads
+  to interleave, so the gUSA question is still open.
+- **`atomics stress`** (new, not yet on the car) settles it: 4
+  round-robin threads for 1.5 s each with a plain load/store control,
+  GCC's gUSA `fetch_add`, and `fetch_add` built with SH-4A LL/SC
+  (`src/hello8/llcs.cpp`, `-matomic-model=hard-llcs`). Timings are in
+  [src/hello8/README.md](src/hello8/README.md).
+
+`hello8 <sd> [seconds] [checks]`: the results stay up for `seconds`
+(default 20); `checks` (comma-separated, names as on screen) runs only
+those.
+
 ### usb_tx_test (`make sd SD_APPS=usb_tx_test`)
 
-A phone app sends text, and optionally its screen (~2 pictures a second),
-over USB; the MMI shows them and logs them.
+A phone app sends its screen (up to 5 pictures a second by default) over USB; the MMI
+shows it and logs everything. Usage, why text messages were dropped and
+the car results: [src/usb_tx_test/README.md](src/usb_tx_test/README.md).
 
 ```
 phone: android/ app  --USB (AOA bulk)-->  MMI: usb_tx_test  -->  screen + usb_tx_test.log
@@ -616,44 +681,85 @@ sender app because its `accessory_filter.xml` matches manufacturer
 
 Protocol (`src/usb_tx_test/proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say
-who is at each end, `TEXT` carries `seq u16` + UTF-8, `ACK` echoes `seq`.
+who is at each end. `0x02`/`0x03` were `TEXT`/`ACK` (text messages,
+retired 2026-10-25; not to be reused).
 
 **Screen streaming.** Deliberately simple: one JPEG per picture, at most
-every 500 ms, one picture in flight.
+*Max fps* a second (a slider in the phone app, 1–15, default 5), at
+most two pictures in flight.
 
 - The MMI announces what it can show in `VIDEO_CAPS` (sent with its
-  `HELLO` and `HELLO_REPLY`): a landscape box (800×452, under a 28 px
-  status bar) and a portrait box (400×480, the left half), plus 512 KB max
+  `HELLO` and `HELLO_REPLY`): a landscape box (800×480, the whole
+  screen) and a portrait box (400×480, the left half), plus 512 KB max
   per JPEG. A phone app streams only to an MMI that sent it.
 - The phone (`CaptureService`, a MediaProjection foreground service)
   mirrors its screen into a virtual display sized to fit the box for its
   current orientation. It resizes the display when the phone rotates.
-  Every 500 ms it takes the newest image, compresses it (JPEG q60) and
+  When fewer than two pictures are in flight and 1/*Max fps* has passed
+  since the last one was sent, it takes the newest image, compresses it
+  (JPEG q60) and
   sends `VIDEO_START` (id, w, h, format, size) plus `VIDEO_DATA` chunks
   (id + ≤2046 B). A static screen produces no new images and so sends
   nothing. After a replug, the new link gets the last picture again.
 - The MMI reassembles the picture (`vasm.c`), decodes it on its main
   thread (`video.c`, stb_image), draws it and acks it with `VIDEO_ACK`
-  (id, status shown/bad/dropped, decode ms). The phone sends the next
-  picture only after the ack (or after 3 s), so a slow MMI lowers the
-  rate rather than queueing. `VIDEO_STOP` (or the link going down) brings
-  back the text screen.
+  (id, status shown/bad/dropped, decode ms). A picture stays in flight
+  until its ack (or 3 s). With two in flight, the next picture is already
+  waiting on the MMI when the current one is on screen, so the MMI never
+  waits for the phone's capture and transfer. It keeps only the newest
+  waiting picture, so a slow MMI lowers the rate rather than queueing.
+  `VIDEO_STOP` (or the link going down) brings
+  back the status screen.
+- `VIDEO_DETAILS` (phone, `show u8`) switches the status bar over a
+  landscape picture on or off. The phone sends it on every connection
+  and whenever *Details on the MMI* is flipped. The MMI starts with it
+  off, so an older phone app gets the bare picture.
 
 **Portrait vs landscape.** The picture keeps the phone's shape. It is
 never rotated or stretched, only scaled down.
 
-- **Landscape** (w ≥ h): full width under a slim status bar (state,
-  video fps, decode and screen-copy times). The newest message appears
-  as a caption over the bottom of the picture for 15 s.
+- **Landscape** (w ≥ h): centred on the whole screen. A 1080×2340 phone
+  gives 800×368 (its 19.5:9 is wider than the MMI's 5:3, so 368 rows is
+  the most it can fill without cropping). With *Details on the MMI* on,
+  a 28 px status bar (state, video fps, decode and screen-copy times) is
+  drawn over the top. For a 19.5:9 phone it sits in the black band above
+  the picture.
 - **Portrait**: full height on the left (a 1080×2340 phone gives
-  220×480), with the normal text panel (status, messages, footer) in the
+  220×480), with the status panel (state, video stats, footer) in the
   remaining ~580 px.
 
-**Cost on the MMI.** Each picture means a JPEG decode plus one full
-800×480 copy into the VFB. That copy was measured at ~160 ms
-(platform-notes). Both are logged (`video: #n ... decode .. ms, present ..
-ms`) and shown in the status bar or footer. While pictures arrive, the
-1 s clock redraw is skipped.
+**Cost on the MMI.** Each picture means a JPEG decode, a redraw of the
+800×480 screen in RAM and a copy into the VFB. CPU writes into the VFB
+run at ~9 MB/s, so a full copy takes ~160 ms (docs/gpu-results.md). On
+28.10 that copy was ~60 % of the MMI's time per picture. So `screen.c`
+keeps a RAM copy of what each of the two VFB surfaces holds and writes
+only the changed stretch of each row (`copy=changed`, the default; every
+30 s, and for a new surface, a full copy). `usb_tx_test <sd> copy=full`
+(the arguments field in `sd/apps.conf`) brings back the full copy, to
+compare. While pictures arrive, the 1 s clock redraw is skipped.
+
+**Performance metrics** (`perf.c`). Logging is expensive here: every log
+line is fsynced to the SD card. So the threads that move pictures only
+put a record into a RAM ring, and a lower-priority writer thread turns
+the records into:
+
+- one `perf: window` line in `usb_tx_test.log` per 10 s of streaming,
+  plus a `perf: stream` line with the whole stream's totals when it
+  stops. Each has pictures shown, fps, dropped and bad. It has avg/max in
+  ms of every stage: `rx` (USB, `VIDEO_START` to the last `VIDEO_DATA`),
+  `wait` (complete to picked up), `decode`, `render` (RAM canvas), `copy`
+  (into the VFB), `flip` (layer manager) and `latency` (`VIDEO_START` in
+  to on screen). It also has JPEG and VFB KB per picture, the main
+  loop's busy % and the process CPU %.
+- `usb_tx_perf.csv`, one line per picture with the same fields in µs
+  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us`),
+  written 128 lines at a time (or every 30 s, or when the stream stops)
+  with one fsync per batch.
+
+The first three pictures of a stream are still logged one by one. The
+log's start says the clock resolution (`perf: clock resolution`): with
+a 1 ms tick, single µs values are only good to ±1 ms, while averages are
+fine.
 
 **Robustness.** Callbacks from io-usb only queue events; a manager thread
 does all the work. Unplugging the phone, a transfer error, or a device
@@ -722,17 +828,17 @@ clean`.
      app not open*).
    - The phone asks to open usb_tx_test for this accessory. Accept, and
      the bar turns green: *Connected*, with the phone model.
-3. Type and send. The text shows on the MMI, and on the phone it gets a ✓
-   once the MMI has acknowledged it.
-4. *Stream screen* (enabled once the MMI has sent `VIDEO_CAPS`): allow
-   the screen capture, then use the phone as usual. Back or Home keep
-   the app and the stream running. The notification has *Stop*. The app
-   shows sent/shown pictures, the MMI's decode time and the round trip.
-5. Unplug and replug at will. Streaming carries on after a replug. Pull
+3. *Stream screen* (enabled once the MMI has sent `VIDEO_CAPS`): allow
+   the screen capture, then use the phone as usual. Back, Home and
+   turning the phone keep the app and the stream running. The
+   notification has *Stop*. The app shows sent/shown pictures, the MMI's
+   decode time and the round trip. *Details on the MMI* shows the MMI's
+   status bar over a landscape picture (off by default).
+4. Unplug and replug at will. Streaming carries on after a replug. Pull
    the SD card to end it.
 
 Everything is in `usb_tx_test.log` on the card: every USBDI return code, the
-device and interface descriptors, every state change and every message. A
+device and interface descriptors, every state change and every frame. A
 failed handshake or a removal also saves the system log to
 `var/usb_slog_<n>.txt`. run.sh can't do that for this app, because pulling
 the card ends it.
@@ -745,6 +851,11 @@ accessory. An accessory session nobody opens on the phone drops after
 ~18 s, and the app reconnects by itself. Both are handled. The 12.10–19.10
 runs failed on `DEV_NOANSWER` for EP0 control requests with the same phone.
 If that comes back, see the open questions in usb-stack.md.
+
+**2026-10-25:** the link came up again, but no picture was streamed: each
+turn of the phone recreated the app's activity, and the old one's late
+`onClosed` cleared the link the capture service sends on. Fixed in the
+phone app, not yet run on the car ([src/usb_tx_test/README.md](src/usb_tx_test/README.md)).
 
 ### hello6 (`make sd SD_APPS=hello6`)
 
@@ -798,8 +909,12 @@ growing files never start (io-media error `0x80002`). Details:
   `shle-nto-gcc` passes `-fno-builtin-sin*`/`-fno-builtin-cos*`. Without
   them, GCC fuses `sinf` + `cosf` of the same angle into glibc's
   `sincosf`, which QNX's libm doesn't have.
-- **C only.** The car has `libstdc++.so.5` (GCC 3.3 ABI) and Dinkumware
-  `libcpp.so.4`. C++ from modern GCC isn't ABI-compatible with either.
+- **C++ without iostreams.** The car has `libstdc++.so.5` (GCC 3.3 ABI)
+  and Dinkumware `libcpp.so.4`, neither compatible with modern GCC, so
+  C++ apps carry GCC 16's libstdc++ (~180 KB). Its locale code needs glibc:
+  no iostreams, `<sstream>`, `<format>`; no `thread_local`, futures or
+  semaphores ([`sdk/include-c++/README.md`](sdk/include-c++/README.md)).
+  Not run on the car yet.
 - Floating point uses the same `-m4` double ABI as QNX. hello2's
   `glRotatef`/`glOrthof` calls will be the first real test of passing
   floats across the library boundary.

@@ -7,6 +7,8 @@
 #include "keys.h"
 
 #define MSG_BYTES 32            /* ch8 messages are 27 */
+#define STATE_FIRST 16          /* bytes 16-26: state, not controls (below) */
+#define STATE_LAST  26
 
 /* The known controls: a knob takes the whole byte (its value = detents),
  * a button one bit. */
@@ -27,7 +29,17 @@ static const struct {
 /* bytes that are always set: anything else in them is news */
 static int constant(int i)
 {
-	return i == 14 ? 0x01 : i == 15 ? 0x02 : i == 17 ? 0x01 : 0;
+	return i == 14 ? 0x01 : i == 15 ? 0x02 : 0;
+}
+
+/* Bytes 16-26 hold some state of the unit, not controls [inferred]: byte
+ * 16 was 0x00 on 2026-10-21 and 0x03 in every message on 2026-10-25, byte
+ * 26 0x11 all of 25.10, and bytes 23/25 changed with no control touched.
+ * Decoding them as key bits made every message "unknown" (112 of them on
+ * 25.10), so they are left to the raw log. */
+static int is_state(int i)
+{
+	return i >= STATE_FIRST && i <= STATE_LAST;
 }
 
 static int add(struct key_hit *out, int n, int max, int ctl, int amount,
@@ -51,7 +63,7 @@ int key_decode(const unsigned char *buf, int n, struct key_hit *out, int max)
 	if (n > MSG_BYTES)
 		n = MSG_BYTES;
 	for (i = 0; i < n; i++)
-		left[i] = buf[i] ^ constant(i);
+		left[i] = is_state(i) ? 0 : buf[i] ^ constant(i);
 	for (i = 0; i < NKNOWN; i++) {
 		int b = known[i].byte, v = left[b] & known[i].mask;
 

@@ -22,9 +22,12 @@ import java.util.concurrent.Executors
  * activity then goes back to waiting. A link is single-use.
  *
  * Video: the MMI announces what it can show in VIDEO_CAPS ([videoCaps],
- * null for an MMI app without video). [sendPicture] keeps one picture in
- * flight: the next is accepted once the MMI acked the last one (shown,
- * bad or dropped) or after [ACK_TIMEOUT_MS].
+ * null for an MMI app without video). [sendPicture] keeps at most
+ * [MAX_IN_FLIGHT] pictures in flight: one being decoded and drawn on the
+ * MMI, the next already there waiting, so the MMI never sits idle while
+ * the phone captures, compresses and sends. The MMI keeps only the newest
+ * waiting picture, so nothing queues up. A picture counts as done when
+ * the MMI acks it (shown, bad or dropped) or after [ACK_TIMEOUT_MS].
  */
 class AccessoryLink(
     private val usb: UsbManager,
@@ -33,8 +36,7 @@ class AccessoryLink(
 ) {
     interface Listener {
         fun onPeerHello(peer: String)
-        fun onAck(seq: Int)
-        fun onClosed(reason: String)
+        fun onClosed(closed: AccessoryLink, reason: String)
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -42,7 +44,6 @@ class AccessoryLink(
     private var pfd: ParcelFileDescriptor? = null
     private var output: FileOutputStream? = null
     @Volatile private var closed = false
-    private var nextSeq = 1
 
     @Volatile var videoCaps: Proto.VideoCaps? = null
         private set
@@ -60,8 +61,7 @@ class AccessoryLink(
     }
     val video = VideoStats()
     private val flight = Any()
-    private var inFlightId = -1
-    private var inFlightSince = 0L
+    private val inFlight = LinkedHashMap<Int, Long>()    // id -> sent at (elapsedRealtime)
 
     val description: String get() = "${accessory.manufacturer} ${accessory.model}"
 
@@ -81,24 +81,34 @@ class AccessoryLink(
         return true
     }
 
-    /** Queues a TEXT frame; returns its seq, or -1 if the text is too long. */
-    fun sendText(text: String): Int {
-        val seq = nextSeq
-        val frame = Proto.textOrNull(seq, text) ?: return -1
-        nextSeq = if (nextSeq == 0xffff) 1 else nextSeq + 1
-        write(frame)
-        return seq
+    /** True if [sendPicture] would take a picture now. */
+    fun readyForPicture(): Boolean {
+        if (closed) return false
+        synchronized(flight) {
+            expire(SystemClock.elapsedRealtime())
+            return inFlight.size < MAX_IN_FLIGHT
+        }
     }
 
-    /** Queues a picture; false if the previous one is still in flight. */
+    // flight held
+    private fun expire(now: Long) {
+        val it = inFlight.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (now - e.value < ACK_TIMEOUT_MS) continue
+            Log.w(TAG, "picture ${e.key} never acked")
+            it.remove()
+        }
+    }
+
+    /** Queues a picture; false if [MAX_IN_FLIGHT] are still in flight. */
     fun sendPicture(id: Int, w: Int, h: Int, jpeg: ByteArray): Boolean {
         if (closed) return false
         val now = SystemClock.elapsedRealtime()
         synchronized(flight) {
-            if (inFlightId >= 0 && now - inFlightSince < ACK_TIMEOUT_MS) return false
-            if (inFlightId >= 0) Log.w(TAG, "picture $inFlightId never acked")
-            inFlightId = id
-            inFlightSince = now
+            expire(now)
+            if (inFlight.size >= MAX_IN_FLIGHT) return false
+            inFlight[id] = now
         }
         video.sent++
         video.bytes = jpeg.size
@@ -109,8 +119,13 @@ class AccessoryLink(
     }
 
     fun sendVideoStop() {
-        synchronized(flight) { inFlightId = -1 }
+        synchronized(flight) { inFlight.clear() }
         write(Proto.encode(Proto.VIDEO_STOP, ByteArray(0)))
+    }
+
+    /** The MMI's status bar over a landscape picture on / off. */
+    fun sendDetails(show: Boolean) {
+        write(Proto.videoDetails(show))
     }
 
     fun close(reason: String) {
@@ -122,7 +137,7 @@ class AccessoryLink(
         // still sit in read() until the host sends something - it is a
         // daemon thread and ignores everything once `closed` is set.
         try { pfd?.close() } catch (_: IOException) { }
-        main.post { listener.onClosed(reason) }
+        main.post { listener.onClosed(this, reason) }
     }
 
     private fun write(frame: ByteArray) {
@@ -171,10 +186,6 @@ class AccessoryLink(
                 val peer = String(payload, Charsets.UTF_8)
                 main.post { if (!closed) listener.onPeerHello(peer) }
             }
-            Proto.ACK -> if (payload.size >= 2) {
-                val seq = Proto.u16(payload, 0)
-                main.post { if (!closed) listener.onAck(seq) }
-            }
             Proto.VIDEO_CAPS -> Proto.videoCapsOrNull(payload)?.let { caps ->
                 if (videoCaps != caps) Log.i(TAG, "MMI video caps $caps")
                 videoCaps = caps
@@ -192,9 +203,8 @@ class AccessoryLink(
             else -> video.dropped++
         }
         synchronized(flight) {
-            if (ack.id == inFlightId) {
-                video.roundTripMs = SystemClock.elapsedRealtime() - inFlightSince
-                inFlightId = -1
+            inFlight.remove(ack.id)?.let { sentAt ->
+                video.roundTripMs = SystemClock.elapsedRealtime() - sentAt
             }
         }
     }
@@ -202,6 +212,7 @@ class AccessoryLink(
     companion object {
         private const val TAG = "usb_tx_test"
         const val ACK_TIMEOUT_MS = 3000L
+        const val MAX_IN_FLIGHT = 2
         val HELLO = "usb_tx_test-android/1 ${Build.MANUFACTURER} ${Build.MODEL}"
     }
 }

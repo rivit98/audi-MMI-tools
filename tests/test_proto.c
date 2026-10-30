@@ -38,18 +38,18 @@ static void reset(void)
 static void test_encode(void)
 {
 	uint8_t big[PROTO_MAX_PAYLOAD + 1] = { 0 };
-	unsigned n = proto_encode(buf, sizeof(buf), PROTO_TEXT, "\x05\x00hi", 4);
+	unsigned n = proto_encode(buf, sizeof(buf), PROTO_VIDEO_DATA, "\x05\x00hi", 4);
 
 	CHECK_EQ(n, 7);
-	CHECK_EQ(buf[0], PROTO_TEXT);
+	CHECK_EQ(buf[0], PROTO_VIDEO_DATA);
 	CHECK_EQ(buf[1], 4);
 	CHECK_EQ(buf[2], 0);
 	CHECK(memcmp(buf + 3, "\x05\x00hi", 4) == 0);
 
-	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_ACK, NULL, 0), 3);
-	CHECK_EQ(proto_encode(buf, 6, PROTO_TEXT, "\x05\x00hi", 4), 0);   /* no room */
-	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_TEXT, big, sizeof(big)), 0);
-	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_TEXT, big, PROTO_MAX_PAYLOAD),
+	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_VIDEO_STOP, NULL, 0), 3);
+	CHECK_EQ(proto_encode(buf, 6, PROTO_VIDEO_DATA, "\x05\x00hi", 4), 0);   /* no room */
+	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_VIDEO_DATA, big, sizeof(big)), 0);
+	CHECK_EQ(proto_encode(buf, sizeof(buf), PROTO_VIDEO_DATA, big, PROTO_MAX_PAYLOAD),
 	         PROTO_MAX_FRAME);
 	/* length is little endian */
 	CHECK_EQ(buf[1], PROTO_MAX_PAYLOAD & 0xff);
@@ -62,7 +62,7 @@ static void test_whole_frames(void)
 
 	reset();
 	n = proto_encode(buf, sizeof(buf), PROTO_HELLO, "phone", 5);
-	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_ACK, "\x01\x02", 2);
+	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_VIDEO_ACK, "\x01\x02", 2);
 	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_HELLO_REPLY, NULL, 0);
 	proto_dec_feed(&dec, buf, n, collect, &got);
 
@@ -70,7 +70,7 @@ static void test_whole_frames(void)
 	CHECK_EQ(got.type[0], PROTO_HELLO);
 	CHECK_EQ(got.len[0], 5);
 	CHECK(memcmp(got.payload[0], "phone", 5) == 0);
-	CHECK_EQ(got.type[1], PROTO_ACK);
+	CHECK_EQ(got.type[1], PROTO_VIDEO_ACK);
 	CHECK_EQ(proto_get_u16(got.payload[1]), 0x0201);
 	CHECK_EQ(got.type[2], PROTO_HELLO_REPLY);
 	CHECK_EQ(got.len[2], 0);
@@ -81,8 +81,8 @@ static void test_byte_by_byte(void)
 	unsigned n, i;
 
 	reset();
-	n = proto_encode(buf, sizeof(buf), PROTO_TEXT, "\x07\x00zażółć", 2 + 10);
-	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_TEXT, "\x08\x00x", 3);
+	n = proto_encode(buf, sizeof(buf), PROTO_VIDEO_DATA, "\x07\x00zażółć", 2 + 10);
+	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_VIDEO_DATA, "\x08\x00x", 3);
 	for (i = 0; i < n; i++)
 		proto_dec_feed(&dec, buf + i, 1, collect, &got);
 
@@ -113,13 +113,13 @@ static void test_oversized_skipped(void)
 
 	reset();
 	/* hand-made oversized frame, then a good one */
-	buf[0] = PROTO_TEXT;
+	buf[0] = PROTO_VIDEO_DATA;
 	buf[1] = big & 0xff;
 	buf[2] = big >> 8;
 	for (i = 0; i < big; i++)
 		buf[3 + i] = 0xAA;
 	n = 3 + big;
-	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_ACK, "\x09\x00", 2);
+	n += proto_encode(buf + n, sizeof(buf) - n, PROTO_VIDEO_ACK, "\x09\x00", 2);
 
 	/* in three uneven pieces, so the skip crosses feeds */
 	proto_dec_feed(&dec, buf, 100, collect, &got);
@@ -128,7 +128,7 @@ static void test_oversized_skipped(void)
 
 	CHECK_EQ(dec.oversized, 1);
 	CHECK_EQ(got.n, 1);
-	CHECK_EQ(got.type[0], PROTO_ACK);
+	CHECK_EQ(got.type[0], PROTO_VIDEO_ACK);
 	CHECK_EQ(proto_get_u16(got.payload[0]), 9);
 }
 
@@ -139,7 +139,7 @@ static void test_max_payload_accepted(void)
 
 	reset();
 	memset(p, 'x', sizeof(p));
-	n = proto_encode(buf, sizeof(buf), PROTO_TEXT, p, sizeof(p));
+	n = proto_encode(buf, sizeof(buf), PROTO_VIDEO_DATA, p, sizeof(p));
 	proto_dec_feed(&dec, buf, n, collect, &got);
 	CHECK_EQ(got.n, 1);
 	CHECK_EQ(got.len[0], PROTO_MAX_PAYLOAD);

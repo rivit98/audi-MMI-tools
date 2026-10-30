@@ -41,6 +41,7 @@ int vasm_start(struct vasm *a, const uint8_t *p, unsigned n, int *dropped_id,
 	if (pic.size == 0 || pic.size > a->max_bytes || pic.format != PROTO_FMT_JPEG ||
 	    pic.w == 0 || pic.h == 0)
 		return VASM_BAD;
+	pic.rx_start_us = pic.rx_done_us = 0;
 	pic.data = malloc(pic.size);
 	if (pic.data == NULL)
 		return VASM_BAD;

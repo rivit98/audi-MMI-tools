@@ -2,8 +2,8 @@ package mmi3g.usbtx
 
 /**
  * Portrait vs landscape: the phone's screen keeps its own shape. A screen
- * at least as wide as it is tall goes into the MMI's landscape box (under
- * its status bar, full width), a taller one into the portrait box (left
+ * at least as wide as it is tall goes into the MMI's landscape box (the
+ * whole 800x480 screen), a taller one into the portrait box (left
  * half of the MMI, full height, text panel beside it). Never stretched or
  * rotated; scaled to fit, even sizes.
  */

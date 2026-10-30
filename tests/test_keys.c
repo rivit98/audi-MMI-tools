@@ -50,6 +50,22 @@ int main(void)
 	one(9, 0x10, K_UNKNOWN, 1, "unknown b9 0x10");
 	one(14, 0x03, K_UNKNOWN, 1, "unknown b14 0x02");  /* a constant changed */
 
+	/* 2026-10-25: state bytes 16 = 0x03, 26 = 0x11, 23/25 changing: no key */
+	msg(m, 6, 1);
+	m[16] = 0x03;
+	m[23] = 0x12;
+	m[25] = 0x0f;
+	m[26] = 0x11;
+	n = key_decode(m, 27, h, KEY_MAX_HITS);
+	CHECK_EQ(n, 1);
+	key_describe(h, n, buf, sizeof(buf));
+	CHECK_STR(buf, "main knob right x1");
+	msg(m, -1, 0);
+	m[16] = 0x03;
+	m[26] = 0x11;
+	CHECK_EQ(key_decode(m, 27, h, KEY_MAX_HITS), 1);
+	CHECK_EQ(h[0].ctl, K_RELEASE);
+
 	/* two buttons and an unknown bit in the same byte at once */
 	msg(m, 1, 0x02 | 0x40 | 0x01);
 	m[3] = 0x04;
