@@ -141,6 +141,11 @@ void log_toolchain()
 {
 	log_msg("built with GCC %s, __cplusplus %ld, libstdc++ %d (_GLIBCXX_RELEASE %d)",
 	        __VERSION__, __cplusplus, __GLIBCXX__, _GLIBCXX_RELEASE);
+#if defined(__SH_ATOMIC_MODEL_HARD_LLCS__)
+	log_msg("atomics: hard-llcs (SH-4A movli.l/movco.l)");
+#elif defined(__SH_ATOMIC_MODEL_SOFT_GUSA__)
+	log_msg("atomics: soft-gusa");
+#endif
 	log_msg("sizes: std::string %u, std::mutex %u (pthread_mutex_t %u), "
 	        "std::condition_variable %u (pthread_cond_t %u), std::thread %u, "
 	        "std::shared_ptr %u, wchar_t %u, long double %u, time_t %u",

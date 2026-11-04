@@ -9,7 +9,7 @@
 # level 3 are not supported") and what a phone's MediaCodec would send.
 #
 # hello6 (src/hello6/texts.h) has the same list and D (CLIP_S), long
-# enough for hello6's two capture-unit attempts per clip (~25 s).
+# enough for hello6's two capture-unit attempts per clip (~20 s).
 set -euo pipefail
 
 if [[ $# -ne 1 || -z "$1" ]]; then
@@ -17,7 +17,7 @@ if [[ $# -ne 1 || -z "$1" ]]; then
   exit 2
 fi
 OUT=$1
-D=30
+D=22
 FPS=25
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 
@@ -64,6 +64,20 @@ ff -f lavfi -i "$(vf 720 336 'c7 H.264 720x336 fMP4')" "${SIL44[@]}" "${X264[@]}
 # c8: H.264 + MP2 in MPEG-PS, the other streamable container
 ff -f lavfi -i "$(vf 720 336 'c8 H.264 720x336 MPEG-PS')" "${SIL48[@]}" "${X264[@]}" \
   -c:a mp2 -b:a 192k -shortest -f vob "$OUT/c8_h264_336.mpg"
+
+# c9/c10: constant-sample-size MP4 (media/csmp4.py), the layout a live
+# stream can use: moov first with one-entry tables, every frame padded to
+# the same size with a filler NAL. c10's moov declares 10 minutes; hello9
+# writes it to the card while it plays, and serves it as its live stream.
+# vbv caps the I-frames, so the padded size stays small.
+CS264=(-c:v libx264 -profile:v baseline -level:v 3.0 -pix_fmt yuv420p -preset veryfast
+  -b:v 1500k -maxrate 1500k -bufsize 400k -g "$FPS" -keyint_min "$FPS" -sc_threshold 0
+  -bf 0 -refs 1 -an -f h264)
+ff -f lavfi -i "$(vf 720 336 'c9 H.264 720x336 const-size MP4')" "${CS264[@]}" "$OUT/c9.h264"
+python3 media/csmp4.py "$OUT/c9.h264" "$OUT/c9_h264_336_cs.mp4" "$FPS"
+ff -f lavfi -i "$(vf 720 336 'c10 const-size MP4, 10 min moov')" "${CS264[@]}" "$OUT/c10.h264"
+python3 media/csmp4.py "$OUT/c10.h264" "$OUT/c10_h264_336_cs_live.mp4" "$FPS" 600
+rm -f "$OUT"/*.h264
 
 # what came out
 for f in "$OUT"/*.*; do

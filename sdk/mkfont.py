@@ -4,7 +4,7 @@
 usage: mkfont.py <font.psf.gz> <c_name> <out.h>
 
 Writes every glyph plus the font's whole unicode map (sorted, BMP only),
-for src/usb_tx_test/text.h. Unknown characters fall back to the glyph of
+for src/audi_stream_receiver/text.h. Unknown characters fall back to the glyph of
 '?'. Fonts: sdk/fonts/ (Terminus, SIL OFL 1.1, see OFL.txt).
 """
 import gzip

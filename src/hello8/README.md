@@ -25,7 +25,7 @@ expectation that failed.
 | threads | 4 threads with a mutex, thread arguments, exceptions in 4 threads at once, one static initialised from 4 threads, recursive/shared mutexes, `scoped_lock` |
 | sync | `condition_variable` (producer/consumer, timed wait), `call_once` |
 | atomics | the operations, then 4 threads × 200000 `fetch_add`: counts lost updates |
-| atomics stress | 4 round-robin threads add to one counter for 1.5 s, three ways: plain load + add + store (the control, must lose updates), GCC's default gUSA `fetch_add`, and the same `fetch_add` built with SH-4A LL/SC (`llcs.cpp`, must lose none). Reports the lost updates of each |
+| atomics stress | 4 round-robin threads add to one counter for 1.5 s, three ways: plain load + add + store (the control, must lose updates), `fetch_add` built with GCC's old sh4 default gUSA (`gusa.cpp`, `soft-gusa,strict`), and the same `fetch_add` with the SDK's default SH-4A LL/SC (`llcs.cpp`, must lose none). Reports the lost updates of each |
 
 - **Run:** `hello8 <sd_path> [seconds] [check,check,...]`. Results stay up
   for `seconds` (default 20). The last argument runs only the named
@@ -36,12 +36,31 @@ expectation that failed.
   `hello8 exit` says the static destructors ran.
 - **If it crashes or hangs:** the last `check ...` line names the check.
   Rerun the others with the third argument.
-- **Status:** the first 17 checks pass on the car (2026-10-28, below) and
-  all 18 on the build host with glibc's libstdc++ (`make test`).
-  `atomics stress` is new and hasn't run on the car yet; it answers what
-  `atomics` couldn't (below).
+- **Status:** all 18 checks pass on the car (2026-10-30, below) and on the
+  build host with glibc's libstdc++ (`make test`). Since then the SDK
+  builds everything with LL/SC atomics. hello8 ran once more to confirm
+  that build on the car (2026-11-03: 18 of 18, below) and has left the
+  default run. Run it again after changing the SDK's C++ runtime or its
+  atomics model.
 
 ## On the car
+
+**2026-11-03: 18 of 18 passed with the LL/SC SDK build**
+(`runs/3.11.2026 - run1/hello8.log`). The log says `atomics: hard-llcs
+(SH-4A movli.l/movco.l)`, exit 0, static destructor ran. Checks 1–17 gave
+30.10's timings to the microsecond (throw + catch 68 µs, sort 10k 2.0 ms,
+4 × 20000 mutex locks 16 ms). `atomics stress`:
+
+| loop | adds in 1.5 s | lost |
+|---|---|---|
+| plain load / add / store | 184.6 M | 95.2 M (52 %) |
+| gUSA `fetch_add` (`gusa.cpp`, `soft-gusa,strict`) | 129.1 M | **83.2 M (64 %)** |
+| LL/SC `fetch_add` (the SDK default now) | 129.1 M | **0** |
+
+The SDK's default atomics work on the car, so hello8 left the default run.
+gUSA lost 7× more than on 30.10 (11.6 M). How much it loses depends on
+where the context switches land, so the count varies from run to run;
+the answer, "not atomic under QNX", doesn't.
 
 **2026-10-25: did not start.** The loader refused the binary before
 `main`, in 0 s:
@@ -62,7 +81,7 @@ executable) and sets the ELF OS/ABI back to System V like the stock
 binaries. It fails the build on what it can't fix (IFUNC symbols, a TLS
 segment). Rebuild the image with `make sdk`.
 
-**2026-10-28: 17 of 17 passed** (`dev/28.10.2026 - c++, sound/`). It
+**2026-10-28: 17 of 17 passed** (`runs/28.10.2026 - c++, sound/`). It
 loaded (so the `qnx-elf-fix.py` fix works), ran all checks in 3.8 s, kept the
 results up for 20 s and exited 0. `static destructor ran at exit` came
 last, so `__cxa_atexit` works too. The system log has nothing from or
@@ -90,7 +109,7 @@ and 0 lost proves nothing yet [inferred]. To test it, run the loop for
 seconds instead of 200000 iterations, so the threads are switched mid-loop
 thousands of times.
 
-**Hence `atomics stress`** (added after this run, not yet on the car). Its
+**Hence `atomics stress`** (added after this run; on the car 2026-10-30, below). Its
 three loops, as built for the car:
 
 ```
@@ -116,4 +135,39 @@ updates are lost.
 say `sh4a` instead of the stock binaries' `sh4`. QNX's loader looks only
 at `e_machine` (openqnx `proc/loader_elf.c`), so it should still load,
 and if it does, that is also the check that an app built entirely with
-these flags can run.
+these flags can run. It did (2026-10-30).
+
+**2026-10-30: 18 of 18 passed** (`runs/30.10.2026 - media/hello8.log`).
+The `sh4a`-flagged binary loaded and ran, so QNX's loader really does
+ignore the ELF flags. The first 17 checks gave the same timings as on
+28.10 (throw + catch 68 µs, sort 10k 2.0 ms, `sleep_for(100ms)` 101 ms,
+4 × 20000 mutex locks 16 ms). Exit 0, static destructor ran.
+
+`atomics stress`, 4 `SCHED_RR` threads, 1.5 s per loop:
+
+| loop | adds in 1.5 s | lost | |
+|---|---|---|---|
+| plain load / add / store | 184.5 M | 96.9 M (53 %) | the control: the threads did interleave |
+| gUSA `fetch_add` (GCC's default) | 129.1 M | **11.6 M (9 %)** | **not atomic under QNX** |
+| LL/SC `fetch_add` (`-matomic-model=hard-llcs`) | 129.1 M | **0** | atomic, and as fast as gUSA |
+
+So the second row of the table above holds: **gUSA is broken on QNX,
+LL/SC fixes it.** A thread switched out inside a gUSA sequence isn't
+restarted, and when it resumes it stores a stale value. That one store
+wipes out every add the other threads made in the meantime, which is why
+a few thousand context switches lose millions of updates. LL/SC costs
+nothing extra here: 129.1 M adds both ways. What this means for apps is in
+[docs/cpp-apps.md](../../docs/cpp-apps.md#threads-and-atomics).
+
+**After 2026-10-30: the SDK's default is LL/SC.** `shle-nto-gcc` now
+builds everything with `-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a`, so
+the roles in hello8 swapped. `llcs.cpp` gets the default flags and
+`#error`s if the default model isn't hard-llcs. `gusa.cpp` is built on its
+own with `-matomic-model=soft-gusa,strict`. Without `,strict`, GCC on
+SH-4A uses `movli.l`/`movco.l` for 32-bit atomics even in a "soft" model,
+and the Makefile fails the build if `hello8-gusa.o` has any. The two
+earlier runs are unaffected, because their gUSA loop was built with
+`-m4`. The log now starts with the atomics model (`atomics: hard-llcs`).
+`make gusa-scan` lists the gUSA sequences left: in hello8 only `gusa.cpp`
+and what is precompiled into `libstdc++.a`/`libgcc_eh.a`
+([docs/cpp-apps.md](../../docs/cpp-apps.md#threads-and-atomics)).

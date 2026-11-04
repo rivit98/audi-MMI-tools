@@ -1,7 +1,7 @@
 # Phone screen mirroring on the MMI 3G+: options and feasibility
 
 How to show an Android phone's screen (Redmi Note 8 Pro, 1080×2340) on this
-unit's 800×480 display. This doc assumes `usb_tx_test` works, i.e. we have a
+unit's 800×480 display. This doc assumes `audi_stream_receiver` works, i.e. we have a
 working Android Open Accessory (AOA) bulk link between the phone and our own
 SH4 app. The phone is used in **landscape only**.
 
@@ -21,10 +21,10 @@ camera input) is rejected and not covered here.
 
 | # | Option | Feasibility | Effort | Main risk |
 |---|---|---|---|---|
-| 0 | JPEG pictures over AOA, CPU-decoded, ~2 fps (built 2026-10-22 in `usb_tx_test` + the Android app; README "Screen streaming") | **Built, not yet run on the car** | done | CPU: one JPEG decode + one ~160 ms VFB copy per picture |
+| 0 | JPEG / PNG pictures over AOA, CPU-decoded (built 2026-10-22 in `audi_stream_receiver` + the Android app; README "Screen streaming") | **Works on the car**: 2 fps 28.10, 3 fps 30.10 with the MMI ~30 % busy (~10 fps ceiling). k× capture + PNG built 30.10, not yet run | done | Text blurred on 30.10 (phone-side 3–5:1 bilinear downscale + JPEG q60, fixed, unconfirmed); PNG decode cost on the SH4 unmeasured |
 | 1 | Raw pixels (dirty tiles + LZ4) over AOA, drawn with GL | **High** | ~1–2 weeks | Throughput: VFB writes from the CPU are slow, GL upload speed is unmeasured |
 | 1b | Same, but DXT1 tiles uploaded as compressed textures | **High** | +3–5 days on top of 1 | Text quality (block artifacts) |
-| 2a | Hardware H.264 (DM642 DSP), stream fed to `io-media-nvidia` | **Medium** | ~2–4 weeks | Does io-media accept a live, growing input? Latency 0.5–2 s? |
+| 2a | Hardware H.264 (DM642 DSP), stream fed to `io-media-nvidia` | **High**: a live stream played on the car 04.11 (§7.10) | ~2–3 weeks | Phone encoder output must fit one frame size S and keep a steady rate; ~0.5 s latency from io-media |
 | 2b | Hardware H.264, talking to the DSP driver directly | **Low** | months | Private NVIDIA protocol (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) |
 | 3 | Software H.264 on the SH4 | **Rejected** | — | ~5–10 fps at best [unverified estimate] |
 | 4 | scrcpy over adb (MMI acts as adb host) | **Medium** | ~2–3 weeks + 2a | Needs USB debugging always on. Video still needs 2a or 2b. |
@@ -41,14 +41,27 @@ camera input) is rejected and not covered here.
    played on screen through VCAP 0 (§7.4). **Since 21.10, H.264 Baseline
    (720×480, 720×336) plays on screen too (§7.5).** None of the streamable
    inputs (fMP4, H.264 in MPEG-PS, growing files) start, and neither does
-   800-wide H.264, so 2a now hinges on io-media's parsers/reader.
+   800-wide H.264. **02.11 RE (§7.8):** io-media refuses anything wider
+   than 720 or taller than 576 on purpose, and `mp4_parser` ignores `moof`.
+   A plain MP4 with a constant sample size has a tiny header that can be
+   written before the frames exist, which makes it a live-stream container
+   io-media should take. hello9 tests that next, up to a live stream it
+   serves itself. **03.11 (§7.9):** every CS-MP4 was refused at open,
+   because io-media's own MP4 demuxer can't read the 64-bit `mdat` header
+   `csmp4.py` wrote. Nothing about streaming has been tested yet. Fixed
+   the same day (32-bit `mdat`); the next run repeats hello9.
+   **04.11 (§7.10): live hardware streaming works.** c9 (CS-MP4) played,
+   and so did a 30 s live stream hello9 served itself through blocking
+   reads, at 25 fps with a steady ~0.5 s lag and ~10 % CPU. Pauses in the
+   stream are waited out. 2a is now the path to build; see §7.10 for
+   what's left.
 
 **2026-10-22:** a deliberately simple stopgap (option 0) is built into
-`usb_tx_test`. It sends the phone's screen as JPEG pictures, 2 a second at
+`audi_stream_receiver`. It sends the phone's screen as JPEG pictures, 2 a second at
 most, one in flight, with portrait shown pillarboxed on the left. That
 departs from the landscape-only assumption above. It measures real AOA
 receive and per-picture costs on the car (`video:` lines in
-`usb_tx_test.log`), which option 1 needs anyway.
+`audi_stream_receiver.log`), which option 1 needs anyway.
 
 ---
 
@@ -218,7 +231,7 @@ less than 1 MB/s, so only options 1 and 1b depend on this number.
 | Capture | MediaProjection → VirtualDisplay. One consent dialog per session, no root. Needs a foreground service. | High: standard API since Android 5 |
 | Raw frames (1, 1b) | VirtualDisplay → `ImageReader` (RGBA_8888) → tile diff → RGB565 + LZ4, or DXT1 | High. The phone CPU handles 800×480 easily. |
 | H.264 (2a) | VirtualDisplay → `MediaCodec` encoder surface. `KEY_PROFILE=AVCProfileBaseline`, `KEY_LEVEL=AVCLevel3`, 25–30 fps, 2–4 Mbit/s, I-frame every 1–2 s, `KEY_LATENCY=0` where supported. | High, but check `MediaCodecList` for a hardware Baseline encoder at the chosen size **[unverified on this phone]**. |
-| Transport | Existing AOA bulk link (`usb_tx_test` protocol, with new frame types) | Confirmed working (assumed for this doc) |
+| Transport | Existing AOA bulk link (`audi_stream_receiver` protocol, with new frame types) | Confirmed working (assumed for this doc) |
 | Input | **AOA v2 HID**: the accessory registers a HID device with the phone over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57 `SEND_HID_EVENT`). This is what scrcpy's OTG mode uses. The knob from `/dev/ipc/ch8` maps to keyboard D-pad, Enter and Back, or to a mouse. No adb, no root. | High. The MMI side reuses the existing `usbd_setup_vendor` path. |
 
 ### Landscape only
@@ -266,7 +279,7 @@ letterboxes by itself.
 | Unverified | GL upload MB/s, USB bulk MB/s, LZ4 decompression speed on the SH4 (expect ≥ 100 MB/s, no FPU involved) |
 | Pros | Sharpest image. Lowest latency (one frame of encoding). Almost no new unknowns. The phone app is plain Kotlin. |
 | Cons | Busy content (scrolling, video, map panning) sends whole frames: 800×369×2 = 590 KB before LZ4. At 10 MB/s of upload or USB that's about 15 fps. |
-| Effort | MMI: ~1 week (GL path from hello3, protocol from usb_tx_test). Phone: ~1 week (MediaProjection, tiles, LZ4 via `lz4-java`, HID). |
+| Effort | MMI: ~1 week (GL path from hello3, protocol from audi_stream_receiver). Phone: ~1 week (MediaProjection, tiles, LZ4 via `lz4-java`, HID). |
 
 ### Option 1b: DXT1 tiles
 
@@ -287,10 +300,12 @@ NDK, or a GLES 3.1 compute shader. The MMI uploads with
 
 **Design.** The phone sends Baseline Level 3 H.264 over AOA. The MMI app:
 
-1. runs a QNX resource manager at e.g. `/dev/mirror/live.mp4` (or `.mpg`)
-   that serves the incoming stream wrapped in a streamable container: a
-   fragmented MP4, or MPEG-PS carrying H.264 (stream id 0xE0). Reads block
-   until new data arrives.
+1. runs a QNX resource manager at e.g. `/dev/mirror/live.mp4` that serves
+   the incoming stream as a **constant-sample-size MP4** (§7.8): a fixed
+   `moov` declaring hours of frames, then frame k at `mdat + k·S`, each
+   padded to S bytes with a filler NAL. Reads block until frame k has
+   arrived. (Fragmented MP4 and MPEG-PS were the first idea; io-media takes
+   neither, §7.5 and §7.8.)
 2. tells io-media to play `file:///dev/mirror/live.mp4` (the same calls
    `testapp-cmdline` makes: attach input, attach output, play).
 3. registers and shows a **video displayable with flags 0x101** (VCAP 0)
@@ -300,16 +315,14 @@ NDK, or a GLES 3.1 compute shader. The MMI uploads with
 | | |
 |---|---|
 | Confirmed | The DSP H.264 BP decoder exists. io-media's profile/level checks. The DSP → VCAP 0 input 1 → layer path, on screen, with files played by `testapp-file` outside the HMI: MPEG-2 720×576 (§7.4), MPEG-4 640×480, **H.264 BP 720×480 and 720×336 in plain MP4** (§7.5). The `LMGR_VIDEO` / VCAP flag bits in layermanagerV2. The test clients. `file://` input. **Not playing (21.10):** 800×480 H.264, fragmented MP4, H.264 in MPEG-PS, growing files (io-media error `0x80002` at once). |
-| Unverified | Why those fail: the `width < 720` assert for 800 wide, parser support for fMP4 / PS-H.264, and whether any parser tolerates a growing, unseekable input (mp4_parser calls `vstream_length` and seeks). Prefetch latency (`queue-pre-hw = 50`, `queue-time = 1000` ms for the mediafs graph). Coexistence with MMI3GMedia, which owns io-media and the global video lock. |
+| Explained by RE (02.11, §7.8) | 800 wide: io-media's own check refuses width > 720 or height > 576. fMP4: `mp4_parser` walks `moof`/`traf` but has no `trun`/`tfhd` handler, so the sample tables stay empty and validation fails. The parser reads through io-media's file streamer with no length checks, so blocking reads look like a slow file. |
+| Confirmed on the car (04.11, §7.10) | CS-MP4 with filler-padded frames and a `moov` over-declaring 10 min plays. A live stream from our own resource manager plays for 30 s with reads that block ~90 ms each; io-media reads sequentially in 64 KB and only ~2.7 frames ahead. Lag ~0.5 s, steady. Pauses of 2 s and 5 s are waited out (no unblock); after one the picture skips the ~9 queued frames and goes on at 1×. ~10 % unit CPU. A growing file on the card does not work (EIO). |
+| Unverified | Real phone-encoder output (frame-size spread, keyframes vs S, rates other than 25 fps, bursts). Where the ~9-frame queue lives and whether S or the frame rate changes it. Sessions longer than 36 s, and the 4 GB limit (~1.6 h at 28 KB × 25 fps). Coexistence with MMI3GMedia, which owns io-media and the global video lock, and with the rear camera on VCAP 0 input 0. |
 | Pros | 2–4 Mbit/s whatever the content. 25–30 fps. The SH4 is idle. Smooth for video and map panning. |
-| Cons | Latency probably 0.5–2 s from io-media buffering, so it's poor for interactive use. Fragile next to the HMI's own media playback. A DSP crash path exists ("dsp crash, remaining retries"). |
-| Effort | 2–4 weeks: resource manager, fMP4 or PS muxer (on the phone or the MMI), iom client, video displayable. Plus 1 week of RE if the stream won't play as-is. |
+| Cons | Latency ~0.5 s from io-media (measured 04.11) plus the phone's encoder and USB: fine for viewing, sluggish for interaction. Fragile next to the HMI's own media playback. A DSP crash path exists ("dsp crash, remaining retries"). |
+| Effort | Resource manager, iom client and video displayable exist and work in hello9 (04.11). Left: ~2–3 weeks for the phone encoder, the CS-MP4 header from the phone's SPS/PPS, and wiring it into `audi_stream_receiver` (§7.10). |
 
-**First reverse-engineering step if T1 passes but streaming fails:** re-carve
-`io-media-nvidia` cleanly (the current copy's data segment is shifted by
-`0x1dc8` bytes, see §6), then trace `vstream_read` /
-`vstream_bytes_available` in `mp4_parser.so` and the `file://` reader's EOF
-handling.
+The reverse-engineering step planned here was done on 02.11 (§7.8).
 
 ### Option 2b: direct DSP access
 
@@ -331,7 +344,7 @@ dominate it.
 
 **Design.**
 1. The MMI implements the adb host protocol (CNXN / AUTH / OPEN / WRTE /
-   OKAY) on the phone's adb interface (`ff/42/01`; `usb_tx_test` currently
+   OKAY) on the phone's adb interface (`ff/42/01`; `audi_stream_receiver` currently
    skips it).
 2. It pushes the official `scrcpy-server` (Apache-2.0) and starts it with
    `app_process`.
@@ -450,7 +463,7 @@ work.
   moving 120-line RGB565 band (tile-diff-like) and full DXT1 frames
 
 Still missing: AOA bulk receive throughput. That needs the phone, so it
-belongs in `usb_tx_test`.
+belongs in `audi_stream_receiver`.
 
 **How the results decide:**
 - If clips 1 and 2 are never seen, the displayable setup is wrong, not the
@@ -634,7 +647,7 @@ working display path to show a picture.
 
 ### 7.5 21.10 results: H.264 on screen; no streamable input starts
 
-Run `dev/21.10.2026/` (hello5, hello6 phase `v`, hello4 in one boot).
+Run `runs/21.10.2026/` (hello5, hello6 phase `v`, hello4 in one boot).
 hello6 played all ten clips (30 s each) through `testapp-file -o
 mixer:DSPOUT_TDM2_20?delay=130`, each shown first on VCAP 1 (flags `0x201`,
 VP 2 source 0), then on VCAP 0 input 1 (`0x101`, VP 1 source 1), 10 s each.
@@ -698,12 +711,12 @@ into a format io-media will start on. In order:
    unless (2) shows the failure is something else.
 
 Option 1 (raw tiles over AOA) does not depend on any of this. With
-usb_tx_test working on the car (21.10, `docs/usb-stack.md`), it is the
+audi_stream_receiver working on the car (21.10, `docs/usb-stack.md`), it is the
 quickest path to a first mirror.
 
 ### 7.6 25.10 results: 21.10 repeated
 
-Run `dev/25.10.2026/` (hello6 phase `v`, after hello8 and hello5), with a
+Run `runs/25.10.2026/` (hello6 phase `v`, after hello8 and hello5), with a
 phone video this time. The same ten clips, both attempts each: the result
 is 21.10's, clip for clip. Clips 1, 2, 3, 5 and 6 played their 30 s (47
 TIME events) and were **on screen through VCAP 0 input 1**, one knob
@@ -715,4 +728,325 @@ Nothing new for option 2a, then: the container question above is still
 the open one. The same day the screen streaming over AOA (option 1's
 transport, JPEG pictures) was tried for the first time and sent no
 picture, because of a bug in the phone app's link handling, fixed since
-(`src/usb_tx_test/README.md`).
+(`src/audi_stream_receiver/README.md`).
+
+### 7.7 30.10 results: 21.10 repeated again; shorter clips
+
+Run `runs/30.10.2026 - media/` (hello6 phase `v`, after hello8 and hello5),
+phone video up to clip 6. The result was 21.10's and 25.10's for the third
+time:
+- Clips 1, 2, 3, 5 and 6 were on screen through VCAP 0 input 1, one knob
+  turn each, 2.4–4.0 s after capture was enabled.
+- VCAP 1 stayed black.
+- Clips 4 and 7–10 never started (no TIME event).
+
+The car was most likely switched off after clip 6 (platform-notes §8),
+and hello6 finished the rest by itself. Since the answer doesn't change, hello6's clips are now 22 s and
+each attempt 7 s (from 30 s and 10 s), which takes the run from ~7 to
+~6 minutes. The open question for option 2a is still the container: a
+format io-media starts from a stream (or a file still being written).
+
+### 7.8 02.11 RE: why clips fail, and a container that should stream
+
+Static analysis of the P1001 efs-system (rev 51), extracted whole with
+`tools/f3swalk.py`: `sbin/io-media-nvidia` (uncompressed ELF, the clean
+copy §6 asked for), `lib/dll/mmedia/mp4_parser.so`, `etc/iom.cfg` and
+`etc/NvDspCodecs.elf`. Decompiled with headless Ghidra 12 (IDA has no SH4
+decompiler). The SH4 PIC idiom `(code *)(literal + pc)` was resolved to
+call targets and GOT-relative strings by a post-processing script.
+
+**`0x80002` is a symptom.** `Error 80002: No metadata available` in the
+slog is io-media answering hello6's own `GetTrackInfo` query: the track
+never got opened, so it has no metadata. The failing tracks sit in
+`state=1` (playing ones show `state=4`). Their play logs are empty
+because `testapp-file` ignores SIGTERM, dies by SIGKILL and loses its
+buffered stdout. They are not real "no output" results.
+
+**Parser choice is by file name.** `iom.cfg` maps URL patterns to parsers
+(`strict = yes`):
+
+| pattern | parser |
+|---|---|
+| `*.mp4 *.m4v *.mov *.mpeg4 *.m4a *.m4b` | `mp4_parser` (efs `.so`) |
+| `*.mpg *.mpeg *.mp2` | `parser_mpgvfile` (built in) |
+| `*.avi *.xvid *.divx` | `parser_avi` (built in) |
+| `*.wmv *.wma *.asf` | `wma9_parser` (efs `.so`) |
+| `*.mp3`, `*.aac`, `*.wav` | `mpega_parser`, `aac_parser`, `wav_parser` |
+
+**800 wide (clip 4) is refused on purpose.** io-media-nvidia
+`FUN_080d1760` (Ghidra address), before anything reaches the DSP:
+
+```c
+if (width > 720 || height > 576)  log "*** Unsupported video resolution", return 0x8000001a;
+if (height > 480 && fps > 25.1)   log "*** Unsupported video frame rate", return 0x8000001a;
+```
+
+The DSP image agrees: `NvDspCodecs.elf` (and a copy inside io-media) has
+`Assertion failed, (width < 720), file NvMixer_Video.c`. **720×576 is the
+ceiling.** For a landscape phone that means 720×336 letterboxed, or a
+taller crop up to 720×576 (25 fps above 480 lines). The VCAP scales to the
+panel (§7.4).
+
+**Fragmented MP4 (clips 7, 9) adds no samples.** `mp4_parser` is
+table-driven. One list holds the containers it descends into, including
+`moov trak mdia minf stbl mvex moof traf`. A second table maps leaf boxes
+to handlers: `mvhd tkhd mdhd hdlr elst stts stsc stco co64 stsz stz2 ctts
+stss stsh`, the sample entries `avc1 mp4v mp4a ...` and the iTunes
+metadata. It has **no handler for `trun`, `tfhd`, `mfhd` or `trex`**, so
+fragments are walked and skipped. With fMP4's empty `moov` sample tables,
+`validate_parsed_info` fails (`0x30`) and so does the parse.
+
+**What `mp4_parser` needs** (`validate_parsed_info`, per track): an `stts`
+entry, an `stsc` entry, `stco` or `co64`, and `stsz` with a sample count
+or a constant sample size, plus the track headers. `stss` (no `stss` = all
+frames are sync) and `ctts` are optional. Box handlers:
+
+- `stsz` with a non-zero constant `sample_size` reads **no per-sample
+  table** (no malloc). The sample count limit is 16 M.
+- `stco` reads `entry_count × 4` bytes, and `stts`/`stsc` read their
+  entries (limit 4 M).
+- The parser stops at `mdat` once `moov` is in (`parse_mp4file`), so `moov`
+  must come first.
+- Reads go through `vstream_*`, a buffer over io-media's file streamer
+  (`read`/`lseek` on the URL) with **no file-length or offset checks**.
+
+**The container that follows: constant-sample-size MP4 (CS-MP4).**
+
+- **Header:** `ftyp` + `moov`, a few hundred bytes. `stts` is one entry
+  (N frames × delta), `stsc` one entry (one chunk holds all N), `stco` one
+  entry (the start of `mdat`'s payload), `stsz` = (S, N), and no `stss`.
+  N can be hours' worth.
+- **Data:** frame k lives at `mdat + k·S`. Each frame (length-prefixed
+  NALs) is padded to S bytes with one filler NAL (type 12, `ff…ff 80`),
+  which decoders discard.
+- **Live:** the header is fixed before any frame exists, so a resource
+  manager can serve `/dev/mirror/live.mp4`: header from memory, frame k's
+  bytes when frame k has arrived over AOA, with reads blocking until then.
+  The phone sends unpadded frames; the MMI pads. A frame larger than
+  S − 6 is dropped and a sync frame requested.
+- **Cost:** S × fps bytes/s pass through io-media and over PCI to the DSP,
+  not over USB. With x264's VBV at 400 kbit the largest 720×336 frame was
+  26 KB, so S = 28 KB (5.7 Mbit/s inside the unit). The phone encoder will
+  need a frame-size cap (bitrate mode CBR, short VBV, or intra refresh) to
+  keep S small.
+
+`media/csmp4.py` writes this layout from an Annex-B stream. ffmpeg decodes
+c9 cleanly (550/550 frames), and c10 is reported as 600 s with the first
+550 frames present.
+
+**Car test: [hello9](../src/hello9/README.md) (~3.5 min).** It plays
+everything through its own io-media client, on VCAP 0 input 1 only:
+
+1. **c5:** the control.
+2. **c9:** CS-MP4, static. Does the DSP accept the padded frames?
+3. **c10g:** a CS-MP4 whose `moov` declares 10 min, written to the card
+   while it plays after a 2 s head start. Does io-media start on it and
+   keep up?
+4. **live:** hello9's own resource manager serves `/dev/hello9/live.mp4`
+   for 30 s. The header comes at once, frame k at k/25 s, and reads that
+   run ahead wait.
+5. **stall:** the same with a 2 s and a 5 s pause.
+
+For the live tests hello9 logs how far ahead of the stream io-media
+reads, how long its reads wait, and the lag (how long after its release
+a frame is reported as playing).
+
+| Outcome | Meaning |
+|---|---|
+| c9 doesn't play | The padding is the suspect. Try padding inside the last slice NAL instead of a filler NAL. |
+| c9 plays, c10g doesn't, live plays | io-media reads ahead of a growing file and hits its end. Blocking reads fix it, so a resource manager is the way. |
+| live plays | Option 2a works with io-media as it is. Next: frames from the phone over AOA instead of from the card. The lag sets the latency floor. |
+| stall breaks playback | io-media doesn't wait out a gap. The MMI then has to fill gaps itself (repeat-frame "skip" P-frames) before the stream reaches io-media. |
+
+### 7.9 03.11 results: CS-MP4 refused at open, by io-media's own demuxer
+
+Run `runs/3.11.2026 - run1/` (hello9, all five tests), with a phone video.
+
+**On the car:**
+
+- **c5 (control) played and was seen**, through hello9's own io-media
+  client (22 TIME events, knob turn 5.6 s after play).
+- **c9, c10g, live and stall** all failed ~40 ms after play: an ERROR
+  event "Input/output error", no TIME event, and `iom_errno 0x80002` "No
+  metadata available" for the query. The screen stayed black.
+- In `live` and `stall`, io-media opened the stream three times and read
+  **64 KB at offset 0 once**, waiting 62–74 ms for frame 2. It read
+  nothing more. So the file was refused while it was being opened, from
+  its first 64 KB, before any frame reached the DSP.
+
+The same day hello6's ten clips gave the 21.10 result for the fourth time
+(`runs/3.11.2026 - run2/`).
+
+**Cause (RE the same day, Ghidra, io-media-nvidia rev 51) [confirmed by
+simulation on the clip files]:**
+
+- **Who parses the file.** The trackplayer's `.mp4` input isn't parsed by
+  `mp4_parser.so`, as §7.8 assumed. io-media has its own demuxers:
+  - `CDemuxMp4`: vtable `0x82924a0`, built on an embedded copy of the ISO
+    reference MP4 library.
+  - `CDemuxRaw` and `CDemuxMpgPs`.
+  - Its own extension table: `.mp4`, `.m4v`, `.264`, …
+
+  The query's format string `'MP4 '` comes from io-media too. Where the
+  graph picks `CDemuxMp4` over `iom.cfg`'s `mp4_parser` wasn't traced.
+- **The open path.** `CDemuxMp4` → `FUN_08129e00` → `FUN_0812a260` →
+  `FUN_08139220` (MP4OpenMovieFile, with a 10 MB header budget
+  `0xa00000`) → `FUN_08225880` → `FUN_08225700` → **`FUN_08225a20`**,
+  which walks the top-level boxes.
+- **The walk reads 32-bit box sizes only.** It handles `size == 0` (to
+  the end of the file) but has no branch for `size == 1` (the 64-bit
+  largesize), and it fails if `pos + size > st_size`.
+- **Why c9 fails.** `csmp4.py` writes `mdat` with a 64-bit header, so:
+  1. The walk takes `mdat` at 646 as a 1-byte box and moves to 647.
+  2. At 647 it reads size 365, type `dat\0`, and moves to 1012, inside
+     frame data.
+  3. There it reads a 1.9 GB "size", which runs past the end of the file,
+     so the walk returns -8.
+  4. `FUN_0812a260` turns -8 into `0x80000018`, and the track never opens
+     (hence "No metadata").
+
+  The same walk passes c6 (ftyp, moov, free, mdat) and fails c9 and c10
+  at 1012. Every read it makes falls inside the first 64 KB, which is the
+  one read `live` logged.
+- **Other limits found in `CDemuxMp4`** [confirmed in code, not all
+  paths traced]:
+  - Everything except `mdat` is loaded into memory at open, so nothing
+    may follow `mdat` in a live stream.
+  - Header bytes plus sample tables must fit the 10 MB budget.
+  - A constant `stsz` size builds no table. A per-sample table costs 4
+    bytes per frame and fails at once above the budget.
+  - Nothing requires `stss`, `edts`/`elst` or more than one chunk.
+  - The SPS check uses `avcC`.
+  - Sample reads use a growing buffer, so there is no per-sample cap.
+  - A read error -4 re-checks the file size, which looks like
+    growing-file support.
+
+**What this changes:**
+
+- **None of §7.8's CS-MP4 questions has been answered yet**: the filler
+  NALs, the over-declared `moov`, blocking reads, stalls. The files never
+  got past the box walk.
+- **§7.8's `mp4_parser` findings don't apply to this path.** The width
+  limit (`FUN_080d1760`) is io-media's own check and still holds. The
+  fMP4 explanation (no `trun` handler) came from `mp4_parser` and has to
+  be re-checked in `CDemuxMp4`. fMP4 fails at open either way.
+- **Fix, made the same day for the next run:**
+  - `csmp4.py` writes `mdat` with an 8-byte header and changes nothing
+    else, so the test isolates this one difference.
+  - c9 gets its exact size. The over-declared c10 gets size 0 ("to the
+    end of the file", which the walk resolves against `st_size`): the
+    growing copy can't pass with an explicit size, because the walk
+    refuses a box that ends past the current file size.
+  - The live server reports `st_size` = the declared total, so its
+    `mdat` ends there.
+  - A live stream has to stay under 4 GB, about 1.6 h at 28 KB × 25 fps.
+    A longer session can reopen.
+  - hello9's header parser now refuses what this walk refuses.
+  - If that still fails, the next suspect is the constant `stsz`. The
+    fallback is an all-equal per-sample table: 8 bytes per frame of the
+    budget, so up to ~14 h at 25 fps.
+- **For the live server:** io-media's first read asks for 64 KB at
+  offset 0, which reaches ~2.3 frames into `mdat`. Open needs only the
+  ~650-byte header, so answering that read short (with what exists)
+  instead of waiting would save about 3 frames of start-up. How io-media
+  takes a short read is untested.
+
+### 7.10 04.11 results: live H.264 streaming works
+
+Run `runs/4.11.2026 - streaming/` (hello5 `t`, then hello9's five tests,
+174 s, no FAIL lines). Phone video `VID_20261104_164346` covers all of
+hello9; `_v2` is the `live` test cut out. Details per test:
+[src/hello9/README.md](../src/hello9/README.md), "On the car".
+
+| test | result |
+|---|---|
+| c5 (plain MP4) | Seen (knob 3.7 s) |
+| **c9 (CS-MP4 file)** | **Seen**, 720×336, 22 TIME events. First TIME 567 ms (c5: 369) |
+| c10g (CS-MP4 growing on the card) | Header opens ("0 of 600000 ms"), then EIO at 813 ms: io-media read past the written end. Black |
+| **live (our resource manager, 30 s)** | **Seen, 30 s, no errors.** 341 sequential 64 KB reads, all waited (avg 89, max 140 ms), read-ahead ≤ 107 ms. Lag 514–560 ms, steady |
+| **stall (pauses 2 s at 8 s, 5 s at 16 s)** | **Seen, no errors, no unblocked reads.** Both pauses waited out; picture moved again after each |
+
+**What this settles [confirmed on the car]:**
+
+- **Option 2a works without touching io-media.** The container is CS-MP4
+  as built by `media/csmp4.py`: `ftyp`, `moov`, then a 32-bit `mdat`
+  (size 0 for the live stream, with `st_size` = the declared total); one
+  constant `stsz` size; every frame padded to S bytes with a filler NAL;
+  `moov` declaring far more frames than exist. The DSP decodes the padded
+  frames, and `CDemuxMp4` takes the over-declared header.
+- **io-media reads like a simple sequential reader.** At start it opens
+  the path three times (two probes, then the real one). After that it
+  only reads 64 KB at a time, in order, with no `pread`s and no seeks, and
+  never more than ~2.7 frames past what has been released. A read can
+  wait at least 5 s without io-media giving up.
+- **Latency added by io-media: ~0.5 s, steady.** Two measures agree:
+  - TIME positions trail the frame release by 514–560 ms over the whole
+    30 s, with no drift.
+  - When starved, the picture stops ~9 frames (~0.35 s) behind the
+    newest frame io-media has read (frozen on 190 with 198 served, on 391
+    with 399 served). The rest is decode and display.
+- **A pause in the stream freezes the picture, then playback skips and
+  goes on.** The freeze lasts as long as the pause (2.0 s, 5.2 s). When
+  frames come back, the picture **jumps ~10 frames** (190 → 202,
+  391 → 401) and runs at 25 fps again. So gaps don't add latency, but the
+  ~9 frames queued when the stream ran dry are never shown. io-media's
+  clock runs on through a pause, so its TIME positions are no use for
+  measuring after one.
+- **Cost:** the unit's CPU (the MMI's own slog `CPU:` line) is 20–23 %
+  during `live` against 12–13 % idle. Option 0 (JPEG) used ~27 % at 3 fps.
+- **Growing files are out:** io-media reads ahead of the writer and gets
+  EIO. Only the resource manager can make reads wait.
+
+**Consequences for the design:**
+
+1. **The stream must never go quiet.** If the phone stops sending when its
+   screen is still, the last ~0.35 s of a change stays hidden until the
+   next frame, and then it is skipped. The sender has to keep a steady
+   frame rate: Android's `KEY_REPEAT_PREVIOUS_FRAME_AFTER` on the encoder,
+   or the MMI inserting skip P-frames (all macroblocks skipped, a few
+   bytes plus filler) whenever no frame has come for 1/25 s.
+2. **Frame size S is a hard cap.** Every frame, keyframes included, must
+   fit S. The test clip used S = 28 KB at 1.5 Mbit/s. The encoder needs a
+   strict per-frame cap (CBR, small VBV buffer; possibly intra refresh
+   instead of IDR frames), and an oversized frame has to be dropped and a
+   sync frame asked for. Bandwidth is S × 25 per second, whatever the
+   content (28 KB → 5.7 Mbit/s over AOA).
+3. **The header comes from the phone.** The `avcC` in `moov` must carry
+   the encoder's own SPS/PPS, and the size is fixed for the session. The
+   phone sends its codec config first; the MMI builds the header (a C++
+   port of `csmp4.py`, next to `stream_plan.cpp`) and only then starts
+   the graph. A rotation or size change means a new header and a graph
+   restart.
+4. **Picture size:** at most 720 wide and 576 high, H.264 Baseline ≤ L3.
+   VCAP scales to the displayable, so 720×432 (5:3, = 800×480) fills the
+   screen.
+5. **Session length:** `mdat` must stay under 4 GB: ~1.6 h at
+   28 KB × 25 fps, ~2.9 h at 16 KB. A longer session needs a graph
+   restart (a short black gap) or a smaller S.
+
+**What's left for a working mirror** (in order):
+
+1. **Phone:** a MediaCodec H.264 path in the Audi streaming app: Baseline,
+   720×432, 25 fps constant (repeat previous frame), capped frame size.
+   Log the frame-size distribution and how often the cap is hit, at the
+   desk first (`make aoa-host` path).
+2. **Protocol:** new AOA frames for "codec config" (SPS/PPS, size, S) and
+   "H.264 frame" next to the JPEG/PNG pictures.
+3. **MMI (`audi_stream_receiver`):** move hello9's `stream_server`,
+   `stream_plan`, `vout` and the iom client into `src/common`; feed the
+   server from the AOA frame ring instead of c10; build the header from
+   the phone's config; restart the graph on a new config; fill gaps with
+   skip frames if the phone can't.
+4. **Measure the real latency end to end:** show the phone's frame
+   number or clock on both screens (or a hello9 variant drawing the
+   server's released-frame number in a VFB strip under a smaller video
+   displayable), so one photo shows both.
+5. **Latency tuning, if needed:** does the ~9-frame queue shrink with a
+   smaller S (is it counted in bytes or frames)? With a higher declared
+   rate (30 fps)? Answering io-media's first 64 KB read short would save
+   ~3 frames at start-up only.
+6. **Robustness:** a session of 10+ minutes; the HMI starting its own
+   media or video (MMI3GMedia owns the video lock); reverse gear (the
+   camera is VCAP 0 input 0); unplugging mid-stream; a graph restart.
+
+`c10g` has answered its question and can leave hello9's default list.

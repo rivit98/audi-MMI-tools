@@ -39,14 +39,42 @@ static int cur;                 /* slot of the current VFB (back surface) */
 static struct canvas back;
 static int lm_is_open, registered, partial;
 static struct screen_stats stats;
+static unsigned reshow_ms, shown_at, reshows, reshow_fails;
+static int shown;              /* screen_open's show is done */
 
-static void show_cid_and_hmi(void)
+static int show_cid_and_hmi(void)
 {
 	int cids[3] = { CID, 16, 19 };
 	int rc = lm_show_displayables(0, cids, 3);
 
+	shown = 1;
+	shown_at = log_ms();
+	return rc;
+}
+
+static void show_logged(void)
+{
+	int rc = show_cid_and_hmi();
+
 	log_msg("  lm_show_displayables(0, {%d,16,19}): rc=%d %s", CID, rc,
 	        rc ? strerror(rc) : "ok");
+}
+
+/* screen_set_reshow(): show again once reshow_ms have passed. The first
+ * one and every failure are logged, the rest only counted. */
+static void maybe_reshow(void)
+{
+	int rc;
+
+	if (reshow_ms == 0 || !registered || !shown || log_ms() - shown_at < reshow_ms)
+		return;
+	rc = show_cid_and_hmi();
+	reshows++;
+	if (rc != 0)
+		reshow_fails++;
+	if (rc != 0 || reshows == 1)
+		log_msg("screen: re-show %u (every %u ms): rc=%d %s", reshows,
+		        reshow_ms, rc, rc ? strerror(rc) : "ok");
 }
 
 /* The surface goes; its shadow buffer is kept for the next one. */
@@ -140,7 +168,7 @@ int screen_open(void)
 		return -1;
 	}
 	screen_present();
-	show_cid_and_hmi();
+	show_logged();
 	return 0;
 }
 
@@ -152,6 +180,11 @@ struct canvas *screen_canvas(void)
 void screen_set_partial(int on)
 {
 	partial = on;
+}
+
+void screen_set_reshow(unsigned ms)
+{
+	reshow_ms = ms;
 }
 
 const struct screen_stats *screen_last_stats(void)
@@ -227,6 +260,7 @@ int screen_present(void)
 	t0 = log_us();
 	rc = screen_flip();
 	stats.flip_us = log_us() - t0;
+	maybe_reshow();
 	return rc;
 }
 
@@ -241,8 +275,12 @@ void screen_close(void)
 		rc = lm_unregister_displayable(CID);
 		log_msg("  lm_unregister_displayable(%d): rc=%d%s", CID, rc,
 		        registered ? "" : " (was not registered)");
-		show_cid_and_hmi();
+		if (reshows != 0)
+			log_msg("  re-shows: %u, %u failed", reshows, reshow_fails);
+		show_logged();
 		lm_close();
+		shown = 0;
+		reshows = reshow_fails = 0;
 		lm_is_open = 0;
 	}
 	registered = 0;

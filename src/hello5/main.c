@@ -6,7 +6,7 @@
  * order. Steps m, n, v and t play a ping train that hello5 renders itself
  * (pulse.c: a 0.5 s ping every 2 s) on the one output heard so far, mixer
  * m2 DSPOUT_TDM1_20_SAD: m, v and t through the unit's testapp-file, n
- * through our own io-media client (iom.c). Each step first
+ * through our own io-media client (common/iom.c). Each step first
  * shows what to do with a countdown, then a PLAYING screen with the
  * question to listen for; the silence between the pings is where the
  * answer is:
@@ -96,6 +96,12 @@
  *             follow the car volume, or the volume ended at 0.
  *          t  nothing recorded, probably because v left the volume down.
  *             So v now runs last (default "mntv").
+ *   28.10  m: the radio is muted for the whole train, back ~0.2 s after.
+ *          n: volume 0 changes nothing. The run ended in t's countdown.
+ *   30.10  all four answered. m, n: radio muted, pings heard; pings 4-6
+ *          as loud as the rest. t: Bluetooth music muted for the whole
+ *          train, audible the moment it ended. v: the pings follow the
+ *          volume knob (~21 dB down, then ~12 dB up again).
  *
  * For an io-audio device each chime also measures whether the hardware
  * consumed it: after the write, snd_pcm_plugin_prepare() is polled until it
@@ -856,7 +862,7 @@ static int play_testapp(const struct step *s, const char *log_file, struct play 
 	return 0;
 }
 
-/* ---- step n: the train through our own io-media client (iom.c) ---- */
+/* ---- step n: the train through our own io-media client (common/iom.c) ---- */
 
 #define NATIVE_LOW_VOLUME 0     /* for pings 4-6: 30 was not clearly
                                    quieter on 2026-10-25, 0 is decisive */
@@ -1082,10 +1088,12 @@ static const struct step step_list[] = {
 	  "LISTEN: do the pings get quieter and louder with the radio?", 10, 10, 0,
 	  play_testapp },
 	{ 't', "music",
-	  "Now press the MEDIA button and start some music (USB stick, phone "
-	  "over Bluetooth, Jukebox, CD). Then pings every 2 s for 12 s.",
-	  "LISTEN: is the music still playing BETWEEN the pings?", 25, 6, 0,
-	  play_testapp },
+	  "Press MEDIA now and start some music (USB, Bluetooth, Jukebox, CD). "
+	  "When the Media screen comes up, this screen should come back within "
+	  "a second. Then 6 pings, one every 2 s.",
+	  "WATCH: is this screen back, without flicker? LISTEN: music BETWEEN "
+	  "the pings?",
+	  25, 6, 0, play_testapp },
 };
 #define NSTEPS ((int)(sizeof(step_list) / sizeof(step_list[0])))
 

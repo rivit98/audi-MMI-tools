@@ -1,9 +1,9 @@
-# usb_tx_test Android sender - everything runs in the mmi-android image
+# Audi streaming - Android sender for audi_stream_receiver - everything runs in the mmi-android image
 # (docker/Dockerfile: JDK 17, Android SDK 35, Gradle, platform-tools).
 #
-#   make            build out/usb_tx_test.apk
+#   make            build out/audi_streaming.apk
 #   make test       Kotlin unit tests (protocol)
-#   make install    adb install -r out/usb_tx_test.apk  (phone on this PC's USB,
+#   make install    adb install -r out/audi_streaming.apk  (phone on this PC's USB,
 #                   USB debugging on; adb runs in the container - stop a host
 #                   adb server first: `adb kill-server`)
 #   make shell      interactive shell in the build container
@@ -15,7 +15,7 @@
 # keep working after `make clean`.
 
 IMAGE := mmi-android
-APK   := out/usb_tx_test.apk
+APK   := out/audi_streaming.apk
 
 RUN = mkdir -p .cache/home && docker run --rm -u $(shell id -u):$(shell id -g) \
       -e HOME=/src/.cache/home -e GRADLE_USER_HOME=/src/.cache/gradle \
@@ -56,7 +56,7 @@ test: .cache/image.stamp
 
 install: $(APK)
 	$(ADB) sh -c 'adb start-server >/dev/null && adb wait-for-usb-device && \
-	    adb install -r /out/usb_tx_test.apk; rc=$$?; adb kill-server; exit $$rc'
+	    adb install -r /out/audi_streaming.apk; rc=$$?; adb kill-server; exit $$rc'
 
 shell: .cache/image.stamp
 	docker run --rm -it -u $(shell id -u):$(shell id -g) \

@@ -22,6 +22,10 @@
 #define C_BOX    0xffffffffu
 #define C_BOXTXT 0xff000000u
 
+/* MEDIA (step t) brings the MMI's Media screen up over ours, and it stayed
+ * there for the rest of the 2026-11-03 run: show ours again this often. */
+#define UI_RESHOW_MS 1000
+
 /* one per group: blue, green, purple, brown, teal, red */
 static const uint32_t group_bg[] = {
 	0xff1838a0u, 0xff187028u, 0xff682088u, 0xff805010u, 0xff106870u, 0xff901818u,
@@ -85,6 +89,7 @@ static unsigned finish(void)
 int ui_open(void)
 {
 	pthread_mutex_lock(&ui_lock);
+	screen_set_reshow(UI_RESHOW_MS);
 	ui_ok = screen_open() == 0;
 	if (!ui_ok) {
 		screen_close();

@@ -1357,10 +1357,9 @@ void check_atomics(Result &r)
 	b.store(true);
 	EXPECT(b.load());
 
-	// 4 threads, each fetch_add 200000 times. GCC's sh4 atomics are gUSA
-	// sequences ("soft-gusa"), which need the kernel to restart them when
-	// interrupted; QNX's kernel does not, so a thread preempted inside one
-	// can lose an update. Lost updates are counted, not just failed.
+	// 4 threads, each fetch_add 200000 times. Lost updates are counted, not
+	// just failed. Too short to interleave (each thread finishes inside one
+	// timeslice): "atomics stress" below is the real test.
 	const int nthreads = 4, iter = 200000;
 	std::atomic<int> count{0};
 	std::vector<std::thread> pool;
@@ -1387,10 +1386,11 @@ void check_atomics(Result &r)
 // counter for 1.5 s, switched mid-loop hundreds of times, three ways:
 //   plain  load + add + store: the control. It MUST lose updates, or the
 //          threads didn't interleave and the other two numbers say nothing.
-//   gUSA   __atomic_fetch_add as GCC builds it for sh4 by default (soft-gusa).
-//          Lost updates here = QNX doesn't restart the sequence.
-//   LL/SC  the same in llcs.cpp, built with -matomic-model=hard-llcs: the
-//          fix. It must lose none.
+//   gUSA   __atomic_fetch_add in gusa.cpp, built with -matomic-model=soft-gusa,
+//          GCC's sh4 default. Lost updates here = QNX doesn't restart the
+//          sequence (2026-10-30: 9 % lost).
+//   LL/SC  the same in llcs.cpp, with the SDK's default since 2026-10-30,
+//          hard-llcs: the fix. It must lose none.
 // The counter is 32-bit and wraps (the host's plain loop can exceed 2^32);
 // lost = done - counter, mod 2^32.
 
@@ -1403,17 +1403,6 @@ __attribute__((noinline)) unsigned long long plain_add_until(unsigned *count, co
 	while (!__atomic_load_n(stop, __ATOMIC_RELAXED)) {
 		__atomic_store_n(count, __atomic_load_n(count, __ATOMIC_RELAXED) + 1u,
 		                 __ATOMIC_RELAXED);
-		n++;
-	}
-	return n;
-}
-
-__attribute__((noinline)) unsigned long long gusa_add_until(unsigned *count, const bool *stop)
-{
-	unsigned long long n = 0;
-
-	while (!__atomic_load_n(stop, __ATOMIC_RELAXED)) {
-		__atomic_fetch_add(count, 1u, __ATOMIC_RELAXED);
 		n++;
 	}
 	return n;

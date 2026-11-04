@@ -20,20 +20,120 @@ Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
   `mntv`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).
 - **Output:** `hello5.log` (`RESULT` lines; step `n`'s timed events),
   `hello5_<step>.log` (`testapp-file`'s output).
-- **Status:** `m` and `n` are answered (2026-10-28, below). `t` and `v`
-  still need a re-test: on 2026-10-28 the run ended during `t`'s countdown.
-  The older results come from step `g`. More detail is in
+- **Status:** all four steps are answered (2026-10-30, below): our sound
+  replaces the radio and the music while it plays, and follows the car's
+  volume knob. 2026-11-03 repeated all four, with the same results.
+  hello5's own volume does nothing, and io-media's code says why: the
+  `mixer:` output's `set_volume` calls a DSP mixer method that is an empty
+  stub (`docs/platform-notes.md` §9, "Why the graph volume does nothing").
+  An app that wants to be quieter than the car volume has to scale its own
+  samples. The older results come from step `g`. More detail is in
   [docs/platform-notes.md](../../docs/platform-notes.md) §9.
+- **Screen:** hello5 shows its displayable again every second
+  (`screen_set_reshow`, `common/screen.c`), because after MEDIA the MMI's
+  Media screen stayed over it (2026-11-03). Untested on the car.
 
 The knob/button log that used to be part of hello5 is now
 [hello7](../hello7/).
 
 ## On the car
 
+**2026-11-03, steps `mntv`** (before hello6), radio on, Bluetooth phone
+for `t`. Logs in `runs/3.11.2026 - run2/`. Phone videos
+`VID_20261103_103843` (`m`, `n`; video ≈ log + 8.3 s, from ping 1 of `n`),
+`…104029` (`t` and pings 1–4 of `v`) and `…104111_1` (pings 7–10 of `v`).
+The listener left no notes; this comes from the sound (880 Hz band per
+ping, 1–5 kHz and <300 Hz between pings) and the system log (slog ≈ log
++ 1229.5 s, from the MEDIA press):
+
+- **`m`, `n`: 30.10 again.** The radio drops to the recording's floor for
+  each train and comes back when it ends. In `n`, pings 4–6 at volume 0
+  are as loud as the others (fourth run), and the queued pings come
+  ~2.35 s apart (~350 ms per queued file).
+- **`t`: pings only, no music between them** (the 1–5 kHz band at the
+  floor), so `TDM1_20_SAD` replaces Bluetooth music too, as on 30.10.
+  This time the music didn't come back after the train. The phone had
+  reported `MEDIA_STATE_PAUSED` itself (AVRCP event, no
+  `DCMD_MEDIA_PAUSE` from the MMI) within a second of the train's start.
+  It played again for ~7 s during `v`'s countdown, then paused with a
+  track change, and Bluetooth disconnected right after hello5. The user
+  was also using the phone during the run, so these may be the phone
+  rather than the MMI.
+- **After MEDIA, the MMI's Media screen stayed over hello5's** for the
+  rest of hello5 (both videos). The pings and the log went on as normal;
+  only the instructions were hidden. Same thing as hello7's MENU/BACK
+  (25.10).
+- **`v`: every recorded ping is as loud as `t`'s** (5–6 not recorded).
+  Nobody turned the knob: ch8 counted 0 clicks and the MMI logged no
+  `Encoder` key. An earlier reading of this run said pings 1–4 were
+  ~20 dB down, and that was wrong. Measured again (880 Hz band RMS over
+  each ping, 820–940 Hz Butterworth), in the same video as `t`:
+
+  | pings | level | between pings |
+  |---|---|---|
+  | `t` 1–6 (`…104029`) | −44.7 … −46.3 dB | −54 … −60 dB |
+  | `v` 1–4 (`…104029`) | −44.2 … −46.2 dB | −59 … −64 dB |
+  | `v` 7–10 (`…104111_1`) | −44.0 … −45.0 dB | −54 … −63 dB |
+
+  If the phone's gain control had made up for a 20 dB drop, the level
+  between pings would have risen with it. It went down instead, so the
+  recording shows no drop. 30.10's knob result stands.
+- `testapp-file` exit 1 as always; steps 12.5–20.7 s for 12–20 s trains.
+
+**2026-10-30, steps `mntv`** (after hello8), radio on, Bluetooth phone for
+`t`. Logs in `runs/30.10.2026 - media/`, phone video with sound (video time
+≈ log time + 22.8 s, from the on-screen clock). The listener's notes
+agree with the video's sound (880 Hz band per ping, 1–5 kHz between
+pings):
+
+- **`m`: the radio is muted, the pings are heard** (listener). All 6
+  pings recorded, 2.00 s apart, the first 0.33 s after `testapp-file`
+  started. Between them the 1–5 kHz bands sit 8–10 dB under the radio
+  before the step, at the recording's floor. This is the same as on 28.10.
+- **`n`: pings heard, no radio** (listener). All 12 recorded.
+  - **Pings 4–6 at hello5's volume 0 are as loud as the rest** (±0.3 dB),
+    the third run in a row. The graph's volume `devctl` does nothing.
+  - Queued pings 10–12 came 2.35, 2.37 and 2.36 s apart, so each queued
+    file still costs ~350 ms.
+  - 28.10's bass fade-in didn't come back: below 300 Hz stayed at the
+    floor for the whole train. From ping 10 on, some unpitched broadband
+    sound is in the gaps. It isn't the radio's music, which came back
+    only when the queue ended. Probably the cabin [unverified].
+- **`t`: pings only, no Bluetooth music** (listener).
+  - MEDIA was pressed at 82.2 s. The phone's AVRCP went `PLAYING` at
+    ~83.5 s (system log: `DCMD_MEDIA_RESUME`, a track by sanah).
+  - All 6 pings recorded, about 7 dB louder than in `m` and `n`. The
+    volume knob was also turned during the countdown (MMI's log: net −2),
+    so per-source volume or the knob can't be told apart.
+  - **Music was first audible at 111.2 s, the moment `testapp-file`
+    ended (111.06 s).** So the music plays underneath and is muted for the
+    whole train, like the radio. The 15 s between the MEDIA press and the
+    train were silent too, for an unknown reason (the song's start?
+    Bluetooth start-up?).
+  - So `TDM1_20_SAD` attaches while the MME plays, and it **replaces
+    media audio as well**.
+- **`v`: the pings follow the volume knob** (listener: they got louder
+  after turning up). All 10 recorded:
+  - pings 2–3 loudest, after 3 detents up
+  - pings 4–5 ~21 dB down, after a run of detents down
+  - pings 6–10 ~12 dB back up, after detents up
+
+  ch8 counted 18 detents down and 20 up, and the MMI's own log
+  (`Encoder Key=0x11`) shows the same mixed directions within single
+  turns. This car's volume knob is slightly faulty (the user), which
+  explains it. So no dB-per-detent figure can be read from this run. Before the train the MMI paused the Bluetooth player
+  (`DCMD_MEDIA_PAUSE` at ~120 s, cause unknown). Car audio was back
+  ~0.3 s after the train.
+- In `t` and `v` the **first** ping came ~12 dB under the others. In `m`
+  and `n` it didn't. Maybe the amplifier fades in when it takes over from
+  a media source [inferred].
+- `testapp-file` exit 1 as always. The steps ran 12.3–20.7 s for 12–20 s
+  trains.
+
 **2026-10-28, steps `mntv`** (after hello8), radio on, music audible in
 the phone video this time (video time ≈ log time + 8.5 s, from the
 on-screen clock). Logs in
-`dev/28.10.2026 - c++, sound/`. Results below come from the video's
+`runs/28.10.2026 - c++, sound/`. Results below come from the video's
 sound: 880 Hz band per ping, and the rest of the spectrum between
 pings.
 
@@ -106,10 +206,12 @@ video, at its time on screen.
 
 **Works**
 - **`mixer:DSPOUT_TDM1_20_SAD?delay=130` through io-media is heard
-  clearly on the speakers, with the radio on.** It is played by the unit's
-  `testapp-file` and by hello5's own io-media client (`iom.c`). **It
-  replaces the radio while it plays** (2026-10-28); the radio comes back
-  ~0.2 s after the stream ends.
+  clearly on the speakers, with the radio on or Bluetooth music playing.**
+  It is played by the unit's `testapp-file` and by hello5's own io-media
+  client (`iom.c`). **It replaces the radio and media audio while it
+  plays** (2026-10-28, 2026-10-30). The car audio comes back 0.2–0.3 s
+  after the stream ends.
+- **Its level follows the car's volume knob** (2026-10-30).
 - **These mixer outputs attach and play every clip to `INPUT_EOF`:**
   `TDM1_20_SAD`, `TDM1_51`, `TDM1_20`, `TDM2_20`, `TDM2_20_SAD`,
   `TDM3_20` and `TDM3_20_SAD`. A 2.5 s clip takes 2.46–2.57 s.
@@ -121,9 +223,12 @@ video, at its time on screen.
     runs dry.
 
 **Doesn't work**
-- **Mixing with the radio:** `TDM1_20_SAD` mutes it (above).
+- **Mixing with the radio or music:** `TDM1_20_SAD` mutes both (above).
 - **The graph's volume:** `iom_set_volume` 0 or 30 returns ok and doesn't
-  change the level (2026-10-25, 2026-10-28).
+  change the level (2026-10-25, 2026-10-28, 2026-10-30, 2026-11-03).
+  io-media's `mixer_set_volume` ends in an empty stub; the mixer URL's
+  `volume_ctrl` is about encoder sharing, not volume
+  (`docs/platform-notes.md` §9).
 - **Gapless queueing:** each queued file adds ~350 ms of silence.
 - **Nothing played through QSA is heard,** on any of the six devices.
 - **These mixer outputs play but are silent:** `TDM2_20`, `TDM2_20_SAD`,

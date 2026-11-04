@@ -2,17 +2,18 @@
 # requires-python = ">=3.12"
 # dependencies = ["pyusb==1.3.1"]
 # ///
-"""aoa_host.py - a desk stand-in for the MMI side of usb_tx_test.
+"""aoa_host.py - a desk stand-in for the MMI side of audi_stream_receiver.
 
-Does what src/usb_tx_test/aoa.c does, with libusb on a PC: switches a USB
-Android phone into accessory mode (AOA), then speaks the usb_tx_test
-protocol (src/usb_tx_test/proto.h): HELLO / HELLO_REPLY, then the phone's
+Does what src/audi_stream_receiver/aoa.c does, with libusb on a PC: switches a USB
+Android phone into accessory mode (AOA), then speaks the audi_stream_receiver
+protocol (src/audi_stream_receiver/proto.h): HELLO / HELLO_REPLY, then the phone's
 screen. Replug the phone at will; it goes back to waiting, like the MMI
 receiver. Ctrl-C to stop.
 
 Video: announces the MMI's boxes (VIDEO_CAPS, 800x480 screen, as
-src/usb_tx_test/video.c), reassembles the phone's pictures, acks each as
-shown and, with --save DIR, keeps the newest one as DIR/latest.jpg.
+src/audi_stream_receiver/video.c), reassembles the phone's pictures, acks each as
+shown and, with --save DIR, keeps the newest one as DIR/latest.jpg or
+DIR/latest.png (the phone app's format setting).
 
 Run with `make aoa-host` (Docker, USB passthrough, saves into
 build/aoa-host/) or `uv run tools/aoa_host.py [--save DIR]` (needs access to
@@ -27,10 +28,10 @@ import time
 import usb.core
 import usb.util
 
-MANUFACTURER, MODEL = "mmi3g", "usb_tx_test"  # = aoa.h, matched by accessory_filter.xml
+MANUFACTURER, MODEL = "mmi3g", "audi_stream_receiver"  # = aoa.h, matched by accessory_filter.xml
 STRINGS = [MANUFACTURER, MODEL, "desk aoa_host.py", "1", "https://github.com/dspl1236/MMI3G-Toolkit",
            "desk-0001"]
-HELLO_TEXT = b"usb_tx_test-desk/1"
+HELLO_TEXT = b"audi_stream_receiver-desk/1"
 
 AOA_VID, AOA_PIDS = 0x18D1, range(0x2D00, 0x2D06)
 HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired 2026-10-25
@@ -38,7 +39,10 @@ VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_ACK, VIDEO_STOP, VIDEO_DETAILS = 5, 6
 VIDEO_SHOWN, VIDEO_BAD = 0, 1
 HDR, MAX_PAYLOAD = 3, 2048
 SCREEN_W, SCREEN_H, MAX_BYTES = 800, 480, 512 * 1024
-CAPS = struct.pack("<HHHHIB", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES, 1)
+FMT_JPEG, FMT_PNG = 1, 2
+CAPS = struct.pack("<HHHHIB", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES,
+                   1 << (FMT_JPEG - 1) | 1 << (FMT_PNG - 1))
+EXT = {FMT_JPEG: "jpg", FMT_PNG: "png"}
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 
 
@@ -132,7 +136,7 @@ def open_endpoints(acc):
 
 
 class Pictures:
-    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one JPEG."""
+    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one JPEG / PNG."""
 
     def __init__(self) -> None:
         """Nothing received yet."""
@@ -141,34 +145,35 @@ class Pictures:
     def start(self, payload: bytes, ep_out) -> None:
         """A new picture; refused like vasm.c does."""
         pid, w, h, fmt, size = struct.unpack_from("<HHHBI", payload)
-        box = (SCREEN_W // 2, SCREEN_H) if w < h else (SCREEN_W, SCREEN_H - TOPBAR_H)
-        if fmt != 1 or not 0 < size <= MAX_BYTES or not (0 < w <= box[0] and 0 < h <= box[1]):
+        phone_ms = struct.unpack_from("<H", payload, 11)[0] if len(payload) >= 13 else 0
+        box = (SCREEN_W // 2, SCREEN_H) if w < h else (SCREEN_W, SCREEN_H)
+        if fmt not in EXT or not 0 < size <= MAX_BYTES or not (0 < w <= box[0] and 0 < h <= box[1]):
             print(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes (box {box[0]}x{box[1]})")
             ep_out.write(frame(VIDEO_ACK, struct.pack("<HBH", pid, VIDEO_BAD, 0)), timeout=2000)
             self.cur = None
             return
-        self.cur, self.data = (pid, w, h, size), b""
+        self.cur, self.data = (pid, w, h, fmt, size, phone_ms), b""
 
     def data_chunk(self, payload: bytes, ep_out) -> None:
         """More of the current picture; ack it when complete."""
         if self.cur is None or struct.unpack_from("<H", payload)[0] != self.cur[0]:
             return
         self.data += payload[2:]
-        pid, w, h, size = self.cur
+        pid, w, h, fmt, size, phone_ms = self.cur
         if len(self.data) < size:
             return
         self.cur = None
         self.shown += 1
         if SAVE_DIR:
-            tmp = os.path.join(SAVE_DIR, "latest.jpg.tmp")
-            with open(tmp, "wb") as f:
+            name = os.path.join(SAVE_DIR, f"latest.{EXT[fmt]}")
+            with open(name + ".tmp", "wb") as f:
                 f.write(self.data)
-            os.replace(tmp, os.path.join(SAVE_DIR, "latest.jpg"))
+            os.replace(name + ".tmp", name)
         ep_out.write(frame(VIDEO_ACK, struct.pack("<HBH", pid, VIDEO_SHOWN, 0)), timeout=2000)
         if self.shown <= 3 or self.shown % 20 == 0:
             fps = self.shown / max(time.monotonic() - self.t0, 0.001)
             print(f"picture #{self.shown} id {pid}: {w}x{h} {'portrait' if w < h else 'landscape'}, "
-                  f"{size} bytes, {fps:.1f} fps on average")
+                  f"{EXT[fmt]} {size} bytes (phone {phone_ms} ms), {fps:.1f} fps on average")
 
 
 def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
@@ -195,7 +200,7 @@ def session(acc) -> None:
     """Talk to the accessory until it goes away."""
     iface, ep_in, ep_out = open_endpoints(acc)
     print(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
-          f"OUT 0x{ep_out.bEndpointAddress:02x}; open usb_tx_test on the phone")
+          f"OUT 0x{ep_out.bEndpointAddress:02x}; open Audi streaming on the phone")
     dec, pics = Decoder(), Pictures()
     try:
         ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)

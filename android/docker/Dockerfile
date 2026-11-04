@@ -1,4 +1,4 @@
-# mmi-android - build image for the usb_tx_test Android sender (android/).
+# mmi-android - build image for the Audi streaming Android app (android/).
 #
 # JDK 17 + Android SDK command-line tools (platform 35, build-tools 35.0.0)
 # + Gradle. Used by `make apk` / `make apk-test`; Gradle's dependency cache

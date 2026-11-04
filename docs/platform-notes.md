@@ -5,12 +5,12 @@ disassembling the device's own libraries. Everything here has been observed;
 anything still guessed is marked **[unverified]**. The point is that nothing
 below needs re-testing — build on it.
 
-Sources: `dev/10.10.2026 - first version run`, `dev/10.10.2026 - second
-version run (old toolchain)`, `dev/10.10.2026 - second version run (new
-toolchain O2)`, `dev/11.10.2026 - third version (3d pipeline)` (written up
+Sources: `runs/10.10.2026 - first version run`, `runs/10.10.2026 - second
+version run (old toolchain)`, `runs/10.10.2026 - second version run (new
+toolchain O2)`, `runs/11.10.2026 - third version (3d pipeline)` (written up
 in [`gpu-results.md`](gpu-results.md)), the later runs named in each
-section (up to `dev/21.10.2026`), plus IDA/objdump on the firmware libraries in
-`dev/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/usr/lib/`.
+section (up to `runs/30.10.2026 - media`), plus IDA/objdump on the firmware libraries in
+`third_party/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/usr/lib/`.
 
 ---
 
@@ -25,6 +25,11 @@ section (up to `dev/21.10.2026`), plus IDA/objdump on the firmware libraries in
   unit. See [`gcc-sh4-treg-bug.md`](gcc-sh4-treg-bug.md).
 - The build-time canary (`sdk/canary.c`) stays, because the SDK image is
   `FROM debian:sid-slim` — a rolling base whose GCC 16.x can change under us.
+- **Code is built for SH-4A with LL/SC atomics** (`-m4a
+  -matomic-model=hard-llcs`, since 2026-10-30). GCC's sh4 default, gUSA
+  atomic sequences, loses updates under QNX, whose kernel doesn't restart
+  them (hello8 `atomics stress`: 9 % lost, LL/SC none). QNX's loader
+  accepts the `sh4a` ELF flag. See [`cpp-apps.md`](cpp-apps.md#threads-and-atomics).
 - ET_EXEC at base `0x08040000`, `--hash-style=sysv`, 4 KB segment alignment,
   interpreter `/usr/lib/ldqnx.so.2`. Crash addresses from the dumper map
   straight onto the unstripped `build/<app>` (`make addr`).
@@ -92,7 +97,7 @@ So a client must call `getVfb` again after **every** `updateVfb` and draw
 into the sid it returns. A client that keeps drawing into the first sid only
 gets its picture on every other update. The updates in between show the
 other surface, which nobody ever wrote: the pink/beige vertical-band noise
-over the top ~60 % of the screen. usb_tx_test redraws once a second, so its
+over the top ~60 % of the screen. audi_stream_receiver redraws once a second, so its
 screen alternated between its UI and that noise. hello6's text screens were
 the second update after `screen_open` and showed only noise. One-shot users
 (showScreen, lmprobe) update once, which is why they never saw it. The same
@@ -101,7 +106,7 @@ never-written surface is the "noise over the map" in the GL apps' `s-shot`s
 keeps both surfaces attached.
 
 Because this is settled, `lmprobe` is no longer in the default `TESTS` — it
-is still built and still copied to the card.
+is still built (`make sd SD_APPS=lmprobe` puts it on the card).
 
 ## 4. Display and layers
 
@@ -248,6 +253,11 @@ fixed sequence done by the user against the full 27-byte dumps:
   Main knob 5 + 5 clicks gave exactly 5 + 5 messages. Volume 3 up gave 3,
   and "3 down" gave 4 messages carrying 5 detents (`01 01 01 02`), so the
   knob reports what it physically moved.
+- **This car's volume knob is slightly faulty** (the user, 2026-10-30).
+  Its turns often come with detents in the other direction mixed in
+  (`Incr=1` among `Incr=-1`s, `-6` in a slow turn up), in ch8 and in the
+  MMI's own `Encoder Key=0x11` log alike. That is the knob, not the
+  protocol. The main knob's counts are clean.
 - MMI3GApplication logs the same turns in the system log, one line per ch8
   message at the same moments: `[KEY] Encoder Key=0x10 Incr=±n` for the
   main knob (byte 6 = +n, byte 7 = −n) and `Encoder Key=0x11` for the
@@ -280,6 +290,18 @@ fixed sequence done by the user against the full 27-byte dumps:
   If that holds, ch8 gives an app a few seconds' warning to save its state
   and exit. To confirm: switch the ignition off on purpose during a run
   and compare.
+- **2026-10-30: the same sequence, and the unit kept running.** During
+  hello6's clip 6, 8 s after the driver's last knob click (the phone video
+  ends about there), ch8 sent the 29-byte `… 02 02` message, then `01 03`
+  (+0.2 s) and `01 00` (+3.2 s). MMI3GApplication logged `OnOff new system
+  state is 5` in the same second. It had logged state `7` 18 s earlier, and
+  logged `19` with `AMFMTuner disconnected` 2 min later. The states seen
+  while running normally were `14`, after `49 20 35 4 6` at boot. This
+  time nothing stopped: hello6 played its remaining four clips (3 min
+  more), and run.sh logged its result and "all done". So byte 15 `03`/`00`
+  is a power state on the way down, with the unit still running for minutes
+  [inferred]. On 28.10 the logs ended at it for some other reason (the
+  card pulled, or the unit shutting down faster).
 
 **No key or button stops an app.** Runs end on their own timer, a signal, SD
 removal or the watchdog — a stray press during a test cannot cut it short.
@@ -440,10 +462,61 @@ audible this time, music with a bass beat:
 - **Each queued file adds ~350 ms of silence** (2.38/2.39/2.33 s instead
   of 2.0), the same as on 25.10.
 
+**2026-10-30 (steps `mntv`, all four ran), the listener's notes and the
+phone video's sound** (`src/hello5/README.md` has the details):
+
+- **`m`, `n`: the radio is muted for the whole train again,** and the
+  pings are heard. 28.10's bass fade-in in `n` didn't come back. At
+  volume 0, pings 4–6 were as loud as the rest (±0.3 dB) for the third
+  time. Queued files: +350 ms each again.
+- **`t`: `TDM1_20_SAD` attaches while the MME plays Bluetooth music, and
+  mutes it too.** AVRCP reported `PLAYING` from just after the MEDIA
+  press, but no music was heard during the train. It was audible from the
+  moment `testapp-file` ended.
+- **`v`: the pings follow the car's volume knob.** Two pings ~21 dB down
+  after a run of detents down, the rest ~12 dB back up after detents up
+  (listener: louder after turning up). The knob's detent counts are too
+  noisy (both directions within one turn, in ch8 and in the MMI's own
+  log) to give a dB-per-detent figure: this car's volume knob is slightly
+  faulty (section 8).
+
+**2026-11-03 (steps `mntv`):** the same as 30.10 in all four steps. In
+`v` the pings were as loud as `t`'s with no knob turn. An earlier
+reading had them ~20 dB down; `src/hello5/README.md` has the
+measurement.
+
 What this means for an app with sound: it can play through
-`TDM1_20_SAD`, but the user's radio or music pauses while it does, and
-its level is the car's volume. That suits short prompts and a
-full-screen media app, but not background sound over the radio.
+`TDM1_20_SAD`, and the user's radio or music is muted while it does
+(confirmed for the radio and for Bluetooth media). Its level is the car's
+volume, set with the volume knob. The app's own graph volume does nothing
+(below, confirmed in code). That suits short prompts and a full-screen
+media app, but not background sound over the radio. To be quieter than
+the car volume, an app has to scale the samples it writes.
+
+**Why the graph volume does nothing (io-media-nvidia, P1001 efs-system,
+IDA).** The `mixer:` output plugin's ops table is at `0x8279360`. Its
+fourth entry, `0x8050570`, is `mixer_set_volume` (its own log strings).
+It takes only the first byte of the 4-byte volume payload, so balance and
+fade are ignored. It computes `gain = volume / 100.0` and calls virtual
+slot `+0x0C` of the DSP `AudioMixer` singleton (`sub_80A1940`, object
+`0x83636C4`, vtable `0x828813C`). That slot (`0x80A3D20`) is a stub:
+`mov.l #0x8000000C, r0; rts`. Nothing reaches the DSP. hello5 still gets
+`EOK` from the devctl, so the generic graph code doesn't pass this error
+back to the client [inferred].
+
+The real DSP gain command does exist. Vtable slot `+0x20` (`0x80A2720`)
+sends `AMixer` command 2 (`GainSet`; the constructor registers commands
+0–10 by name, `0x80A1C00`) for pins 1–6. Its only wrapper is
+`sub_804E13C(pin, gain)`, and nothing in the binary references it (no
+call, no pointer). So no client of io-media can set a DSP mixer gain.
+
+**`volume_ctrl` isn't a volume.** `FUN_08055858` parses the mixer URL's
+query: `volume_ctrl=yes` sets a flag, and `mime`/`mimetype`, `delay`,
+`EncodingBitrate` and `PriorityAdjust` fill the other fields. The only
+reader of the flag is the encoder set-up (`FUN_080550ae`, mix-out to
+`DSPOUT_PCI1..3`): `yes` makes the encoder shareable ("Volume_ctrl=yes so
+Encoder is shareable"), `no` makes it private. It means nothing for
+playback.
 
 **io-media from our own code (from `testapp-file`'s disassembly, P1001
 efs-system).** `testapp-file` links no io-media library (NEEDED is only

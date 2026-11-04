@@ -43,7 +43,7 @@ of the text (use them to indent). Text is UTF-8.
 | `footer H FONT BG FG TEXT` | A bar of height H at the bottom in BG, with TEXT in FG at the margin, centred vertically. Flow lines stop above it, so put it before them. |
 
 - **FONT**: `small` (8x16) or `big` (16x32): Terminus Bold, the same fonts
-  as usb_tx_test (`sdk/fonts/`, SIL OFL). Characters the font lacks are
+  as audi_stream_receiver (`sdk/fonts/`, SIL OFL). Characters the font lacks are
   drawn as `?`.
 - **COLOUR**: `RRGGBB` hex (`#RRGGBB` also works) or a name from `colour`.
 - **Flow text** (`line`, `para`) goes down from the `at` position. A line

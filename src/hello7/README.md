@@ -65,4 +65,6 @@ menus for the rest of hello7's run.
   "top-left soft key" (byte 1 `0x02`) are guesses, and `0x40` and `0x80`
   are unknown.
 - **Volume turns are not always clean:** the volume knob sometimes sends
-  messages for both directions in one turn. The HMI sees the same.
+  messages for both directions in one turn. The HMI sees the same. This
+  car's volume knob is slightly faulty (the user, 2026-10-30), so that is
+  the hardware, not the decoding.

@@ -25,6 +25,14 @@ int  screen_present(void);
 /* Off by default (costs two screen-sized RAM buffers). */
 void screen_set_partial(int on);
 
+/* Off by default (0). With ms > 0, screen_present() shows our displayable
+ * again (show {40,16,19}) when the last show is ms or more ago. The HMI
+ * takes the screen with its own show on some keys (MEDIA in hello5 on
+ * 2026-11-03, MENU/BACK in hello7 on 2026-10-25) and the layer manager
+ * offers no way to see that, so an app that must stay up re-shows on a
+ * timer. */
+void screen_set_reshow(unsigned ms);
+
 /* What the last screen_present() did. */
 struct screen_stats {
 	unsigned copy_us;   /* compare + copy into the VFB */

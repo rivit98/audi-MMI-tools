@@ -29,11 +29,11 @@ run has finished.
    appears. Each test
    then has a screen before it, which says what it does and what you
    should see, and a screen after it with its result.
-4. The last test is `usb_tx_test` (the phone's screen over USB). It runs
+4. The last test is `audi_stream_receiver` (the phone's screen over USB). It runs
    until you take the card out, so that is how the run ends - there is no
-   "all done" screen. The tests before it (hello8, hello5, then hello6) take
-   about 11 minutes. If your card's run
-   does not end with `usb_tx_test`, wait for the **"all done"** screen to
+   "all done" screen. The tests before it (hello5, then hello9)
+   take about 4 minutes. If your card's run
+   does not end with `audi_stream_receiver`, wait for the **"all done"** screen to
    go away instead, then take the card out.
 
 Buttons and knobs do not stop a test - each one runs for its own fixed time.
@@ -50,7 +50,7 @@ freeze is already on the card.
 ## The tests
 
 `hello`, `lmprobe`, `hello2`, `hello3` and `hello4` have passed on the car
-and are no longer run, but they are still on the card.
+and are no longer run, so they are not on the card.
 
 | Test | What it checks | What you see / do |
 |---|---|---|
@@ -59,11 +59,11 @@ and are no longer run, but they are still on the card.
 | `hello2` | Drawing with the graphics chip (OpenGL ES), 20 s | A background slowly changing colour, a rotating coloured square, a white block bouncing along the top and a yellow progress bar. Saves screenshots to the card. |
 | `hello3` | Graphics speed (fill rate), 3 × 10 s | Random coloured blocks that get smaller, flowing rainbow plasma, then more and more plasma layers (yellow number). Green frame counter top left. |
 | `hello4` | 3D drawing, about 1.5 minutes | A row of small squares top right (green = pass, red = fail). Then 10 s each: two colourful cubes, a gold ring with moving lights, a checkerboard world with crates and fog. Then a grid of coloured rings; the yellow number is how many: 1, 2, 4, 8, 12, 10 s each. **May freeze the MMI** (see above). |
-| `hello5` | How our app's sound behaves next to the radio, the volume knob and music. About 2.5 minutes. | Radio on at a normal volume, and **film the screen with sound on**. Four steps; each one says on screen what to do and counts down before it starts. Each plays a short ping every 2 s with a white **PLAYING** box. **1:** listen whether the radio keeps playing *between* the pings. **2:** 12 pings played by hello5 itself: pings 4–6 should be missing, and the last three should keep the same 2 s beat. **3:** press **MEDIA** and start music (USB, Bluetooth, Jukebox, CD) during the countdown; does the music keep playing between the pings? **4:** while the pings play, turn the **volume** knob slowly, **one click at a time**: 3 clicks down, wait a few pings, then 3 clicks up; do the pings get quieter and louder too? Turn the volume back up afterwards. Note the answers (or let the video tell). |
+| `hello5` | Whether hello5 gets the screen back from the MMI's Media screen, and how its sound behaves next to music. About 45 s. | **Film the screen with sound on.** During the 25 s countdown press **MEDIA** and start music (USB, Bluetooth, Jukebox, CD). The MMI's Media screen comes up: **does hello5's screen come back over it within about a second, and stay there without flickering?** Then 6 pings, one every 2 s, with a white **PLAYING** box: does the music keep playing *between* the pings? Note the answers (or let the video tell). |
 | `hello8` | Programs written in C++ work on the MMI. About 35 s. | Nothing to do. A list of 18 checks fills in one by one: **PASS** in green, or **FAIL** in red with what went wrong underneath. The results stay up for 20 s. Take a photo if anything is red. If nothing changes for more than a minute, note the check marked **RUN**. |
 | `hello7` | A tool, not run by default: names every knob and button you use. 60 s. | Turn any knob and press any button, one at a time. Each is named on screen and counted; a control hello7 doesn't know yet shows as "unknown" with its byte and bits, so note which one you pressed. The MMI reacts to them as well: MENU or BACK brings the MMI's own screens up over hello7's for the rest of its run. |
-| `usb_tx_test` | The phone's screen over USB, about 2 pictures a second. Runs until you pull the card, so it is always the last test: pulling the card ends it and the run. | Install the usb_tx_test app on the phone, then plug the phone into the car's USB port. The bar at the top turns green ("Connected") once the phone accepts the "open usb_tx_test" prompt. Tap **Stream screen** on the phone and allow the screen capture: the phone's screen appears on the MMI. Turn the phone, switch apps, unplug and replug as often as you like. **Pull the card to end it.** |
-| `hello6` | Whether the MMI's video chip plays phone-style video. About 8 minutes. **Park the car.** | Text screens explain every step. 10 test videos, each with a screen before it and each shown two ways, about 10 s each: **turn the main knob one click whenever you see a moving test picture** (a coloured pattern with its name and a counting number). The picture may stay black for some of them; that is a result too. A results screen stays up at the end. |
+| `audi_stream_receiver` | The phone's screen over USB, a few pictures a second. Runs until you pull the card, so it is always the last test: pulling the card ends it and the run. | Install the Audi streaming app on the phone, then plug the phone into the car's USB port. The bar at the top turns green ("Connected") once the phone accepts the "open Audi streaming" prompt. Tap **Stream screen** on the phone and allow the screen capture: the phone's screen appears on the MMI. Turn the phone, switch apps, unplug and replug as often as you like. **Format** on the phone: JPEG, PNG (sharper text) or PNG when still; try each for a while on a screen with small text and take a photo of the MMI with each. **Pull the card to end it.** |
+| `hello6` | Whether the MMI's video chip plays phone-style video. About 6 minutes. **Park the car.** | Text screens explain every step. 10 test videos, each with a screen before it and each shown two ways, about 7 s each: **turn the main knob one click whenever you see a moving test picture** (a coloured pattern with its name and a counting number). The picture may stay black for some of them; that is a result too. A results screen stays up at the end. |
 
 The result screen after each test shows one of these verdicts:
 

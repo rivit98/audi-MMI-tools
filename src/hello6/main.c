@@ -8,7 +8,8 @@
  *   v  video: clips through the unit's DM642 decoder via io-media and
  *      testapp-file, shown on a layer manager video displayable with the
  *      capture unit enabled through dev-videoctrl; the driver turns the
- *      knob when the picture is visible (video.c). All ten clips.
+ *      knob when the picture is visible (video.c). All ten clips. (The
+ *      streaming tests that followed from them are hello9's.)
  *   g  GPU: CPU writes to the frame buffer, texture upload (RGBA, BGRA,
  *      RGB565, DXT1), visible upload+draw pipelines in fps (bench.c)
  *
@@ -26,7 +27,7 @@
  * decompressed by inflator) or, failing that, from the copies `make sd`
  * puts next to hello6 on the card.
  *
- * Default: v only, every clip through both capture paths (~8 min). The
+ * Default: v only, every clip through both capture paths (~6 min). The
  * rest only costs the driver's time (and g froze the unit on 12.10 and
  * 13.10).
  *
@@ -47,7 +48,7 @@
 #include "quit.h"
 #include "texts.h"
 
-#define WATCHDOG_S   900     /* v alone ~8 min (10 clips x ~37 s) */
+#define WATCHDOG_S   900     /* v alone ~6 min (10 clips x 30-38 s) */
 #define INTRO_MS     12000   /* 8 s until 13.10: too short */
 #define PAGE_MS      12000   /* per results page */
 #define MAX_SUMMARY  48

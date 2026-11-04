@@ -2,9 +2,9 @@
 #
 # Built by `make sdk` (see Makefile), which passes the inputs as narrow
 # named build contexts so the 100 MB firmware tree is never sent to Docker:
-#   qnx-libc-public  dev/openqnx/trunk/lib/c/public
-#   qnx-sys-public   dev/openqnx/trunk/services/system/public
-#   qnx-crt-sh       dev/openqnx/trunk/lib/c/startup/sh
+#   qnx-libc-public  third_party/openqnx/trunk/lib/c/public
+#   qnx-sys-public   third_party/openqnx/trunk/services/system/public
+#   qnx-crt-sh       third_party/openqnx/trunk/lib/c/startup/sh
 #   fwlibs           the device .so files to stub (staged by make)
 # GLES 1.1 / EGL headers are the standard Khronos ones from Debian's
 # libgles-dev/libegl-dev; build-sysroot.sh copies them into the sysroot.

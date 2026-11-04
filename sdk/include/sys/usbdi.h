@@ -3,7 +3,7 @@
  * MMI 3G+ SDK.
  *
  * openqnx (6.4.1) does not ship the USB DDK headers, so this is a
- * reconstruction: just the pieces usb_tx_test needs to talk to a phone
+ * reconstruction: just the pieces audi_stream_receiver needs to talk to a phone
  * through io-usb (/dev/io-usb/io-usb) with the device's own libusbdi.so.2
  * (/mnt/efs-system/lib, "632-2077" build of io-usb).
  *

@@ -84,7 +84,7 @@ produce fewer than two compares.
 
 ## How it was found
 
-First car run (2026-10-10, `dev/10.10.2026 - first version run/`): hello2–4
+First car run (2026-10-10, `runs/10.10.2026 - first version run/`): hello2–4
 logged `lm_register_displayable(cid=40, …): Invalid argument`. The layer
 manager had in fact accepted every register: the slog shows
 `processPendingShowRequests: showDisplayable(cid=40)` during each app, and the

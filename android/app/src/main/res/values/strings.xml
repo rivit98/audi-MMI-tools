@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">usb_tx_test</string>
-    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
+    <string name="app_name">Audi streaming</string>
+    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Format: JPEG is small and fast, PNG keeps text sharp but is bigger and slower, PNG when still sends JPEG while the screen moves and the same picture as PNG once it stops. Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
     <string name="stream_start">Stream screen</string>
     <string name="stream_stop">Stop stream</string>
     <string name="max_fps">Max %1$d fps</string>
     <string name="details">Details on the MMI (landscape)</string>
+    <string name="format">Format</string>
+    <!-- in the order of enum Format (CaptureService.kt) -->
+    <string-array name="formats">
+        <item>JPEG (fast)</item>
+        <item>PNG (sharp, slower)</item>
+        <item>PNG when still (JPEG while moving)</item>
+    </string-array>
 </resources>

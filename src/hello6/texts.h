@@ -7,10 +7,10 @@
 #define FOOTER_MAIN  "hello6 - results in hello6.log and hello6/ on the card"
 #define FOOTER_VIDEO "hello6 - video test. Pull the SD card to stop."
 
-#define INTRO_TITLE  "hello6: video test (~8 min)"
+#define INTRO_TITLE  "hello6: video test (~6 min)"
 #define INTRO_BODY \
 	"Park the car. Ten test videos, each shown two ways one after " \
-	"the other (about 10 s each). Turn the main knob ONE click " \
+	"the other (about 7 s each). Turn the main knob ONE click " \
 	"whenever you see the moving test picture.\n\nLeave the card " \
 	"in until the results screen has gone."
 
@@ -24,19 +24,24 @@
 #define VIDEO_TITLE_FMT "Video %d/%d: %s"
 #define VIDEO_BODY_FMT \
 	"%s\n\nFirst capture unit 1 (partial decode), then unit 0 (DSP " \
-	"video port), about 10 s each. Turn the main knob ONE click " \
+	"video port), about 7 s each. Turn the main knob ONE click " \
 	"whenever you see the moving test picture (its name and a " \
 	"counting number)."
 
 /* media/mkclips.sh makes these (same names, CLIP_S seconds each: long
- * enough for both capture-unit attempts, which take ~25 s per clip). */
-#define CLIP_S  30
+ * enough for both capture-unit attempts, which take ~20 s per clip).
+ * 30 s until 30.10; the picture was always seen within 4 s. */
+#define CLIP_S  22
 
 struct clip {
 	const char *file, *title, *what;
 	int grow;
 };
 
+/* Clips 1-10 gave the same result on 21.10, 25.10 and 30.10. The RE of
+ * 2026-11-02 (docs/phone-mirroring.md 7.8) explains 4 (io-media refuses
+ * width > 720) and 7/9 (mp4_parser ignores moof). The streaming tests that
+ * followed (constant-sample-size MP4, a live stream) are hello9's. */
 static const struct clip clips[] = {
 	{ "c1_mpeg2_576.mpg", "MPEG-2 720x576 (DVD-like)",
 	  "Control: the DVD player's format. Not seen here = the screen "

@@ -9,22 +9,22 @@
 #   make sd SD_APPS="hello hello3"
 #                        the same with only those apps (in that order)
 #   make test            host-side unit tests (tests/*.c) in the SDK container
-#   make apk             build the Android sender: android/out/usb_tx_test.apk
+#   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
 #   make apk-test        its Kotlin unit tests
 #   make apk-install     adb install it (adb in the container, phone on USB)
 #   make aoa-host        desk test: this PC plays the MMI for the phone app
-#                        (the newest streamed picture: build/aoa-host/latest.jpg)
+#                        (the newest streamed picture: build/aoa-host/latest.jpg / .png)
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
-#   make clips           hello6's test videos (build/clips/, ffmpeg in the
-#                        mmi-media image; `make sd SD_APPS=hello6` does it too)
+#   make clips           hello6's and hello9's test videos (build/clips/, ffmpeg
+#                        in the mmi-media image; make sd does it when needed)
 #   make shell           interactive shell in the SDK container
 
 REPO   := $(abspath $(CURDIR)/../..)
-OQ     := $(REPO)/dev/openqnx/trunk
-FW     := $(REPO)/dev/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51
-FWEFS  := $(REPO)/dev/HN+R_EU_AU_P1001/extracted/MU9411/efs-system/51
+OQ     := $(CURDIR)/third_party/openqnx/trunk
+FW     := $(CURDIR)/third_party/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51
+FWEFS  := $(CURDIR)/third_party/HN+R_EU_AU_P1001/extracted/MU9411/efs-system/51
 IMAGE  := mmi-sdk
 APP    ?= hello2
 
@@ -56,7 +56,9 @@ CXXFLAGS := $(CFLAGS)
 #   SCREEN  screen.c: a CPU-drawn layer-manager screen (VFB), + TEXT
 #   GL      gfx.c (gf + EGL), hud.c (FPS counter), img.c (BMP/PNG)
 #   PROC    proc.c: start the unit's own tools from a threaded app
-#   JPEG    jpeg.c: JPEG decoding (stb_image)
+#   IMGDEC  imgdec.c: JPEG + PNG decoding (stb_image)
+#   CPUMON  cpumon.c: own + unit CPU load, a "cpu:" log line per window (cpustat.c)
+#   IOM     iom.c: our own io-media client (graph, input, output, play, events)
 common = $(foreach f,$(1),src/common/$(f).c src/common/$(f).h)
 BASE   := $(call common,log quit lmgr)
 TEXT   := $(call common,text) build/gen/font_big.h build/gen/font_small.h
@@ -64,18 +66,20 @@ SCREEN := $(call common,screen vfbcopy) $(TEXT)
 IMG    := $(call common,img) src/common/stb_image_write.h
 GL     := $(call common,gfx hud) $(IMG)
 PROC   := $(call common,proc)
-JPEG   := $(call common,jpeg) src/common/stb_image.h
+IMGDEC := $(call common,imgdec) src/common/stb_image.h
+CPUMON := $(call common,cpumon cpustat)
+IOM    := $(call common,iom)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
-# APPS is everything `make` builds, and all of it goes on the card; TESTS
-# are what run.sh executes by default, in this order (settings:
-# sd/apps.conf).
+# APPS is everything `make` builds; TESTS are what run.sh executes by
+# default, in this order (settings: sd/apps.conf). `make sd` builds and
+# puts on the card only SD_APPS (default TESTS) and what they need.
 #
-# hello and lmprobe are built and shipped but no longer run: both have
+# hello and lmprobe are still built but no longer run: both have
 # answered their question on the car. hello proved the toolchain produces
 # binaries the MMI runs; lmprobe proved the layer-manager / VFB sequence,
 # and its d-shot is byte-identical between runs (docs/platform-notes.md).
-# Run either by hand from the card, or with `make sd SD_APPS="lmprobe ..."`.
+# Run either with `make sd SD_APPS="lmprobe ..."`.
 # hello2 and hello3 joined them after the 2026-10-11 run: both passed, and
 # what they measured is written up in docs/gpu-results.md.
 #
@@ -84,33 +88,39 @@ JPEG   := $(call common,jpeg) src/common/stb_image.h
 # docs/gpu-results.md sections 8-9). Stress steps 16 and up stay commented
 # out (src/hello4/main.c) in case it is run again.
 #
-# hello8 is the C++ test: the language runtime and the standard library
-# (src/hello8/checks.cpp), one PASS/FAIL per check on screen and in its
-# log. 17 of 17 passed on 2026-10-28; it is back for "atomics stress",
-# which compares gUSA atomics with SH-4A LL/SC ones (docs/cpp-apps.md).
-# About 35 s, nothing to do.
+# hello8, the C++ test (src/hello8/checks.cpp): 18 of 18 passed on
+# 2026-10-30, and "atomics stress" settled the last question (gUSA atomics
+# lose updates under QNX, SH-4A LL/SC ones don't; docs/cpp-apps.md). The
+# SDK has built everything with LL/SC since; 2026-11-03 confirmed that
+# build on the car (18 of 18, LL/SC 0 lost), so hello8 left the default run.
 #
 # hello7 is a tool, not a test: a live knob and button tester, run when
 # needed (`make sd SD_APPS="hello7 ..."`). It left the default run after
 # 2026-10-25: the MMI reacts to every button as well, and MENU or BACK
 # brings its own screens up over hello7's for the rest of the run.
 #
-# hello6 needs the driver watching for about 8 minutes and puts ~55 MB of
-# test videos on the card. usb_tx_test runs until the SD card is pulled, so
+# hello6 left the default run for good after 2026-11-03: its ten clips
+# gave the same answer four runs in a row (21.10-03.11), and its main
+# result, hardware H.264 on screen through VCAP 0 input 1, is rechecked
+# by hello9's c5 control on every hello9 run. What it leaves open needs
+# RE or new tests, not another hello6 run (src/hello6/README.md).
+#
+# hello9 needs the driver watching for about 3.5 minutes and puts ~70 MB of
+# test videos on the card. audi_stream_receiver runs until the SD card is pulled, so
 # it is always last: pulling the card ends it and the whole run (no final
 # "done" screen; everything before it is already on the card).
-APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 usb_tx_test
-CXX_APPS := hello8
+APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver
+CXX_APPS := hello8 hello9
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello8 hello5 hello6 usb_tx_test
+TESTS   := hello5 hello9 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: before an app, after it, at the end.
 PRE_S   := 5
 POST_S  := 8
 FINAL_S := 15
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host clips
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host clips gusa-scan
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -126,8 +136,8 @@ LIBS_hello4 := -lGLES_CM -lgf -lm
 # hello5: no GL. Its screen (what to do, which ping is playing, for a phone
 # video) is CPU-drawn. Its ping trains (pulse.c) and step g's mixer chimes
 # are played by the unit's testapp-file, started with proc.c, and by its
-# own io-media client (iom.c, step n).
-build/hello5: $(wildcard src/hello5/*.c src/hello5/*.h) $(BASE) $(SCREEN) $(PROC)
+# own io-media client (common/iom.c, step n).
+build/hello5: $(wildcard src/hello5/*.c src/hello5/*.h) $(BASE) $(SCREEN) $(PROC) $(IOM)
 LIBS_hello5 := -lasound -lgf
 # hello6: mirroring assumptions (docs/phone-mirroring.md). GL benchmarks,
 # CPU-drawn instruction screens, the unit's tools for video.
@@ -138,20 +148,34 @@ build/hello7: $(wildcard src/hello7/*.c src/hello7/*.h) $(BASE) $(SCREEN)
 LIBS_hello7 := -lgf
 # hello8: C++. checks.cpp is plain C++ (also run on the build host by
 # tests/test_hello8.cpp); main.cpp shows the results on a CPU-drawn screen.
-# llcs.cpp is built on its own with SH-4A LL/SC atomics (movli.l/movco.l)
-# for the "atomics stress" check; the binary's ELF flags become sh4a, which
-# QNX's loader doesn't check (proc/loader_elf.c looks at e_machine only).
-LLCS_FLAGS := -m4a -matomic-model=hard-llcs -Wa,--isa=sh4a
-build/hello8: $(filter-out src/hello8/llcs.cpp,$(wildcard src/hello8/*.cpp)) \
-    $(wildcard src/hello8/*.h) build/hello8-llcs.o $(BASE) $(SCREEN)
+# The SDK builds with SH-4A LL/SC atomics (sdk/shle-nto-gcc); gusa.cpp is
+# built on its own with GCC's old sh4 default, soft-gusa, so "atomics
+# stress" still compares the two (llcs.cpp checks the default). ",strict":
+# without it GCC uses movli.l/movco.l for 32-bit atomics on SH-4A anyway.
+GUSA_FLAGS := -matomic-model=soft-gusa,strict
+build/hello8: $(filter-out src/hello8/gusa.cpp,$(wildcard src/hello8/*.cpp)) \
+    $(wildcard src/hello8/*.h) build/hello8-gusa.o $(BASE) $(SCREEN)
 LIBS_hello8 := -lgf
-build/hello8-llcs.o: src/hello8/llcs.cpp src/hello8/checks.h
+build/hello8-gusa.o: src/hello8/gusa.cpp src/hello8/checks.h
 	mkdir -p build
-	$(RUN) shle-nto-g++ $(CXXFLAGS) $(LLCS_FLAGS) -c -o $@ $<
-# usb_tx_test: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
-# pictures are JPEGs, decoded on the CPU.
-build/usb_tx_test: $(wildcard src/usb_tx_test/*.c src/usb_tx_test/*.h) $(BASE) $(SCREEN) $(JPEG)
-LIBS_usb_tx_test := -lusbdi -lgf
+	$(RUN) shle-nto-g++ $(CXXFLAGS) $(GUSA_FLAGS) -c -o $@ $<
+	@$(RUN) sh4-linux-gnu-objdump -d $@ | grep -q movli.l && \
+	    { echo "$@: LL/SC in the gUSA loop (GUSA_FLAGS lost ,strict?)"; rm -f $@; exit 1; } || true
+# hello9: C++. The streaming tests (docs/phone-mirroring.md 7.8): our own
+# io-media client, a resource manager serving the live stream
+# (stream_server.cpp, whose headers need src/common/qnx/sys/pm.h), the
+# video displayable. stream_plan.cpp is plain C++, also tested on the build
+# host (tests/test_hello9.cpp).
+build/hello9: $(wildcard src/hello9/*.cpp src/hello9/*.h) $(BASE) $(SCREEN) $(PROC) $(IOM)
+LIBS_hello9 := -lgf
+# QNX's <sys/compiler_gnu.h> declares _Uint8t/_Uint32t (uint8_t, uint32_t)
+# with __aligned__ at their natural alignment, which g++ reports for every
+# std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
+CXXFLAGS_hello9 := -Wno-ignored-attributes
+# audi_stream_receiver: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
+# pictures are JPEGs or PNGs, decoded on the CPU.
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON)
+LIBS_audi_stream_receiver := -lusbdi -lgf
 
 # pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
 # status screens. Text drawing + PNG writer, no device libraries.
@@ -203,43 +227,58 @@ $(addprefix build/,$(CXX_APPS)):
 check: build/$(APP)
 	$(RUN) sh -c 'file build/$(APP); sh4-linux-gnu-readelf -h -l -d build/$(APP) | grep -E "Type:|Entry|interpreter|LOAD|NEEDED|HASH|FLAGS|Flags"'
 
-# hello6's extras. Its test videos go on the card only when it runs
-# (~55 MB). The unit's own efs tools it uses (io-media test client, layer
-# manager / GPU memory / CPU load tools) always go along, in bin/: hello6
-# prefers the unit's copies and falls back to these. They are the unit's
-# files, inflated from efs-system (tools/qnx_inflator.c) into $(FWEFS)/bin.
-FWTOOLS   := $(wildcard $(addprefix $(FWEFS)/bin/,testapp-file testapp-cmdline mmecli \
-             ShowVideoMemory memusage hbhogs))
-HELLO6_SD := $(if $(filter hello6,$(SD_APPS)),build/clips/.done)
+# What each app needs on the card besides its binary; `make sd` takes only
+# the SD_APPS' share.
+#   CLIPS_<app>    test videos from build/clips/ (media/mkclips.sh), to
+#                  card:/clips. The set is generated whole, once, when any
+#                  SD app has clips.
+#   FWTOOLS_<app>  the unit's own efs tools it starts, to card:/bin. The
+#                  apps prefer the unit's copies and fall back to these:
+#                  the unit's files, inflated from efs-system
+#                  (tools/qnx_inflator.c) into $(FWEFS)/bin.
+#   FILES_<app>    other files, to the card root.
+# hello6's clips 9 and 10 are c7 and c8, written to the card while they play.
+CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
+                  c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
+CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c10_h264_336_cs_live.mp4
+FWTOOLS_hello5 := testapp-file
+FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
+FWTOOLS_hello9 := testapp-file testapp-cmdline
+FILES_hello5   := src/hello5/beep.wav
 
-# Every app we build goes on the card (so anything can be run by hand from
-# /tmp); only SD_APPS are executed by run.sh and get status screens.
-sd: $(addprefix build/,$(APPS) $(TOOLS)) $(HELLO6_SD)
+ifneq ($(filter sd,$(MAKECMDGOALS)),)
+ifneq ($(filter-out $(APPS),$(SD_APPS)),)
+$(error SD_APPS: not an app: $(filter-out $(APPS),$(SD_APPS)) (APPS: $(APPS)))
+endif
+endif
+per_app   = $(sort $(foreach a,$(SD_APPS),$($(1)_$(a))))
+SD_CLIPS  := $(call per_app,CLIPS)
+SD_FWTOOLS := $(wildcard $(addprefix $(FWEFS)/bin/,$(call per_app,FWTOOLS)))
+SD_FILES  := $(call per_app,FILES)
+
+# Only the SD_APPS are built and copied, plus run.sh's own tools (TOOLS,
+# showScreen). Anything else: add it to SD_APPS.
+sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/var
-	cp $(addprefix build/,$(APPS) $(TOOLS)) $(FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
-	cp sd/apps.conf sd/screens.sh sd/README.md build/sd/
-	@if [ -n "$(HELLO6_SD)" ]; then \
-	    mkdir -p build/sd/clips && cp build/clips/*.* build/sd/clips/; \
-	    echo "bundled build/clips -> card:/clips (hello6)"; \
-	fi
-	@if echo " $(APPS) " | grep -q " hello5 "; then \
-	    cp src/hello5/beep.wav build/sd/beep.wav; \
-	    echo "bundled src/hello5/beep.wav -> card:/beep.wav"; \
-	fi
+	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	cp sd/apps.conf sd/screens.sh sd/README.md $(SD_FILES) build/sd/
+	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
 	    -e 's/@POST_S@/$(POST_S)/' -e 's/@FINAL_S@/$(FINAL_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root"
-	@echo "  on the card: $(APPS)"
-	@echo "  run by run.sh: $(SD_APPS)"
+	@echo "  apps (run by run.sh): $(SD_APPS)"
+	@echo "  clips: $(or $(SD_CLIPS),none)"
+	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
+	@du -sh build/sd | sed 's/\t.*/ on the card/; s/^/  /'
 
-# hello6's test videos: media/mkclips.sh in the mmi-media image (ffmpeg).
+# hello6's and hello9's test videos: media/mkclips.sh in the mmi-media image (ffmpeg).
 MEDIA_IMAGE := mmi-media
 build/.media-image: media/Dockerfile
 	docker build -t $(MEDIA_IMAGE) media
 	mkdir -p build && touch $@
-build/clips/.done: media/mkclips.sh build/.media-image
+build/clips/.done: media/mkclips.sh media/csmp4.py build/.media-image
 	rm -rf build/clips && mkdir -p build/clips
 	docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src \
 	    $(MEDIA_IMAGE) bash media/mkclips.sh build/clips
@@ -253,16 +292,17 @@ addr: build/$(APP)
 
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
-TESTBIN := build/test_proto build/test_jpeg build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8
+TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
+           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_hello9
 test: $(TESTBIN)
 	@for t in $(TESTBIN); do $(RUN) ./$$t || exit 1; done
 	$(RUN) python3 -I tests/check_png.py build/test_png.d
-build/test_proto: tests/test_proto.c tests/check.h src/usb_tx_test/proto.c src/usb_tx_test/proto.h \
-                  src/usb_tx_test/vasm.c src/usb_tx_test/vasm.h
-# usb_tx_test's JPEG decoding, on pictures stb_image_write encodes
-build/test_jpeg:  tests/test_jpeg.c tests/check.h $(JPEG) src/common/stb_image_write.h
-TESTLIBS_test_jpeg := -lm
+build/test_proto: tests/test_proto.c tests/check.h src/audi_stream_receiver/proto.c src/audi_stream_receiver/proto.h \
+                  src/audi_stream_receiver/vasm.c src/audi_stream_receiver/vasm.h
+# audi_stream_receiver's JPEG / PNG decoding, on pictures stb_image_write encodes
+build/test_imgdec: tests/test_imgdec.c tests/check.h $(IMGDEC) src/common/stb_image_write.h
+TESTLIBS_test_imgdec := -lm
+build/test_cpustat: tests/test_cpustat.c tests/check.h $(call common,cpustat)
 build/test_text:  tests/test_text.c tests/check.h $(call common,text)
 # lz4mini against the reference liblz4 (liblz4-dev in the SDK image)
 build/test_lz4:   tests/test_lz4.c tests/check.h src/hello6/lz4mini.c src/hello6/lz4mini.h
@@ -281,15 +321,32 @@ build/test_pulse:  tests/test_pulse.c tests/check.h src/hello5/pulse.c src/hello
 # hello7's ch8 decoding, on the messages logged on 2026-10-21
 build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/keys.h
 # hello8's checks with the host's own libstdc++ (C++, so its own rule)
-build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp \
+build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp src/hello8/gusa.cpp \
     src/hello8/checks.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello8 \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8,$(TESTBIN)):
+# hello9's stream plan: CS-MP4 header, release schedule, byte mapping
+build/test_hello9: tests/test_hello9.cpp tests/check.h src/hello9/stream_plan.cpp \
+    src/hello9/stream_plan.h
 	mkdir -p build
-	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/usb_tx_test \
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello9 \
+	    -o $@ $(filter %.cpp,$^)
+$(filter-out build/test_hello8 build/test_hello9,$(TESTBIN)):
+	mkdir -p build
+	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
+
+# gUSA atomic sequences left in the built apps (tools/gusa-scan.awk): the
+# SDK builds with LL/SC, so only what is precompiled into libstdc++.a /
+# libgcc_eh.a (C++ apps) and hello8's deliberate gusa.cpp should show.
+gusa-scan: $(addprefix build/,$(APPS))
+	@$(RUN) sh -c 'for a in $(APPS); do \
+	    n=$$(sh4-linux-gnu-objdump -d --no-show-raw-insn build/$$a | awk -f tools/gusa-scan.awk | wc -l); \
+	    echo "$$a: $$n gUSA sequence(s)"; \
+	    sh4-linux-gnu-objdump -d --no-show-raw-insn build/$$a | awk -f tools/gusa-scan.awk | \
+	        sort | uniq -c | sed "s/^/    /"; \
+	done' | c++filt
 
 # Android sender: its own Makefile (android/Makefile), everything in Docker.
 apk:

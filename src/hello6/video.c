@@ -64,7 +64,8 @@
 #define LABEL_MS     6000
 #define START_MS     1000    /* player start-up before the first displayable */
 #define BIND_MS      500     /* layer manager binds the VCAP when it shows us */
-#define ATTEMPT_MS   10000   /* START_MS + query + 2 attempts < the clip */
+#define ATTEMPT_MS   7000    /* START_MS + query + 2 attempts < the clip;
+                                * 10 s until 30.10, knob turned 2.4-4 s in */
 #define QUERY_MS     2500    /* testapp-cmdline: run the script and quit */
 #define END_WAIT_MS  8000    /* for the player to finish by itself */
 #define HEAD_S       2       /* growing clips: seconds written before playing */

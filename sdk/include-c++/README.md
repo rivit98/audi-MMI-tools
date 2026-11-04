@@ -17,10 +17,10 @@ The Makefile's `CXX_APPS` rule does this.
 **Status:** builds, and `src/hello8` (18 checks) passes on the build host
 with glibc's libstdc++ (`make test`). On the car (2026-10-25) hello8 did
 not load: a `STB_GNU_UNIQUE` symbol from `libstdc++.a` (see below), fixed
-since. **On 2026-10-28 all 17 checks passed on the car**
-([`src/hello8/README.md`](../../src/hello8/README.md)). `atomics` was too
-short to show the gUSA problem described below; the new `atomics stress`
-check compares gUSA with SH-4A LL/SC atomics (not yet on the car). **For app writers:**
+since. **On 2026-10-30 all 18 checks passed on the car**
+([`src/hello8/README.md`](../../src/hello8/README.md)), and `atomics
+stress` confirmed the gUSA problem described below: gUSA `fetch_add` lost
+9 % of its updates, SH-4A LL/SC none. The SDK builds with LL/SC since. **For app writers:**
 [`docs/cpp-apps.md`](../../docs/cpp-apps.md) has the rules.
 
 ## Why not the car's own C++ libraries
@@ -113,21 +113,25 @@ calendar), `std::thread`, mutexes (plain, recursive, shared, `scoped_lock`),
 - **64-bit atomics** (`std::atomic<long long>`): not lock-free on SH4.
   They need libatomic, which isn't linked: the link fails
   (`__atomic_fetch_add_8`).
-- **Atomics are not atomic across a preemption, probably.** GCC's sh4 Linux
-  default is `-matomic-model=soft-gusa`: short sequences that the *Linux*
-  kernel restarts if they are interrupted. QNX's kernel saves and restores
-  the registers and doesn't restart them (openqnx
-  `services/system/ker/sh/kernel.s`). So a thread preempted inside one can
-  lose an update, though nothing crashes. hello8's `atomics` check counts
-  lost updates. It lost none on the car, but its threads ran under 2 ms
-  each, shorter than one timeslice, so they never interleaved: still
-  unproven either way. Also, a signal delivered to a handler while
-  `r15` holds the gUSA marker kills the process: the kernel's
-  signal-frame bounds check in `ker/nano_signal.c` fails. Signals taken
-  with `sigwait()` are not affected. The SH7785 has `movli.l`/`movco.l` (QNX's own `atomic_add`
-  uses them), so `-m4a -matomic-model=hard-llcs` would fix our own code,
-  but not the copies already compiled into `libstdc++.a` (shared_ptr and
-  string reference counts, `exception_ptr`).
+- **gUSA atomics are not atomic across a preemption (confirmed on the
+  car), so the SDK builds with SH-4A LL/SC.** GCC's sh4 Linux default is
+  `-matomic-model=soft-gusa`: short sequences that the *Linux* kernel
+  restarts if they are interrupted. QNX's kernel saves and restores the
+  registers and doesn't restart them (openqnx
+  `services/system/ker/sh/kernel.s`). In hello8's `atomics stress` on
+  2026-10-30, 4 round-robin threads lost 11.6 M of 129 M gUSA
+  `fetch_add`s, and none with `movli.l`/`movco.l` (QNX's own `atomic_add`
+  uses them too). Since then `shle-nto-gcc` passes `-m4a
+  -matomic-model=hard-llcs -Wa,--isa=sh4a` for everything we compile, the
+  headers' inlined `std::atomic` and `shared_ptr` counts included. What
+  is precompiled into `libstdc++.a` / `libgcc_eh.a` keeps gUSA: COW
+  string and `exception_ptr` counts (exception messages), `std::thread`
+  start-up, `set_terminate` and co., and the unwinder's frame registry
+  (`make gusa-scan`). A signal delivered to a handler while one of those
+  runs kills the process, because `r15` holds the gUSA marker and the
+  kernel's signal-frame bounds check in `ker/nano_signal.c` fails.
+  Signals taken with `sigwait()` are not affected. Rebuilding those
+  archives with LL/SC would close this (`docs/TODO.md`).
 - **An exception escaping a `call_once` callable** ends in
   `std::terminate`: it would have to unwind through QNX's `pthread_once`,
   which has no unwind tables. The same goes for throwing through any C

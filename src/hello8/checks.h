@@ -38,9 +38,11 @@ Result run(const Check &c);
 // ran before main from ones that didn't.
 void mark_main();
 
-// llcs.cpp, built with SH-4A LL/SC atomics on the car: __atomic_fetch_add on
-// *count until *stop, returns how many it did. For "atomics stress".
+// __atomic_fetch_add on *count until *stop, returns how many it did. For
+// "atomics stress". On the car llcs.cpp has the SDK's default SH-4A LL/SC
+// atomics, gusa.cpp GCC's old sh4 default (soft-gusa).
 unsigned long long llcs_add_until(unsigned *count, const bool *stop);
+unsigned long long gusa_add_until(unsigned *count, const bool *stop);
 
 } // namespace checks
 

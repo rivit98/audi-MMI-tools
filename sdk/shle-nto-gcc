@@ -19,9 +19,15 @@ case "$(basename "$0")" in
     *)   CXX=0; CC="${MMI_CC:-sh4-linux-gnu-gcc-16}" ;;
 esac
 
-# Code generation: SH4, little endian, FPU in double-precision mode (crt1
-# sets FPSCR.PR=1, which is what -m4 assumes). --isa=sh4 makes the assembler
-# reject SH-4A-only opcodes and mark the ELF "sh4" (Debian's default: sh4a).
+# Code generation: SH-4A (the SH7785), little endian, FPU in
+# double-precision mode (crt1 sets FPSCR.PR=1, which is what -m4a assumes,
+# as -m4 does). Atomics are SH-4A LL/SC (movli.l/movco.l), not GCC's sh4
+# default gUSA sequences: QNX's kernel doesn't restart an interrupted gUSA
+# sequence, so they lose updates between threads (hello8 "atomics stress"
+# on the car, 2026-10-30: gUSA lost 9 %, LL/SC none, at the same speed).
+# The ELF says "sh4a" then; QNX's loader checks only e_machine. What is
+# precompiled into libstdc++.a / libgcc_eh.a keeps gUSA
+# (docs/cpp-apps.md). Until 2026-10-30: -m4 -Wa,--isa=sh4, soft-gusa.
 # Non-PIE, because QNX 6.3's loader expects ET_EXEC binaries like the stock
 # ones (base 0x08040000).
 # Linux-isms GCC would otherwise bake in are switched off, including Debian's
@@ -42,7 +48,7 @@ if [ $CXX = 1 ]; then
             -isystem $I -isystem $I/sh4-linux-gnu -isystem $I/backward
             -isystem $SYSROOT/usr/include-c++/post -D_QNX_SOURCE"
 fi
-CFLAGS="-m4 -ml -Wa,--isa=sh4 -fno-pie -fno-stack-protector
+CFLAGS="-m4a -ml -matomic-model=hard-llcs -Wa,--isa=sh4a -fno-pie -fno-stack-protector
         -fno-builtin-sin -fno-builtin-sinf -fno-builtin-sinl
         -fno-builtin-cos -fno-builtin-cosf -fno-builtin-cosl
         -nostdinc $CXXINC -isystem $SYSROOT/usr/include
@@ -71,8 +77,8 @@ CXXRT=
 CXXLIBS=
 if [ $CXX = 1 ]; then
     CXXRT="$L/cxxrt-qnx.o"
-    CXXLIBS="-x none $($CC -m4 -ml -print-file-name=libstdc++.a)
-             $($CC -m4 -ml -print-file-name=libgcc_eh.a) -lm"
+    CXXLIBS="-x none $($CC -m4a -ml -print-file-name=libstdc++.a)
+             $($CC -m4a -ml -print-file-name=libgcc_eh.a) -lm"
 fi
 # QNX link order: crt1 crti crtbegin <user objs + libs> -lc libgcc crtend crtn
 # - DT_HASH only (no .gnu.hash): the 2008-era ldqnx predates GNU hash.
@@ -95,7 +101,7 @@ $CC $CFLAGS -nostdlib -no-pie \
     -Wl,-z,max-page-size=0x1000 -Wl,-z,noexecstack \
     -Wl,--no-as-needed \
     "$L/crt1.o" "$L/crti.o" "$L/crtbegin.o" "$L/crtarray.o" $CXXRT \
-    -L"$L" "$@" $CXXLIBS -lc "$($CC -m4 -ml -print-libgcc-file-name)" \
+    -L"$L" "$@" $CXXLIBS -lc "$($CC -m4a -ml -print-libgcc-file-name)" \
     "$L/crtend.o" "$L/crtn.o" || exit
 # A binary the fix rejects must not stay behind: make would take it as up
 # to date and put it on the card.

@@ -10,7 +10,7 @@ deliberate, and it is set up twice before our code ever runs.
 
 ## Where the trap is turned on
 
-`dev/openqnx/trunk/lib/c/startup/sh/crt1.S` — the first thing `_start` does,
+`third_party/openqnx/trunk/lib/c/startup/sh/crt1.S` — the first thing `_start` does,
 before `_init_libc` and before `main`, is call libgcc's `__set_fpscr`:
 
 ```
@@ -21,7 +21,7 @@ start_3:  .long  0xc0400
 `0xc0400` = `SH_FPSCR_PR | SH_FPSCR_DN | SH_FPSCR_ENABLE_Z` — double
 precision, denormals-as-zero, and **divide-by-zero exceptions enabled**.
 
-`dev/openqnx/trunk/services/system/ker/sh/nano_fpu.c` sets the same bits as
+`third_party/openqnx/trunk/services/system/ker/sh/nano_fpu.c` sets the same bits as
 the kernel's per-thread default, and says why:
 
 > we normally don't use FPU exceptions, but in the case of SH we have to,
@@ -108,7 +108,7 @@ Use it instead of `glFogf(GL_FOG_MODE/START/END, ...)` anywhere.
   FPU and raise `SIGFPE`.
 - A `SIGFPE` with a high `ip` is in a shared library, not our code. Take
   `mapaddr` and disassemble the matching firmware `.so` from
-  `dev/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/usr/lib/`:
+  `third_party/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/usr/lib/`:
 
   ```sh
   docker run --rm -v "$PWD/<libdir>":/fw:ro mmi-sdk sh -c '

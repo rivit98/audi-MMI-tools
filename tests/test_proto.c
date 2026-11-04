@@ -1,5 +1,5 @@
-/* test_proto.c - frame encoder/decoder (src/usb_tx_test/proto.c) and
- * video picture reassembly (src/usb_tx_test/vasm.c). */
+/* test_proto.c - frame encoder/decoder (src/audi_stream_receiver/proto.c) and
+ * video picture reassembly (src/audi_stream_receiver/vasm.c). */
 #include <stdlib.h>
 
 #include "check.h"
@@ -224,6 +224,8 @@ static void test_vasm_refusals(void)
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	n = start(p, 3, 640, 360, 9, 10);                 /* unknown format */
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	n = start(p, 3, 640, 360, 0, 10);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	n = start(p, 4, 0, 360, PROTO_FMT_JPEG, 10);
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	CHECK_EQ(vasm_start(&a, p, 5, &dropped, &bad), VASM_BAD);   /* short */
@@ -236,6 +238,39 @@ static void test_vasm_refusals(void)
 	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_BAD);
 	CHECK_EQ(bad, 5);
 	CHECK_EQ(a.active, 0);
+	vasm_free(&a);
+}
+
+/* PNG, and phone_ms: absent in an 11-byte START (old phone app), read from
+ * a 13-byte one, extra bytes after it ignored. */
+static void test_vasm_png_phone_ms(void)
+{
+	struct vasm a;
+	struct vpic pic;
+	uint8_t p[64];
+	int dropped, bad;
+	unsigned n;
+
+	vasm_init(&a, 100);
+	n = start(p, 20, 800, 368, PROTO_FMT_PNG, 2);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	n = data(p, 20, "ok", 2);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
+	vasm_take(&a, &pic);
+	CHECK_EQ(pic.format, PROTO_FMT_PNG);
+	CHECK_EQ(pic.phone_ms, 0);
+	free(pic.data);
+
+	n = start(p, 21, 800, 368, PROTO_FMT_JPEG, 1);
+	proto_put_u16(p + n, 345);
+	p[n + 2] = 0x77;
+	CHECK_EQ(vasm_start(&a, p, n + 3, &dropped, &bad), VASM_OK);
+	n = data(p, 21, "j", 1);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
+	vasm_take(&a, &pic);
+	CHECK_EQ(pic.format, PROTO_FMT_JPEG);
+	CHECK_EQ(pic.phone_ms, 345);
+	free(pic.data);
 	vasm_free(&a);
 }
 
@@ -272,6 +307,7 @@ int main(void)
 	test_vasm_whole_picture();
 	test_vasm_refusals();
 	test_vasm_cut_short();
+	test_vasm_png_phone_ms();
 	test_encode();
 	test_whole_frames();
 	test_byte_by_byte();

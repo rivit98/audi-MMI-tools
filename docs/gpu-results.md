@@ -1,14 +1,14 @@
 # GPU results — what hello2, hello3 and hello4 told us
 
-Conclusions from the 2026-10-11 car run (`dev/11.10.2026 - third version
+Conclusions from the 2026-10-11 car run (`runs/11.10.2026 - third version
 (3d pipeline)`) plus a phone video of the screen during the whole run
 (`VID_20261011_174053.mp4`, 120 fps, kept outside the repo). The earlier runs
-(`dev/10.10.2026 - …`) are used for comparison. The platform facts these
+(`runs/10.10.2026 - …`) are used for comparison. The platform facts these
 build on are in [`platform-notes.md`](platform-notes.md).
 
 Conditions: GCC 16 `-O2` build, MMI cold-booted, the HMI showing the
 **navigation map** underneath the whole time, car parked. Run order: hello2,
-hello3, hello4; hello4 froze the unit, so hello5/hello6/usb_tx_test did not
+hello3, hello4; hello4 froze the unit, so hello5/hello6/audi_stream_receiver did not
 run.
 
 | App | Verdict | In short |
@@ -254,7 +254,7 @@ and 64. It logs:
   the last line on the card is the last frame that finished;
 - free RAM in every per-second line (the size of `/proc`), for hypothesis 3.
 
-hello4 now runs after hello5 and hello6, so a freeze only costs usb_tx_test.
+hello4 now runs after hello5 and hello6, so a freeze only costs audi_stream_receiver.
 
 How to read the result:
 
@@ -284,7 +284,7 @@ were all fine.
 
 ## 6. 12.10: hello6 froze the unit on its first texture upload
 
-Run `dev/12.10.2026 - hello5 hello6`. hello6 got through sysinfo, the CPU
+Run `runs/12.10.2026 - hello5 hello6`. hello6 got through sysinfo, the CPU
 benchmarks and the VFB tests, then the **whole MMI froze again** (as in
 §4.4). The last fsync'ed line was `RESULT vfb_memcpy_out`, so the freeze is
 somewhere in `lm_update_vfb` → GL state setup → `upload_case("rgb565")`:
@@ -310,7 +310,7 @@ copies into a buffer nobody read; fixed with a compiler barrier.
 
 ## 7. 12.10 v2: single uploads pass, back-to-back uploads freeze
 
-Run `dev/12.10.2026 hello5 hello6 v2` (phone video `VID_20261012_173526`,
+Run `runs/12.10.2026 hello5 hello6 v2` (phone video `VID_20261012_173526`,
 kept outside the repo). The GPU phase ran last, after video. It got further
 than v1, then froze the whole unit again. Last lines on the card:
 
@@ -362,7 +362,7 @@ decompress: UI frame 8.8 ms, photo 29 ms.
 
 ## 8. 19.10 v2: hello4 survives 8 and 12 tori, freezes on the first 16-tori frame
 
-Run `dev/19.10.2026 - v2`, stress scene only
+Run `runs/19.10.2026 - v2`, stress scene only
 (`scenes=s step=5 tori=1,2,4,8:60,12,16,24,32,64 trace=1`), after hello5 and
 hello6 in the same boot. The HMI underneath showed the **main menu**, not
 the nav map (video 2:32). Phone video `VID_20261019_113015_v2.mp4` (kept
@@ -417,7 +417,7 @@ the same picture: they came when several large uploads were queued at once.
   neither: option 1 uploads one texture per frame and draws one quad, and
   option 2a doesn't touch GL at all. **hello4 has nothing more to tell the
   mirroring work.** It went back into the default run (last before
-  usb_tx_test) with probes, scenes and stress, but the default stress steps
+  audi_stream_receiver) with probes, scenes and stress, but the default stress steps
   now stop at 12 tori: 16, 32 and 64 are commented out in `opts_default`.
   After the clean run in §9 it was retired.
   If the threshold ever matters, the cheap follow-up is the 16-tori frame
@@ -426,7 +426,7 @@ the same picture: they came when several large uploads were queued at once.
 
 ## 9. 21.10: hello4 runs clean end to end, then retires
 
-Run `dev/21.10.2026/`, the full hello4 (`step=10 trace=1`: probes, cube,
+Run `runs/21.10.2026/`, the full hello4 (`step=10 trace=1`: probes, cube,
 light, world, stress 1/2/4/8/12 tori, 10 s each), after hello5 and hello6
 (ten video clips through the DSP and VCAP 0) in the same boot. Verdict
 `OK`, exit 0, 85 s, no freeze, no swap failures, `glError` 0 throughout,

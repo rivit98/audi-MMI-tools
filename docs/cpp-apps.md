@@ -1,16 +1,17 @@
 # Writing MMI apps in C++
 
 **Yes, C++ is safe to use for apps, within the rules below.** GCC 16 with
-C++20 and its standard library runs on the car: hello8's first 17 checks all
-passed on 2026-10-28 (language runtime, exceptions, RTTI, containers,
+C++20 and its standard library runs on the car: all 18 of hello8's checks
+passed on 2026-10-30 (language runtime, exceptions, RTTI, containers,
 algorithms, strings, `<chrono>`, `<random>`, threads, mutexes, condition
-variables). What doesn't work mostly fails at build time. Two things still
+variables, atomics). What doesn't work mostly fails at build time. Two things still
 need care at run time:
 
-1. **Atomic read-modify-writes shared between threads.** That means
-   `std::atomic` arithmetic and exchanges, and `shared_ptr` copies of one
-   object made by several threads. They can lose an update (below). Use
-   `std::mutex` for shared state.
+1. **What `libstdc++.a` keeps of GCC's old atomics.** The SDK builds your
+   code with SH-4A LL/SC atomics, so `std::atomic` and `shared_ptr` are
+   safe between threads. A few precompiled library parts still use gUSA,
+   which loses updates under QNX: exception objects shared between
+   threads, `std::thread` start-up, signal handlers ([below](#threads-and-atomics)).
 2. **`thread_local` and the other things listed under
    [Not available](#not-available).** The build stops on them.
 
@@ -80,7 +81,7 @@ Everything hello8 checks, all passed on the car:
 - every container, `<algorithm>`, `<numeric>`, ranges and views, `span`,
   `optional`, `variant`, `any`, `tuple`, `bitset`
 - `std::function`, lambdas, `bind`, `invoke`, `unique_ptr`,
-  `shared_ptr`/`weak_ptr` (but see [Threads](#threads-and-atomics))
+  `shared_ptr`/`weak_ptr`, also shared between threads ([Threads](#threads-and-atomics))
 - `<cmath>` (on the unit's C99 `libm.so.2`), `<complex>`, `<random>`
   engines and distributions
 - `<chrono>`: `steady_clock`, `system_clock`, `sleep_for`, the calendar.
@@ -97,8 +98,24 @@ for control flow in a per-frame loop.
 
 ## Threads and atomics
 
-GCC's SH4 atomics are **gUSA** sequences (`-matomic-model=soft-gusa`, the
-sh4-linux default). `fetch_add` compiles to:
+**The SDK builds with SH-4A LL/SC atomics** (since 2026-10-30;
+`sdk/shle-nto-gcc` passes `-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a`).
+`fetch_add` compiles to:
+
+```
+0: movli.l @r4, r0   ! load-linked: load and set the reservation
+   add     #1, r0
+   movco.l r0, @r4   ! store-conditional: T = 1 if the reservation held
+   bf      0b        ! an interrupt in between cleared it: retry
+```
+
+A context switch can't break it: the interrupt clears the reservation,
+`movco.l` fails and the loop runs again. QNX's own `atomic_add()` works
+the same way. The ELF header says `sh4a` then, and QNX's loader doesn't
+mind (it checks only `e_machine`).
+
+**GCC's sh4 default, gUSA, is broken on QNX** (that was the SDK's
+default until 2026-10-30):
 
 ```
 mova   1f, r0        ! r0 = end of the sequence
@@ -114,65 +131,57 @@ The Linux kernel sees the negative `r15` on an interrupt and restarts the
 sequence. QNX's kernel doesn't know the convention (openqnx
 `services/system/ker/sh/kernel.s`, `ker/nano_signal.c`). Two things follow:
 
-- **Lost updates.** If the thread is switched out between the load and the
-  store, and another thread updates the same variable, one update is lost
-  when the first thread resumes. Nothing crashes, but a counter is off,
-  or a `shared_ptr` reference count is off, which means a leak or a double
-  free.
+- **Lost updates.** A thread switched out between the load and the store
+  writes back a stale value when it resumes. That wipes out everything the
+  other threads added in between. On the car (hello8 `atomics stress`,
+  2026-10-30) 4 round-robin threads lost **11.6 M of 129 M** gUSA
+  `fetch_add`s (9 %), and on 2026-11-03 **83.2 M of 129 M** (64 %). The same loop with LL/SC lost **0 of 129 M**, at the
+  same speed. A plain load/store control lost 53 %, so the threads did
+  interleave.
 - **A signal handler kills the process.** To deliver a signal to a
   handler, QNX builds the signal frame below the thread's `r15`. Inside a
   sequence `r15` is `-6`, which fails the kernel's stack bounds check
-  (`WITHIN_BOUNDRY`), so the process is killed instead. Signals that are
-  blocked and taken with `sigwait()` never build a frame. That is how
-  `src/common/quit.c` takes SIGTERM/INT/HUP.
+  (`WITHIN_BOUNDRY`), so the process is killed instead.
 
-The window is three instructions, so either needs bad luck. But an app
-that runs for hours does billions of such operations. hello8's `atomics`
-check (4 threads × 200000 `fetch_add`, 0 lost) doesn't settle it: each
-thread finished in under 2 ms, inside one timeslice, so the threads never
-interleaved. Its new `atomics stress` check (see below) is built to settle
-it.
+**What is still gUSA:** the code precompiled into `libstdc++.a` and
+`libgcc_eh.a`, which comes built for plain sh4. The flags can't change
+it. `make gusa-scan` lists every gUSA sequence in the built apps. In
+hello8 they are only in:
+- the reference-counted (COW) `std::string` that `std::logic_error` /
+  `std::runtime_error` keep their message in
+- `exception_ptr` (`std::current_exception`, `rethrow_exception`)
+- `std::thread` start-up (its `shared_ptr` state)
+- `set_terminate` / `set_unexpected` / `set_new_handler`
+- the unwinder's frame registry (`btree_*`, `version_lock_*`)
+
+Plus hello8's deliberate `src/hello8/gusa.cpp`. The C apps have none.
 
 **Rules:**
 
-- **Share state between threads with `std::mutex` /
-  `std::condition_variable`.** They are QNX's pthread objects (the kernel
-  does the atomicity), and they are safe. A lock+unlock costs ~0.2 µs.
-- **Plain atomic loads and stores are safe:** `std::atomic<int>` or
-  `<bool>` `load()`/`store()` compile to single `mov.l`/`mov.b`
-  instructions (checked in the disassembly). A
-  `std::atomic<bool> stop` flag written by one thread and read by others
-  is fine. Don't use `fetch_add`, `exchange`,
-  `compare_exchange_*`, `++` or `--` on a variable that another thread
-  also modifies.
-- **`shared_ptr`: don't copy or drop references to the same object from
-  several threads at once** without a lock. Every copy and destruction is
-  an atomic increment or decrement. Hand objects between threads under a
-  mutex, or use `unique_ptr` and move it.
-- **Exceptions thrown and caught in the same thread are fine.** Moving an
-  `exception_ptr`, or a copy of a `std::runtime_error` (its message is a
-  reference-counted string), to another thread is the same `shared_ptr`
-  case.
-- **Don't install signal handlers** (`signal`, `sigaction`). Block the
-  signals and `sigwait()` for them in a thread, as `quit.c` does.
-- **A single-threaded app** only has the signal-handler problem. Following
-  the previous rule avoids it.
-
-**A possible fix, being tested:** the SH7785 is an SH-4A and has
-load-linked/store-conditional (`movli.l`/`movco.l`; QNX's own
-`atomic_add()` uses them). Building with
-`-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a` turns `fetch_add` into a
-`movli.l`/`add`/`movco.l`/`bf` loop that a context switch can't break: an
-interrupt clears the reservation, `movco.l` fails and the loop retries.
-It builds with the SDK. The ELF header then says `sh4a`, which QNX's
-loader doesn't check (it reads only `e_machine`). It would cover your
-own code and every header-inlined template (`std::atomic`, `shared_ptr`
-counts). It would not cover what is precompiled into `libstdc++.a`
-(`exception_ptr`, exception message strings, `std::thread` internals).
-hello8's `atomics stress` check runs a plain load/store control, the gUSA
-`fetch_add` and an LL/SC one (`src/hello8/llcs.cpp`, built with these
-flags) in 4 round-robin threads for 1.5 s each, and counts the lost updates
-of each. Until it has passed on the car, follow the rules above.
+- **Atomics in your own code are safe:** `std::atomic` `fetch_add`,
+  `exchange`, `compare_exchange_*`, `++`/`--`, `atomic_flag`, and
+  `shared_ptr` copies shared between threads (its counts are inlined from
+  the headers, so they are LL/SC too). 8- and 16-bit atomics are emulated
+  with 32-bit LL/SC, which is just as safe.
+- **Don't pass exception objects between threads at the same time as
+  they are copied elsewhere.** Copies of a `std::runtime_error` (its
+  message string) and of an `exception_ptr` share a gUSA reference count.
+  Throwing and catching in one thread is fine. To hand an error to
+  another thread, pass its `what()` text as a `std::string` instead.
+- **Start threads from one thread,** or under a mutex. `std::thread`'s
+  start-up count is gUSA. Many threads each creating threads at once is
+  the case to avoid.
+- **Don't install signal handlers** (`signal`, `sigaction`) in C++ apps.
+  The precompiled gUSA sequences above can still be running when one
+  arrives. Block the signals and `sigwait()` for them in a thread, as
+  `src/common/quit.c` does. A C app has no gUSA left, but `sigwait()` is
+  still the simpler pattern.
+- `std::mutex` / `std::condition_variable` are QNX's pthread objects and
+  safe as ever: a lock+unlock costs ~0.2 µs.
+- **Don't add `-m4` or another `-matomic-model`** to an app's flags.
+  `-m4` stops the build (`atomic model hard-llcs is only available on SH4A
+  targets`). `-matomic-model=soft-gusa` brings gUSA back for 8/16-bit
+  atomics, and with `,strict` for all of them.
 
 ## Not available
 

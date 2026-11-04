@@ -6,8 +6,8 @@ magenta, red, blue, black) straight into the layer manager's frame buffer
 (VFB) instead of a PNG. They replace the picture for 5 s. Every raw devctl
 status goes to the log. It was written after the first car run, where the GL
 apps' `lm_register_displayable` reported `EINVAL`. It answered that
-question, so it is still built and copied to the card, but no longer run by
-default.
+question, so it is still built, but no longer run by default (and so not on
+the card unless it is in `SD_APPS`).
 
 What it does, in order:
 
@@ -103,7 +103,7 @@ by time stamp.
   (`data[4]`) from register, not just the devctl return.
 - `d-shot` of a CPU-written VFB is a correct capture.
 - The sequence lives on in `src/common/screen.c` (`screen_open`), used by
-  hello5, hello6's text screens, hello7, hello8 and usb_tx_test, and in
+  hello5, hello6's text screens, hello7, hello8 and audi_stream_receiver, and in
   `src/common/gfx.c` for the GL apps hello2–4.
 - What lmprobe could not show: the VFB is double-buffered and its `sid`
   changes on every `updateVfb`. lmprobe updates only once, so it never saw

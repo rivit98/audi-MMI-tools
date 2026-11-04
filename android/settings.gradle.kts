@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "usb_tx_test"
+rootProject.name = "audi_streaming"
 include(":app")

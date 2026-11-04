@@ -1,13 +1,13 @@
 # MMI 3G+ USB host stack — what `io-usb` and friends actually do
 
 How the unit's USB stack behaves, read out of the binaries so a client app
-(like `usb_tx_test`) can be written against it without guessing. Everything
+(like `audi_stream_receiver`) can be written against it without guessing. Everything
 here was verified in Ghidra on the rev `51` (E1) firmware; nothing below is
 speculation unless marked **[unverified]**. The point is reuse: build on it
 instead of re-reading the disassembly.
 
 Sources (all rev `51`, under
-`dev/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/`):
+`third_party/HN+R_EU_AU_P1001/extracted/MU9411/ifs-root/51/mnt/ifs-root/`):
 
 | Binary | Role | Where on the unit |
 |---|---|---|
@@ -42,7 +42,7 @@ Sources (all rev `51`, under
 ## What this means for writing a client
 
 These are the consequences the above forces onto any app that opens a device
-through `libusbdi.so.2` (and that `usb_tx_test` is built around):
+through `libusbdi.so.2` (and that `audi_stream_receiver` is built around):
 
 1. **Do the work on your own thread, not in the callback.** io-usb's
    callbacks fire on the single `usbdi_event_handler` thread and only queue
@@ -52,7 +52,7 @@ through `libusbdi.so.2` (and that `usb_tx_test` is built around):
    new device and can detach yours (or reset it) right after it appears —
    e.g. one "link interrupted → reconnecting" is normal the moment an Android
    phone flips into accessory mode. Reopen on the same device a few times
-   (usb_tx_test tries 5) before giving up.
+   (audi_stream_receiver tries 5) before giving up.
 3. **Retry `usbd_close_pipe` / `usbd_detach` on `EBUSY`.** They free nothing
    and the port stays in holdoff until libusbdi's I/O counters drain, which
    happens only after your completion callbacks have returned. Loop until they
@@ -86,13 +86,13 @@ on QNX head units, and is the reference for the AOA client flow.
 
 ## Android Open Accessory, as seen by this stack
 
-`usb_tx_test` connects to io-usb with a wildcard filter and does the
+`audi_stream_receiver` connects to io-usb with a wildcard filter and does the
 [AOA](https://source.android.com/docs/core/interaction/accessories/aoa)
 handshake (vendor requests 51/52/53) with any new device. An Android phone
 re-enumerates as `18d1:2d00` / `2d01` with a single bulk IN/OUT interface
 (`ff/ff`) — no root, no USB debugging required. Android starts the sender app
 because its `accessory_filter.xml` matches manufacturer `mmi3g` / model
-`usb_tx_test`.
+`audi_stream_receiver`.
 
 **First car run (12.10, Redmi Note 8 Pro in MTP mode, `2717:ff40`, iface
 06/01/01):** `usbd_connect` ok, insertion arrived, `GET_PROTOCOL` answered
@@ -143,19 +143,19 @@ lost: insertion callback 00:05:20, `Process bus event` 00:05:22, no `MTP/PFS
 device detected!` (the probe failed or stalled), removal 00:05:26. A probe
 failure means `usbd_reset_device`. That fits v2's pattern: one answered
 request, then nothing answers, then a late removal. Two EP0 users at once
-on the phone is the likely trigger **[inferred]**. Since 19.10 usb_tx_test
+on the phone is the likely trigger **[inferred]**. Since 19.10 audi_stream_receiver
 waits **4 s** after insertion before its first AOA request (`HANDSHAKE_FIRST_MS`),
 logs the time since insertion on every handshake, and shows "USB device
 xxxx:xxxx found - handshake in 4 s" on the screen. A reset phone comes back
 as a new insertion and starts over.
 
-**19.10 run:** usb_tx_test did not run at all. The card's run.sh had `APPS=hello5
+**19.10 run:** audi_stream_receiver did not run at all. The card's run.sh had `APPS=hello5
 hello6 hello4`, and the run ended inside hello6. So nothing on the MMI
-listened when the phone was plugged in. usb_tx_test has to be the last app
+listened when the phone was plugged in. audi_stream_receiver has to be the last app
 and runs until the card is pulled. Anything before it that freezes the unit
 (hello4's stress scene, hello6's earlier GPU phase) also costs this test.
 
-**19.10 v2 run (`dev/19.10.2026 - v2 (usb only)/usb_tx_test.prev.log`,
+**19.10 v2 run (`runs/19.10.2026 - v2 (usb only)/usb_tx_test.prev.log`,
 same phone, same MTP mode, 4 s delay):** insertion at 29.5 s, then:
 
 | try | after insertion | GET_PROTOCOL (IN) | SEND_STRING 0 (OUT) |
@@ -166,11 +166,11 @@ same phone, same MTP mode, 4 s delay):** insertion at 29.5 s, then:
 | 4 | 11.0 s | **ok, version 2** | `DEV_NOANSWER` after 2 ms |
 | 5 | 15.2 s | **ok, version 2** | `DEV_NOANSWER` after 0 ms |
 
-usb_tx_test then gave up and showed "accessory handshake failed - replug the
+audi_stream_receiver then gave up and showed "accessory handshake failed - replug the
 phone" (photo 11:27). The phone stayed on the bus until the user unplugged
 it at +22.7 s. No reset, no re-insertion. The media launcher logged its
 insertion callback and, 2 s later, `Process bus event - Insertion`, then
-nothing until the removal. A second usb_tx_test run in the same boot saw no
+nothing until the removal. A second audi_stream_receiver run in the same boot saw no
 device (the card was pulled at the moment the phone went in again).
 
 What this changes:
@@ -192,11 +192,11 @@ What this changes:
 **[inferred]** The link to this phone loses control transactions
 at random. The phone's USB controller (a MediaTek SoC in a MIUI MTP gadget
 mode) or the car side (the port, its adapter cable, signal quality at high
-speed) are the suspects, not usb_tx_test's request format: the same
+speed) are the suspects, not audi_stream_receiver's request format: the same
 requests succeed in between.
 
-**21.10 run: the link works end to end** (`dev/21.10.2026 - usb/`, same
-phone and port, usb_tx_test alone on the card). From insertion to the first
+**21.10 run: the link works end to end** (`runs/21.10.2026 - usb/`, same
+phone and port, audi_stream_receiver alone on the card). From insertion to the first
 text:
 
 | log time | event |
@@ -218,12 +218,12 @@ never got in the way. It again never logged `MTP/PFS device detected!`.
 
 - **The phone takes two `START`s on the first connection.** After the first
   it re-enumerates as `2717:ff40` again, and only the second makes it come
-  back as `18d1:2d00`. usb_tx_test's "any `2717:ff40` → handshake" loop
+  back as `18d1:2d00`. audi_stream_receiver's "any `2717:ff40` → handshake" loop
   handles this without a special case.
 - **The first accessory session died after 18 s with no data.** The phone app
   was most likely not open yet, or its "open with" prompt was pending
   **[inferred]**. Android dropped the accessory and the phone came back in
-  MTP mode. usb_tx_test reconnected on its own, and the second session
+  MTP mode. audi_stream_receiver reconnected on its own, and the second session
   connected 6 s after the endpoints were opened.
 - **What changed since 19.10 v2 is not known.** It was the same phone, port
   and binary. Whatever made EP0 lose transactions on 12.10–19.10 (phone
@@ -248,7 +248,7 @@ cheaply they can be answered:
    "charging only" included) and, if the car uses an adapter cable, another
    cable.
 3. **What did io-usb and the media launcher do at that moment?**
-   usb_tx_test now saves `sloginfo` to `var/usb_slog_<n>.txt` on the first
+   audi_stream_receiver now saves `sloginfo` to `var/usb_slog_<n>.txt` on the first
    handshake failure and on every removal (up to 6). run.sh cannot do it,
    because this test ends by pulling the card. On 19.10 v2 io-usb logged
    nothing about the failures, so the slog can't answer this one.
