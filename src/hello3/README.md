@@ -12,8 +12,7 @@ An FPS counter is drawn top left.
 - **Run:** `hello3 <sd_path> [scene_seconds]` (default 10 s per scene)
 - **Output:** `hello3.log` (fps per second, per-scene summary, fill-rate
   table), screenshots of scenes 1 and 2.
-- **Status:** no longer in the default run. More detail is in
-  [docs/gpu-results.md](../../docs/gpu-results.md).
+- **Status:** More detail is in [docs/gpu-results.md](../../docs/gpu-results.md).
 
 How the GPU makes each scene (GLES 1.0 Common only, power-of-two
 textures, no per-frame upload):

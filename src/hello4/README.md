@@ -14,7 +14,7 @@ The results show top right as green/red squares. Then come the scenes:
   line (commented out) is `hello4 <sd> step=10 trace=1`.
 - **Output:** `hello4.log` (GL limits, every probe read with its verdict,
   fps and free RAM, triangle-rate table), screenshots of cube/light/world.
-- **Status:** no longer in the default run. Steps of 16 tori and more are
+- **Status:** Steps of 16 tori and more are
   commented out in `main.c` (`opts_default`). More detail is in
   [docs/gpu-results.md](../../docs/gpu-results.md).
 

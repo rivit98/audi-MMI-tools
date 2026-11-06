@@ -41,8 +41,7 @@ expectation that failed.
   SDK's LL/SC build, and on the build host with glibc's libstdc++
   (`make test`). `sync reuse` (the SDK's `std::mutex` calls
   `pthread_mutex_init`/`pthread_mutex_destroy`) is built, not yet
-  confirmed on the car; hello8 is in the default run for it. Run hello8
-  again after changing the SDK's C++ runtime or its atomics model.
+  confirmed on the car; hello8 is in the default run for it.
 
 ## On the car
 

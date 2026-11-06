@@ -9,8 +9,7 @@ whole display) and hands the screen back.
 - **Run:** `hello2 <sd_path> [seconds]`
 - **Output:** `hello2.log` (EGL/GL diagnostics, every step),
   `hello2_glread.bmp`, `hello2_dshot.png`, `hello2_sshot.png`.
-- **Status:** no longer in the default run. More detail is in
-  [docs/gpu-results.md](../../docs/gpu-results.md).
+- More detail is in [docs/gpu-results.md](../../docs/gpu-results.md).
 
 What each file proves:
 
