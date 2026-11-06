@@ -1,16 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Audi streaming</string>
-    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Format: JPEG is small and fast, PNG keeps text sharp but is bigger and slower, PNG when still sends JPEG while the screen moves and the same picture as PNG once it stops. Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
+    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Format: JPEG is small and fast, PNG keeps text sharp but is bigger and slower, H.264 is smooth video decoded by the MMI\'s video chip (Android 10+, about half a second behind). Latency clock: a big running clock here; a photo of the phone and the MMI together shows how far the MMI is behind. Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
     <string name="stream_start">Stream screen</string>
     <string name="stream_stop">Stop stream</string>
     <string name="max_fps">Max %1$d fps</string>
     <string name="details">Details on the MMI (landscape)</string>
     <string name="format">Format</string>
+    <string name="latency_clock">Latency clock</string>
+    <string name="bit_rate">H.264 rate</string>
+    <string name="sharp">Sharp H.264 (GPU box downscale)</string>
+    <!-- in the order of CaptureService.BIT_RATES -->
+    <string-array name="bit_rates">
+        <item>2.5 Mbit/s (until 05.11)</item>
+        <item>4 Mbit/s</item>
+        <item>6 Mbit/s</item>
+        <item>8 Mbit/s</item>
+    </string-array>
     <!-- in the order of enum Format (CaptureService.kt) -->
     <string-array name="formats">
         <item>JPEG (fast)</item>
         <item>PNG (sharp, slower)</item>
-        <item>PNG when still (JPEG while moving)</item>
+        <item>H.264 (smooth video, MMI video chip)</item>
     </string-array>
 </resources>

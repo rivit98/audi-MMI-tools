@@ -1,8 +1,9 @@
 /*
- * audi_stream_receiver - receive a slow video stream (the phone's screen, ~2 JPEG
- * pictures a second) from an Android phone over USB (Android Open
- * Accessory) and show it on the MMI screen. (It also took text messages
- * until 2026-10-25; README.md says why they went.)
+ * audi_stream_receiver - receive the phone's screen from an Android phone
+ * over USB (Android Open Accessory) and show it on the MMI screen: as JPEG /
+ * PNG pictures, a few a second, decoded here; or, since 2026-11-04, as an
+ * H.264 stream decoded by the unit's DM642 (hwvideo.h). (It also took text
+ * messages until 2026-10-25; README.md says why they went.)
  *
  *   phone app (android/)  --USB, AOA bulk-->  this  -->  screen + SD log
  *
@@ -12,7 +13,9 @@
  * layer-manager displayable drawn by the CPU (screen.c, the lmprobe path),
  * redrawn whenever the model changes or a picture arrives, and once a
  * second for the clock. Pictures are decoded here, on the main thread
- * (video.c); the USB threads only collect them.
+ * (video.c); the USB threads only collect them. While an H.264 stream
+ * plays, the screen is the video's: the CPU-drawn one is closed, and
+ * opened again when the stream ends.
  *
  * Writes <sd>/audi_stream_receiver.log: states, every USBDI result, every message
  * but the picture data, a "perf:" summary every 10 s of streaming and a
@@ -33,6 +36,7 @@
 
 #include "aoa.h"
 #include "cpumon.h"
+#include "hwvideo.h"
 #include "log.h"
 #include "model.h"
 #include "perf.h"
@@ -82,7 +86,7 @@ int main(int argc, char *argv[])
 	const char *sd_path;
 	char path[256];
 	unsigned last_version = ~0u, last_second = ~0u, last_present = 0;
-	int shown, fresh, i, partial = 1;
+	int shown, screen_up, fresh, i, partial = 1;
 
 	if (argc < 2) {
 		fprintf(stderr, "usage: %s <sd_path> [copy=changed|full]\n", argv[0]);
@@ -111,17 +115,35 @@ int main(int argc, char *argv[])
 		video_init(screen_canvas()->w, screen_canvas()->h);
 	else
 		video_init(800, 480);
+	screen_up = shown;
+	hwvideo_start();
 	aoa_start(sd_path);
 
 	while (quit_poll() == QUIT_NONE) {
 		unsigned v, s, t0;
+
+		/* the H.264 stream's video takes the screen (vout replaces what
+		 * the layer manager shows); ours comes back when it ends */
+		if (shown && hwvideo_active() && screen_up) {
+			log_msg("screen: closed for the H.264 video");
+			screen_close();
+			screen_up = 0;
+		} else if (shown && !hwvideo_active() && !screen_up) {
+			log_msg("screen: back after the H.264 video");
+			screen_up = screen_open() == 0;
+			if (!screen_up) {
+				log_msg("FAIL screen: could not open it again; headless from now on");
+				shown = 0;
+			}
+			last_version = ~0u;               /* redraw */
+		}
 
 		fresh = video_poll();
 		v = model_version();
 		s = log_ms() / 1000;
 		/* The clock alone redraws at most once a second: a full screen copy
 		 * into the VFB costs ~160 ms, and pictures redraw anyway. */
-		if (shown && (fresh || v != last_version ||
+		if (screen_up && (fresh || v != last_version ||
 		              (s != last_second && log_ms() - last_present >= 1000))) {
 			struct video_present p;
 			const struct screen_stats *st;
@@ -152,7 +174,9 @@ int main(int argc, char *argv[])
 	}
 
 	aoa_stop();
-	screen_close();
+	hwvideo_shutdown();
+	if (screen_up)
+		screen_close();
 	cpumon_stop();
 	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();

@@ -1,4 +1,5 @@
-// stream_server.cpp - see stream_server.h.
+// stream_server.cpp - see stream_server.h. Moved from hello9 (where it
+// served a file on a timed schedule) on 2026-11-04.
 //
 // Resource manager calls as in QNX 6.3's libc (all exported by the unit's
 // libc.so.2). <sys/iomsg.h> needs <sys/pm.h>, which the sysroot lacks:
@@ -29,11 +30,11 @@ extern "C" {
 namespace {
 
 constexpr unsigned kNoteReads = 40;     // reads noted in detail
-// A read starting this far past the live edge is answered at once (with the
-// looped frames it will hold anyway), not held: a probe of the file's end
-// (ID3v1, last box) would otherwise wait ~10 min for the declared last frame
-// with the player's attach call stuck behind it. Counted as far reads.
-constexpr int64_t kFarMs = 10000;
+// A read starting this far past the live edge is answered at once (with
+// filler frames), not held: a probe of the file's end (ID3v1, last box)
+// would otherwise wait for the declared last frame, hours away, with the
+// player's attach call stuck behind it. Counted as far reads.
+constexpr unsigned kFarS = 10;
 constexpr size_t kMaxNotes = 400;
 constexpr long kTickNs = 10 * 1000000L; // dispatch timeout: serve the queue
 
@@ -56,9 +57,10 @@ struct Pending {
 } // namespace
 
 struct StreamServer::Impl {
-	plan::CsMp4 m;
-	plan::Schedule schedule{25.0, {}};
-	int src_fd = -1;
+	live::Stream *stream = nullptr;
+	uint64_t data_off = 0, total = 0;
+	uint32_t sample_size = 0;
+	unsigned fps = 25;
 
 	dispatch_t *dpp = nullptr;
 	dispatch_context_t *ctp = nullptr;
@@ -67,11 +69,6 @@ struct StreamServer::Impl {
 	resmgr_io_funcs_t io_funcs;
 	Attr attr;
 
-	std::atomic<unsigned> t0_ms{0};          // log_ms() at go(); valid if started
-	std::atomic<bool> started{false};
-	std::atomic<bool> finished{false};
-	std::atomic<uint32_t> final_frames{0};   // released at finish(); 32-bit:
-	                                         // 64-bit atomics need libatomic on SH4
 	std::atomic<bool> stopping{false};
 
 	std::deque<Pending> pending;             // server thread only
@@ -81,22 +78,7 @@ struct StreamServer::Impl {
 	StreamStats st;
 	std::vector<std::string> notes;
 
-	uint64_t released_now() const
-	{
-		if (finished)
-			return final_frames;
-		if (!started)
-			return 0;
-		return schedule.released(log_ms() - t0_ms);
-	}
-
-	// Bytes [0, end) that can be served now.
-	uint64_t available() const
-	{
-		uint64_t frames = released_now();
-		uint64_t end = m.data_off + frames * m.sample_size;
-		return end < m.total() ? end : m.total();
-	}
+	uint64_t frame_of(uint64_t off) const { return (off - data_off) / sample_size; }
 
 	void note(const char *fmt, ...) __attribute__((format(printf, 2, 3)))
 	{
@@ -111,39 +93,26 @@ struct StreamServer::Impl {
 			notes.emplace_back(line);
 	}
 
-	// Does the read start more than kFarMs past the live edge?
+	// Does the read start more than kFarS past the live edge?
 	bool far(const Pending &p) const
 	{
-		if (!started || finished || p.off < m.data_off || p.off >= m.total())
+		if (p.off < data_off || p.off >= total || stream->finished())
 			return false;
-		uint64_t first = (p.off - m.data_off) / m.sample_size;
-		return (int64_t)schedule.release_ms(first) - (int64_t)(log_ms() - t0_ms) > kFarMs;
+		return frame_of(p.off) > stream->frames() + (uint64_t)kFarS * fps;
 	}
 
 	// Answer one read with what is available, n bytes at most; 0 = EOF. A
 	// far read gets its bytes regardless (see kFarMs).
 	void reply(const Pending &p)
 	{
-		uint64_t avail = far(p) ? m.total() : available(), n = p.nbytes;
+		uint64_t avail = far(p) ? total : stream->available(), n = p.nbytes;
 
 		if (p.off >= avail)
 			n = 0;
 		else if (p.off + n > avail)
 			n = avail - p.off;
 		buf.resize(n);
-		uint64_t done = 0;
-		while (done < n) {
-			plan::Span sp = plan::map(m, p.off + done);
-			uint64_t len = sp.len < n - done ? sp.len : n - done;
-			ssize_t got = pread64(src_fd, buf.data() + done, (size_t)len, (off64_t)sp.src_off);
-			if (got <= 0) {
-				note("source read at %llu failed: %s", (unsigned long long)sp.src_off,
-				     got < 0 ? std::strerror(errno) : "end of file");
-				MsgError(p.rcvid, EIO);
-				return;
-			}
-			done += (uint64_t)got;
-		}
+		n = stream->read(p.off, buf.data(), (size_t)n);
 		MsgReply(p.rcvid, (int)n, buf.data(), (int)n);
 		if (!p.pread)
 			p.ocb->offset = (off_t)(p.off + n);
@@ -174,9 +143,9 @@ struct StreamServer::Impl {
 	bool ready(const Pending &p) const
 	{
 		uint64_t end = p.off + p.nbytes;
-		if (end > m.total())
-			end = m.total();
-		return finished || p.off >= m.total() || end <= available() || far(p);
+		if (end > total)
+			end = total;
+		return stream->finished() || p.off >= total || end <= stream->available() || far(p);
 	}
 
 	// Each queued read on its own: another fd's read may be ready while an
@@ -219,12 +188,12 @@ struct StreamServer::Impl {
 		p.since_ms = log_ms();
 
 		uint64_t end = p.off + p.nbytes;
-		if (end > m.total())
-			end = m.total();
-		int64_t lead = 0;
-		uint64_t frames = plan::frames_needed(m, end);
-		if (frames > 0 && started)
-			lead = (int64_t)schedule.release_ms(frames - 1) - (int64_t)(log_ms() - t0_ms);
+		if (end > total)
+			end = total;
+		// frames [0, needed) must exist for the whole read; lead = how many
+		// past what exists now
+		uint64_t needed = end <= data_off ? 0 : (end - data_off + sample_size - 1) / sample_size;
+		int64_t lead = (int64_t)needed - (int64_t)stream->frames();
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			p.seq = ++st.reads;
@@ -234,20 +203,20 @@ struct StreamServer::Impl {
 				st.min_read = p.nbytes;
 			if (p.nbytes > st.max_read)
 				st.max_read = p.nbytes;
-			if (frames > 0 && started) {
-				st.lead_ms_last = lead;
-				if (lead > st.lead_ms_max)
-					st.lead_ms_max = lead;
+			if (needed > 0) {
+				st.lead_frames_last = lead;
+				if (lead > st.lead_frames_max)
+					st.lead_frames_max = lead;
 			}
 		}
 		if (p.seq <= kNoteReads)
-			note("read #%u: %u bytes at %llu%s (frame %lld..%lld)%s, lead %lld ms", p.seq,
+			note("read #%u: %u bytes at %llu%s (frame %lld..%lld)%s, lead %lld frames", p.seq,
 			     p.nbytes, (unsigned long long)p.off, p.pread ? " (pread)" : "",
-			     p.off < m.data_off ? -1LL : (long long)((p.off - m.data_off) / m.sample_size),
-			     frames ? (long long)frames - 1 : -1LL,
+			     p.off < data_off ? -1LL : (long long)frame_of(p.off),
+			     needed ? (long long)needed - 1 : -1LL,
 			     ready(p) ? "" : ", waits", (long long)lead);
 		if (far(p)) {
-			note("read #%u is a far read (%lld ms past the live edge): answered at once",
+			note("read #%u is a far read (%lld frames past the live edge): answered at once",
 			     p.seq, (long long)lead);
 			std::lock_guard<std::mutex> lock(mu);
 			st.far++;
@@ -309,6 +278,7 @@ struct StreamServer::Impl {
 				ctp = c;
 				dispatch_handler(ctp);
 			}
+			stream->fill(log_ms());
 			serve_pending();
 		}
 	}
@@ -366,25 +336,22 @@ StreamServer::~StreamServer()
 	stop();
 }
 
-std::string StreamServer::start(const char *path, const char *src_file, const plan::CsMp4 &m,
-                                const plan::Schedule &schedule)
+std::string StreamServer::start(const char *path, live::Stream *stream)
 {
 	if (impl_ != nullptr)
 		return "already serving";
+	if (stream == nullptr || stream->declared() == 0)
+		return "no stream configured";
 	Impl *d = new Impl();
-	d->m = m;
-	d->schedule = schedule;
-	d->src_fd = open(src_file, O_RDONLY);
-	if (d->src_fd < 0) {
-		std::string e = std::string(src_file) + ": " + std::strerror(errno);
-		delete d;
-		return e;
-	}
+	d->stream = stream;
+	d->data_off = stream->data_off();
+	d->total = stream->total();
+	d->sample_size = stream->sample_size();
+	d->fps = stream->config().fps;
 
 	d->dpp = dispatch_create();
 	if (d->dpp == nullptr) {
 		std::string e = std::string("dispatch_create: ") + std::strerror(errno);
-		close(d->src_fd);
 		delete d;
 		return e;
 	}
@@ -394,7 +361,7 @@ std::string StreamServer::start(const char *path, const char *src_file, const pl
 	d->io_funcs.unblock = io_unblock;
 	d->io_funcs.close_ocb = io_close_ocb;
 	iofunc_attr_init(&d->attr.io, S_IFREG | 0444, nullptr, nullptr);
-	d->attr.io.nbytes = (off_t)m.total();
+	d->attr.io.nbytes = (off_t)d->total;
 	d->attr.impl = d;
 
 	resmgr_attr_t ra;
@@ -406,7 +373,6 @@ std::string StreamServer::start(const char *path, const char *src_file, const pl
 	if (d->id == -1) {
 		std::string e = std::string("resmgr_attach ") + path + ": " + std::strerror(errno);
 		dispatch_destroy(d->dpp);
-		close(d->src_fd);
 		delete d;
 		return e;
 	}
@@ -417,7 +383,6 @@ std::string StreamServer::start(const char *path, const char *src_file, const pl
 		std::string e = std::string("dispatch_context_alloc: ") + std::strerror(errno);
 		resmgr_detach(d->dpp, d->id, 0);
 		dispatch_destroy(d->dpp);
-		close(d->src_fd);
 		delete d;
 		return e;
 	}
@@ -426,27 +391,11 @@ std::string StreamServer::start(const char *path, const char *src_file, const pl
 	return "";
 }
 
-void StreamServer::go()
-{
-	if (impl_ == nullptr)
-		return;
-	impl_->t0_ms = log_ms();
-	impl_->started = true;
-}
-
-void StreamServer::finish()
-{
-	if (impl_ == nullptr || impl_->finished)
-		return;
-	impl_->final_frames = (uint32_t)impl_->released_now();
-	impl_->finished = true;
-}
-
 void StreamServer::stop()
 {
 	if (impl_ == nullptr)
 		return;
-	finish();
+	impl_->stream->finish();
 	impl_->stopping = true;
 	if (thread_.joinable())
 		thread_.join();
@@ -457,7 +406,6 @@ void StreamServer::stop()
 	resmgr_detach(impl_->dpp, impl_->id, _RESMGR_DETACH_ALL);
 	dispatch_context_free(impl_->ctp);
 	dispatch_destroy(impl_->dpp);
-	close(impl_->src_fd);
 	delete impl_;
 	impl_ = nullptr;
 }
@@ -468,16 +416,6 @@ StreamStats StreamServer::stats()
 		return StreamStats();
 	std::lock_guard<std::mutex> lock(impl_->mu);
 	return impl_->st;
-}
-
-uint64_t StreamServer::elapsed_ms() const
-{
-	return impl_ != nullptr && impl_->started ? log_ms() - impl_->t0_ms : 0;
-}
-
-uint64_t StreamServer::released() const
-{
-	return impl_ != nullptr ? impl_->released_now() : 0;
 }
 
 std::vector<std::string> StreamServer::take_notes()

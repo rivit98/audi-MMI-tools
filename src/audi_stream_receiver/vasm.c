@@ -40,7 +40,8 @@ int vasm_start(struct vasm *a, const uint8_t *p, unsigned n, int *dropped_id,
 	pic.phone_ms = n >= PROTO_VIDEO_START_LEN + 2 ? proto_get_u16(p + 11) : 0;
 	*bad_id = (int)pic.id;
 	if (pic.size == 0 || pic.size > a->max_bytes ||
-	    (pic.format != PROTO_FMT_JPEG && pic.format != PROTO_FMT_PNG) ||
+	    (pic.format != PROTO_FMT_JPEG && pic.format != PROTO_FMT_PNG &&
+	     pic.format != PROTO_FMT_H264) ||
 	    pic.w == 0 || pic.h == 0)
 		return VASM_BAD;
 	pic.rx_start_us = pic.rx_done_us = 0;

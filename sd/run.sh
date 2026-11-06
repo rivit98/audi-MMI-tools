@@ -5,13 +5,12 @@
 # Runs every test app in APPS one after another (filled in by `make sd`,
 # settings per app in apps.conf). First the start screen for PRE_S
 # seconds (what this is, don't pull the card), then for each app:
-#   1. its "Next" screen for PRE_S seconds (the wait before it)
-#   2. the app, with stdout + stderr captured in var/<app>_out.log and its
+#   1. the app, with stdout + stderr captured in var/<app>_out.log and its
 #      exit code, run time and verdict appended there as "=== " lines.
 #      It is stopped (TERM, then KILL) if it runs longer than its timeout.
-#   3. its result screen for POST_S seconds
-# then the "all done" screen for FINAL_S seconds. The verdicts are also in
-# var/summary.txt.
+#   2. its result screen for POST_S seconds
+# The verdicts are also in var/summary.txt. (Until 2026-11-04 every app
+# had a "Next" screen before it and the run ended on an "all done" screen.)
 #
 # The screens are rendered when they are needed: screens.sh prints the
 # layout, bin/pngondemand turns it into a PNG in /tmp, and bin/showScreen -t
@@ -29,9 +28,8 @@
 #    last resort /tmp) writes <name>.core*, gzip-compressed. They are moved
 #    to the card so they don't use up the unit's flash (efs-persist).
 APPS="@APPS@"
-PRE_S=@PRE_S@          # screen before each app
+PRE_S=@PRE_S@          # start screen
 POST_S=@POST_S@        # result screen after each app
-FINAL_S=@FINAL_S@      # final screen
 KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
 SDPATH="${1:-${0%/*}}"
 VAR="${SDPATH}/var"
@@ -100,8 +98,6 @@ run_app() {   # run_app <i> <app>
     app_info "${APP}" || { ARGS=""; TIMEOUT=120; }    # (no screens.sh)
     OUT="${VAR}/${APP}_out.log"
 
-    show ${PRE_S} screen_next ${I} "${APP}"
-
     echo "--- ${APP} ${ARGS}  (timeout ${TIMEOUT} s)"
     : > "${OUT}"
     if [ -f "${BIN}/${APP}" ]; then
@@ -131,8 +127,6 @@ run_app() {   # run_app <i> <app>
     } >> "${OUT}"
     echo "${APP} exit code: ${RC}  verdict: ${VERDICT} (${DETAIL})  ${SECS} s"
     echo "${APP} ${VERDICT} ${DETAIL}, ${SECS} s, ${FAILS} FAIL lines" >> "${SUMMARY}"
-    [ ${VERDICT} = OK ] && NOK=$((NOK + 1))
-    RESULTS="${RESULTS} ${VERDICT}"
 
     sloginfo > "${VAR}/${APP}_slog.txt" 2>&1
     for f in /HBpersistence/core/"${APP}".* /mnt/persistence/"${APP}".* /tmp/"${APP}".*; do
@@ -152,13 +146,12 @@ run_app() {   # run_app <i> <app>
     cp "${SDPATH}"/bin/* "${BIN}/" && chmod 755 "${BIN}"/*
     rm -f "${SUMMARY}" "${VAR}/showscreen.log"
 
-    NOK=0; RESULTS=""; N=0
+    N=0
     show ${PRE_S} screen_start
     for A in ${APPS}; do
         run_app ${N} "${A}"
         N=$((N + 1))
     done
-    show ${FINAL_S} screen_done ${NOK}
 
     rm -rf "${BIN}"
     sync

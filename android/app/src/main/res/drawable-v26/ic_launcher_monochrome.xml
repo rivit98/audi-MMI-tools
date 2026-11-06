@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon, themed (Android 13+): silhouettes in one colour - redrawn as vector paths from android/icon/ic_launcher.svg (108x108 grid; the path ends cut the play marks out by winding) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M38.5,33 H75.5 A4.5,4.5 0 0 1 80,37.5 V57.5 A4.5,4.5 0 0 1 75.5,62 H46.25 V47.5 A4.75,4.75 0 0 0 41.5,42.75 H34 V37.5 A4.5,4.5 0 0 1 38.5,33 Z M58.5,42 L58.5,53 L68,47.5 Z"
+        android:fillColor="#FFFFFFFF" />
+    <path android:pathData="M31.5,44 H41.5 A3.5,3.5 0 0 1 45,47.5 V71.5 A3.5,3.5 0 0 1 41.5,75 H31.5 A3.5,3.5 0 0 1 28,71.5 V47.5 A3.5,3.5 0 0 1 31.5,44 Z M34.25,56 L34.25,63 L40.25,59.5 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

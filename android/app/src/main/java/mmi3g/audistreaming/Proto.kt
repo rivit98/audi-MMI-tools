@@ -18,6 +18,15 @@ package mmi3g.audistreaming
  *   VIDEO_ACK 0x08 (MMI: id u16, status u8, decodeMs u16), VIDEO_STOP 0x09
  *   (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 = the MMI's
  *   status bar over a landscape picture, 0 = the picture alone).
+ *
+ *   Hardware H.264 (MMI apps of 2026-11-04 on; proto.h has the details):
+ *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
+ *   u8, h264MaxFrame u32, and sets format bit 2. H264_CONFIG 0x0B (phone:
+ *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps; NAL units
+ *   without start codes) starts or restarts the stream; then each encoded
+ *   frame (Annex-B) goes as a picture with format FMT_H264, acked at once.
+ *   H264_STATUS 0x0C (MMI: code u8): PLAYING, SYNC (send an IDR), REFUSED
+ *   (send pictures instead), CONFIG (send H264_CONFIG again).
  */
 object Proto {
     const val HELLO = 0x01
@@ -28,9 +37,18 @@ object Proto {
     const val VIDEO_ACK = 0x08
     const val VIDEO_STOP = 0x09
     const val VIDEO_DETAILS = 0x0A
+    const val H264_CONFIG = 0x0B
+    const val H264_STATUS = 0x0C
 
     const val FMT_JPEG = 1
     const val FMT_PNG = 2
+    const val FMT_H264 = 3
+
+    // H264_STATUS code
+    const val H264_PLAYING = 0
+    const val H264_SYNC = 1
+    const val H264_REFUSED = 2
+    const val H264_CONFIG_WANTED = 3
 
     // VIDEO_ACK status
     const val VIDEO_SHOWN = 0
@@ -51,19 +69,41 @@ object Proto {
         return out
     }
 
-    /** The boxes a landscape / portrait picture must fit in (VIDEO_CAPS). */
+    /** The boxes a landscape / portrait picture must fit in (VIDEO_CAPS),
+     * and the limits of a hardware H.264 stream (0 from an older MMI app). */
     data class VideoCaps(val landW: Int, val landH: Int, val portW: Int, val portH: Int,
-                         val maxBytes: Int, val formats: Int) {
+                         val maxBytes: Int, val formats: Int,
+                         val h264MaxW: Int = 0, val h264MaxH: Int = 0, val h264Fps: Int = 0,
+                         val h264MaxFrame: Int = 0) {
         val jpeg: Boolean get() = takes(FMT_JPEG)
         val png: Boolean get() = takes(FMT_PNG)
+        val h264: Boolean get() = takes(FMT_H264) && h264MaxW > 0 && h264MaxH > 0 && h264Fps > 0
         fun takes(format: Int): Boolean = formats and (1 shl (format - 1)) != 0
     }
 
     data class VideoAck(val id: Int, val status: Int, val decodeMs: Int)
 
-    fun videoCapsOrNull(p: ByteArray): VideoCaps? =
-        if (p.size < 13) null
-        else VideoCaps(u16(p, 0), u16(p, 2), u16(p, 4), u16(p, 6), u32(p, 8), p[12].toInt() and 0xff)
+    fun videoCapsOrNull(p: ByteArray): VideoCaps? = when {
+        p.size < 13 -> null
+        p.size < 22 -> VideoCaps(u16(p, 0), u16(p, 2), u16(p, 4), u16(p, 6), u32(p, 8), p[12].toInt() and 0xff)
+        else -> VideoCaps(u16(p, 0), u16(p, 2), u16(p, 4), u16(p, 6), u32(p, 8), p[12].toInt() and 0xff,
+            u16(p, 13), u16(p, 15), p[17].toInt() and 0xff, u32(p, 18))
+    }
+
+    /** H264_CONFIG: the stream's rate, the largest frame, SPS and PPS (NAL
+     * units, no start codes). */
+    fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray): ByteArray {
+        val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size)
+        p[0] = fps.toByte()
+        put32(p, 1, frameBytes)
+        put16(p, 5, sps.size)
+        sps.copyInto(p, 7)
+        put16(p, 7 + sps.size, pps.size)
+        pps.copyInto(p, 9 + sps.size)
+        return encode(H264_CONFIG, p)
+    }
+
+    fun h264StatusOrNull(p: ByteArray): Int? = if (p.isEmpty()) null else p[0].toInt() and 0xff
 
     fun videoAckOrNull(p: ByteArray): VideoAck? =
         if (p.size < 5) null else VideoAck(u16(p, 0), p[2].toInt() and 0xff, u16(p, 3))

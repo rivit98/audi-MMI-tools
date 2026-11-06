@@ -928,8 +928,9 @@ simulation on the clip files]:**
   got past the box walk.
 - **§7.8's `mp4_parser` findings don't apply to this path.** The width
   limit (`FUN_080d1760`) is io-media's own check and still holds. The
-  fMP4 explanation (no `trun` handler) came from `mp4_parser` and has to
-  be re-checked in `CDemuxMp4`. fMP4 fails at open either way.
+  fMP4 explanation (no `trun` handler) came from `mp4_parser` and was
+  never re-checked in `CDemuxMp4`. fMP4 fails at open either way, and
+  since CS-MP4 works (04.11) the question was dropped.
 - **Fix, made the same day for the next run:**
   - `csmp4.py` writes `mdat` with an 8-byte header and changes nothing
     else, so the test isolates this one difference.
@@ -1029,24 +1030,167 @@ hello9; `_v2` is the `live` test cut out. Details per test:
 1. **Phone:** a MediaCodec H.264 path in the Audi streaming app: Baseline,
    720×432, 25 fps constant (repeat previous frame), capped frame size.
    Log the frame-size distribution and how often the cap is hit, at the
-   desk first (`make aoa-host` path).
+   desk first (`make aoa-host` path). *Built 04.11, §7.12.*
 2. **Protocol:** new AOA frames for "codec config" (SPS/PPS, size, S) and
-   "H.264 frame" next to the JPEG/PNG pictures.
-3. **MMI (`audi_stream_receiver`):** move hello9's `stream_server`,
-   `stream_plan`, `vout` and the iom client into `src/common`; feed the
-   server from the AOA frame ring instead of c10; build the header from
-   the phone's config; restart the graph on a new config; fill gaps with
-   skip frames if the phone can't.
+   "H.264 frame" next to the JPEG/PNG pictures. *Done 04.11* (`proto.h` /
+   `Proto.kt`: `H264_CONFIG` 0x0B, format 3 in `VIDEO_START`,
+   `H264_STATUS` 0x0C, H.264 limits in `VIDEO_CAPS`).
+3. **MMI (`audi_stream_receiver`):** *done 04.11, see §7.11.* The stream
+   code is in `src/common` (`hw_stream`), the receiver feeds it the
+   phone's frames (`hwvideo.cpp`), the header is built from the phone's
+   SPS/PPS, a new config restarts the graph, gaps are filled with skip
+   frames. Needs the hello9 car run that exercises the same code.
 4. **Measure the real latency end to end:** show the phone's frame
    number or clock on both screens (or a hello9 variant drawing the
    server's released-frame number in a VFB strip under a smaller video
-   displayable), so one photo shows both.
+   displayable), so one photo shows both. *Tool built 04.11: the phone
+   app's Latency clock (§7.12).*
 5. **Latency tuning, if needed:** does the ~9-frame queue shrink with a
    smaller S (is it counted in bytes or frames)? With a higher declared
    rate (30 fps)? Answering io-media's first 64 KB read short would save
-   ~3 frames at start-up only.
+   ~3 frames at start-up only. *Tests built 04.11: hello9 `s56`, `s112`,
+   `f30`.*
 6. **Robustness:** a session of 10+ minutes; the HMI starting its own
    media or video (MMI3GMedia owns the video lock); reverse gear (the
    camera is VCAP 0 input 0); unplugging mid-stream; a graph restart.
 
-`c10g` has answered its question and can leave hello9's default list.
+`c10g` has answered its question and can leave hello9's default list
+(done 04.11).
+
+### 7.11 04.11 build: the stream code shared, gap fill, the receiver's side
+
+Built after the 04.11 run, tested on the build host, **not yet on the car**:
+
+- **`src/common`, C++ (Makefile group `LIVE`):**
+  - `h264`: Annex-B → NAL units and frames; SPS / PPS / slice header
+    fields; **skip frames**: a non-reference P slice with every macroblock
+    skipped (`mb_skip_run` = all), `frame_num` = the last reference + 1,
+    so the encoder's own frames after it stay valid unchanged.
+  - `csmp4`: the CS-MP4 header built on the MMI (a port of `csmp4.py`;
+    `make test` checks it byte for byte against `csmp4.py`'s for the same
+    clip), frame padding, the parser.
+  - `live_stream`: the stream in memory (the header, a ring of the last
+    128 frames), push (drops everything up to the first IDR, a too-big
+    frame and, if it was a reference, the frames up to the next IDR;
+    in-band SPS/PPS that differ from the config are refused), and **gap
+    fill**: when the stream is 2+ frames behind its frame clock and
+    nothing came for a frame period, skips are appended, up to one frame
+    short of the clock, never past it. That answers consequence 1: a pause
+    shows the last real frame and doesn't skip afterwards, and a sender
+    slower than the stream's rate is made up to it.
+  - `stream_server` (from hello9, now serving a `live_stream`), `player`,
+    `vout`, and `hw_stream`, which ties them together.
+- **On the host** (`make test`, `tests/check_live.py`): ffmpeg decodes a
+  stream with a 600 ms gap filled by 14 skips without errors, as raw
+  H.264 and as the MMI-built CS-MP4, and every skip is an exact copy of
+  the frame before. The same simulated on the card's clip (`gap`
+  schedule): frozen on frame 199 for 49 frames and on 399 for 125.
+- **Not settled:** x264 Baseline (and probably the phone) uses POC type 2,
+  where two non-reference frames in a row are outside the spec. ffmpeg
+  doesn't mind; the DSP is what hello9's `gap` test answers. If it
+  minds, the skips become reference frames and the following frames'
+  `frame_num` is rewritten.
+- **hello9** now pushes a raw clip (c11) through `HwStream` the way the
+  receiver pushes the phone's frames: `live`, `gap` (fill on), `slow`
+  (15 fps), `burst` (5 frames every 200 ms), with `c5` as the control and
+  `c9` / `stall` on request (src/hello9/README.md).
+- **`audi_stream_receiver`** has the MMI side of the protocol and runs
+  the stream on its own thread (`hwvideo.cpp`, src/audi_stream_receiver/README.md).
+  It is a C++ app now.
+
+### 7.12 04.11 build: the phone's side, latency and tuning tools
+
+Built after §7.11, the same day, **not yet run on the car**:
+
+- **Phone (Audi streaming app, Format "H.264", Android 10+):**
+  `HwEncoder.kt` is MediaCodec with a Surface input: the MediaProjection
+  virtual display draws straight into it at 720×432 (`H264.pictureSize`:
+  as wide as the MMI allows, the screen's 5:3). Baseline 3.0, 2.5 Mbit/s
+  CBR where offered, an IDR every 10 s at most (they are the big frames;
+  the MMI asks for one when it needs it). The **Max fps slider** (now
+  1-25) sets the encoder's rate: `KEY_MAX_FPS_TO_ENCODER` caps it and
+  `KEY_REPEAT_PREVIOUS_FRAME_AFTER` (1/fps) keeps it up on a still
+  screen. The `H264_CONFIG` always says 25 fps, the MMI's clock: timing
+  the stream at the slider's rate would make io-media's ~9-frame queue
+  cost 9/fps seconds (1.8 s at 5 fps), while at 25 the MMI's skip frames
+  make up the difference (hello9 `slow`).
+- **Frames are never lost silently** (the ones after would be garbage):
+  they queue on the phone while acks are outstanding (up to 12 in
+  flight); 25 queued = something is stuck, so the queue is dropped and an
+  IDR asked for. A frame bigger than `frame_bytes` (64 KB at first) raises
+  it (×2 or ×1.5 the frame, 16 KB steps, at most the MMI's 256 KB) with a
+  new config - the MMI restarts its stream, ~1-2 s black, once. In-band
+  SPS/PPS that differ from the codec config's become the config.
+- **MMI** (`hwvideo.cpp`): keeps 8 MB of frames (16-128). Because the
+  rear camera shares VCAP 0 and an app can't tell whether it is on
+  (docs/rear-camera.md §9, §11), `/dev/videoctrl` is touched only when
+  the user starts or stops a stream: restarts (new config, stream full)
+  keep the picture and swap only the graph; an io-media ERROR ends the
+  stream without touching VCAP and sends the phone back to pictures
+  (`REFUSED`). Starting or stopping H.264 while reversing still hides the
+  camera until its next session.
+- **Desk:** `make aoa-host` speaks H.264 like the MMI (limits, config,
+  the same frame checks and statuses) and writes
+  `build/aoa-host/stream.h264`.
+- **Latency clock:** a switch in the phone app shows seconds.milliseconds,
+  redrawn every display frame. Stream with it on screen, photograph the
+  phone next to the MMI: phone clock − MMI clock = the whole delay
+  (capture, encoder, USB, MMI, io-media, DSP, display). Several photos;
+  the camera's own exposure blurs the last digit.
+- **Tuning (hello9):** `s56` / `s112` (frames padded 2× / 4×) and `f30`
+  (stream at 30 fps) against `live`, from the `lag` in their RESULT lines.
+  Lag the same with bigger frames = the queue is frames (bigger frames
+  only cost io-media reading); lower = bytes. `f30` lower by ~1/6 =
+  frames, and a 30 fps stream would cut ~60 ms.
+
+**Open until the car run:** the phone encoder's real frame sizes (does
+64 KB hold, how big are its IDRs), its POC type (skip frames with POC
+type 0 carry their own POC LSB), whether repeat-previous-frame really
+keeps a still screen at the slider's rate on this phone, the text
+sharpness at 720×432 (the virtual display scales 2340×1080 down 3.25:1
+in one bilinear step, the blur the pictures' k× capture fixed on 30.10 -
+an H.264 equivalent would need a GL downscale between the virtual
+display and the encoder), and the robustness list (§7.10, item 6).
+
+### 7.13 05.11 results and build: phone H.264 on the car; sharper text
+
+**On the car (`runs/5.11.2026 - usb/`):** the phone's H.264 played on the
+MMI for the first time, ~60 s over three streams: 720×432 Baseline, POC
+type 0, lag 600-650 ms steady, MMI CPU ~24 % (receiver 4 %, against ~45 %
+for JPEG). IDRs went over 64 KB, so the phone raised the frame size to
+128 KB (a new H264_CONFIG; the MMI restarted twice in 300 ms, the second
+time for an identical config queued during the first). **The picture was
+blurry.**
+
+**Why:** in H.264 mode the virtual display drew straight into the
+encoder at 720×432, so Android scaled the 2340×1080 screen 3.25:1 in one
+bilinear step (2×2 taps per output pixel out of ~3×3 covered: thin strokes
+are hit or missed) - the same blur the pictures' k× capture fixed on
+30.10, which the H.264 path bypassed. Smaller parts: the letterbox (the
+screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
+frame at 25 fps) and the VCAP's ×1.11 to 800×480.
+
+**Built (not yet run on the car):**
+
+- `GlScaler.kt` / `GlBox.kt`: the virtual display renders at k× the
+  picture into a SurfaceTexture (k = the largest ≤ 4 with k× the mirrored
+  screen within the screen: ×3 = 2160×1296 landscape, Android's step then
+  2340 → 2160; ×4 portrait). A GLES2 pass box-filters it k:1 into the
+  encoder's input surface (EGL_RECORDABLE_ANDROID, the capture's
+  timestamps): even k with (k/2)² bilinear taps at 2×2 corners, odd k
+  with k² nearest taps, highp coordinates. The encoder's rate limit and
+  repeat-previous-frame are unchanged. GL setup failing (or drawing
+  failing later) falls back to the direct path for the rest of the
+  session. Shaders checked with glslang; `GlBoxTest` covers the taps.
+- Switch **Sharp H.264** (default on) for an A/B on the car; drop-down
+  **H.264 rate** 2.5 / 4 (default) / 6 / 8 Mbit/s. Either change restarts
+  the encoder like the fps slider. The status line shows `(x3)` or
+  `(direct)` and the rate.
+
+**Next:** desk first (`make aoa-host`, `ffplay build/aoa-host/stream.h264`,
+Sharp on/off), then the car: small text with Sharp on/off at 4 and
+6 Mbit/s, Max fps 10 and 25; watch the IDR sizes (frames over 256 KB
+can't be sent at all) and the MMI's `h264:` lag at the higher rates.
+Still open on the MMI side: whether the video displayable can be shown
+1:1 (720×432 centred, no VCAP resample) instead of scaled to 800×480.
+

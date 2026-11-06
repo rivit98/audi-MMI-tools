@@ -28,6 +28,11 @@ import java.util.concurrent.Executors
  * the phone captures, compresses and sends. The MMI keeps only the newest
  * waiting picture, so nothing queues up. A picture counts as done when
  * the MMI acks it (shown, bad or dropped) or after [ACK_TIMEOUT_MS].
+ *
+ * H.264 (format FMT_H264): the MMI acks each frame as soon as it is in its
+ * stream, so up to [H264_IN_FLIGHT] are allowed; what the MMI says about
+ * the stream (H264_STATUS) lands in [h264] for the capture service to pick
+ * up.
  */
 class AccessoryLink(
     private val usb: UsbManager,
@@ -60,6 +65,15 @@ class AccessoryLink(
         @Volatile var h = 0
     }
     val video = VideoStats()
+
+    /** H264_STATUS from the MMI, consumed by the capture service. */
+    class H264State {
+        val sync = java.util.concurrent.atomic.AtomicBoolean(false)
+        val configWanted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val refused = java.util.concurrent.atomic.AtomicBoolean(false)
+        @Volatile var playing = false
+    }
+    val h264 = H264State()
     private val flight = Any()
     private val inFlight = LinkedHashMap<Int, Long>()    // id -> sent at (elapsedRealtime)
 
@@ -82,11 +96,11 @@ class AccessoryLink(
     }
 
     /** True if [sendPicture] would take a picture now. */
-    fun readyForPicture(): Boolean {
+    fun readyForPicture(maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
         if (closed) return false
         synchronized(flight) {
             expire(SystemClock.elapsedRealtime())
-            return inFlight.size < MAX_IN_FLIGHT
+            return inFlight.size < maxInFlight
         }
     }
 
@@ -101,14 +115,15 @@ class AccessoryLink(
         }
     }
 
-    /** Queues a picture (format Proto.FMT_*); false if [MAX_IN_FLIGHT] are
+    /** Queues a picture (format Proto.FMT_*); false if maxInFlight are
      * still in flight. */
-    fun sendPicture(id: Int, w: Int, h: Int, format: Int, data: ByteArray, phoneMs: Int): Boolean {
+    fun sendPicture(id: Int, w: Int, h: Int, format: Int, data: ByteArray, phoneMs: Int,
+                    maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
         if (closed) return false
         val now = SystemClock.elapsedRealtime()
         synchronized(flight) {
             expire(now)
-            if (inFlight.size >= MAX_IN_FLIGHT) return false
+            if (inFlight.size >= maxInFlight) return false
             inFlight[id] = now
         }
         video.sent++
@@ -122,6 +137,12 @@ class AccessoryLink(
     fun sendVideoStop() {
         synchronized(flight) { inFlight.clear() }
         write(Proto.encode(Proto.VIDEO_STOP, ByteArray(0)))
+    }
+
+    /** H264_CONFIG (Proto.h264Config): starts or restarts the MMI's stream. */
+    fun sendH264Config(frame: ByteArray) {
+        h264.playing = false
+        write(frame)
     }
 
     /** The MMI's status bar over a landscape picture on / off. */
@@ -192,6 +213,15 @@ class AccessoryLink(
                 videoCaps = caps
             }
             Proto.VIDEO_ACK -> Proto.videoAckOrNull(payload)?.let(::onVideoAck)
+            Proto.H264_STATUS -> Proto.h264StatusOrNull(payload)?.let { code ->
+                Log.i(TAG, "MMI H264_STATUS $code")
+                when (code) {
+                    Proto.H264_PLAYING -> h264.playing = true
+                    Proto.H264_SYNC -> h264.sync.set(true)
+                    Proto.H264_REFUSED -> h264.refused.set(true)
+                    Proto.H264_CONFIG_WANTED -> h264.configWanted.set(true)
+                }
+            }
             else -> Log.w(TAG, "unknown frame type $type, ${payload.size} bytes")
         }
     }
@@ -214,6 +244,7 @@ class AccessoryLink(
         private const val TAG = "AudiStreaming"
         const val ACK_TIMEOUT_MS = 3000L
         const val MAX_IN_FLIGHT = 2
+        const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked at once
         val HELLO = "audi_streaming-android/1 ${Build.MANUFACTURER} ${Build.MODEL}"
     }
 }

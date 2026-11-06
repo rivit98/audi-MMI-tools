@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Audi streaming launcher icon, 108x108 (adaptive icon grid: keep the
+     artwork inside the 66-unit circle around 54,54). The car's display with
+     the phone in front of it, both showing the same picture (a red "play"
+     mark): the phone's screen on the MMI, on the road. Redrawn as vector
+     paths in app/src/main/res/drawable-v26/ic_launcher_*.xml (adaptive
+     icon, Android 8+) and drawable/ic_stat_stream.xml (notification);
+     android/icon/render.sh makes the PNGs for Android 6-7 from it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#16467A"/>
+      <stop offset="1" stop-color="#081A33"/>
+    </linearGradient>
+    <linearGradient id="scr" x1="0" y1="34" x2="0" y2="74" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22385A"/>
+      <stop offset="1" stop-color="#0B1424"/>
+    </linearGradient>
+  </defs>
+  <!-- background layer -->
+  <rect width="108" height="108" fill="url(#bg)"/>
+  <!-- the road ahead, faint -->
+  <path d="M40,108 L56,66 L60,66 L84,108 Z" fill="#1E558F" fill-opacity="0.55"/>
+  <path d="M57.4,72 L58.6,72 L59.4,80 L56.6,80 Z M56.2,86 L59.8,86 L60.8,98 L55.2,98 Z" fill="#F2F5F9" fill-opacity="0.35"/>
+  <!-- foreground layer -->
+  <!-- the car's display: bezel, screen, picture -->
+  <rect x="34" y="33" width="46" height="29" rx="4.5" fill="#F2F5F9"/>
+  <rect x="36.5" y="35.5" width="41" height="24" rx="2.5" fill="url(#scr)"/>
+  <path d="M58.5,42 L58.5,53 L68,47.5 Z" fill="#FF3048"/>
+  <!-- the phone, with a ring in the background colour that cuts it out of the display -->
+  <rect x="26.75" y="42.75" width="19.5" height="33.5" rx="4.75" fill="#0D2645"/>
+  <rect x="28" y="44" width="17" height="31" rx="3.5" fill="#F2F5F9"/>
+  <rect x="29.75" y="47.25" width="13.5" height="24.5" rx="1.5" fill="url(#scr)"/>
+  <rect x="34.5" y="45.25" width="4" height="0.9" rx="0.45" fill="#9AA8BA"/>
+  <path d="M34.25,56 L34.25,63 L40.25,59.5 Z" fill="#FF3048"/>
+</svg>

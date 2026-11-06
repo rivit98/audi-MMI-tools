@@ -20,6 +20,6 @@ int main()
 		       r.detail.c_str());
 		CHECK(r.ok);
 	}
-	CHECK_EQ(checks::all().size(), 18);
+	CHECK_EQ(checks::all().size(), 19);
 	CHECK_DONE();
 }

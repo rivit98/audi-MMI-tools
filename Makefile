@@ -14,7 +14,8 @@
 #   make apk-test        its Kotlin unit tests
 #   make apk-install     adb install it (adb in the container, phone on USB)
 #   make aoa-host        desk test: this PC plays the MMI for the phone app
-#                        (the newest streamed picture: build/aoa-host/latest.jpg / .png)
+#                        (the newest streamed picture: build/aoa-host/latest.jpg / .png;
+#                        H.264: build/aoa-host/stream.h264)
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
 #   make clips           hello6's and hello9's test videos (build/clips/, ffmpeg
@@ -59,7 +60,13 @@ CXXFLAGS := $(CFLAGS)
 #   IMGDEC  imgdec.c: JPEG + PNG decoding (stb_image)
 #   CPUMON  cpumon.c: own + unit CPU load, a "cpu:" log line per window (cpustat.c)
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
+#   LIVE    C++ (CXX_APPS only): a live H.264 stream through the unit's
+#           io-media and DM642 (hw_stream.cpp, docs/phone-mirroring.md 7.10):
+#           h264 + csmp4 + live_stream (pure, tests/test_live.cpp),
+#           stream_server (resource manager), player (io-media graph, + IOM),
+#           vout (video displayable + dev-videoctrl)
 common = $(foreach f,$(1),src/common/$(f).c src/common/$(f).h)
+commonxx = $(foreach f,$(1),src/common/$(f).cpp src/common/$(f).h)
 BASE   := $(call common,log quit lmgr)
 TEXT   := $(call common,text) build/gen/font_big.h build/gen/font_small.h
 SCREEN := $(call common,screen vfbcopy) $(TEXT)
@@ -69,6 +76,7 @@ PROC   := $(call common,proc)
 IMGDEC := $(call common,imgdec) src/common/stb_image.h
 CPUMON := $(call common,cpumon cpustat)
 IOM    := $(call common,iom)
+LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_stream) $(IOM)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
 # APPS is everything `make` builds; TESTS are what run.sh executes by
@@ -110,15 +118,18 @@ IOM    := $(call common,iom)
 # it is always last: pulling the card ends it and the whole run (no final
 # "done" screen; everything before it is already on the card).
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver
-CXX_APPS := hello8 hello9
+CXX_APPS := hello8 hello9 audi_stream_receiver
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 hello9 audi_stream_receiver
+# hello8 back for one run (2026-11-05): the SDK's std::mutex now calls
+# pthread_mutex_init/destroy (its new "sync reuse" check; hello9 died of
+# the old way). Drop it again once it passes on the car.
+TESTS   := hello8 hello5 hello9 audi_stream_receiver
 SD_APPS ?= $(TESTS)
-# Seconds each status screen is shown: before an app, after it, at the end.
+# Seconds each status screen is shown: the start screen, and the result
+# screen after each app.
 PRE_S   := 5
 POST_S  := 8
-FINAL_S := 15
 
 .PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host clips gusa-scan
 all: $(addprefix build/,$(APPS) $(TOOLS))
@@ -161,21 +172,25 @@ build/hello8-gusa.o: src/hello8/gusa.cpp src/hello8/checks.h
 	$(RUN) shle-nto-g++ $(CXXFLAGS) $(GUSA_FLAGS) -c -o $@ $<
 	@$(RUN) sh4-linux-gnu-objdump -d $@ | grep -q movli.l && \
 	    { echo "$@: LL/SC in the gUSA loop (GUSA_FLAGS lost ,strict?)"; rm -f $@; exit 1; } || true
-# hello9: C++. The streaming tests (docs/phone-mirroring.md 7.8): our own
-# io-media client, a resource manager serving the live stream
-# (stream_server.cpp, whose headers need src/common/qnx/sys/pm.h), the
-# video displayable. stream_plan.cpp is plain C++, also tested on the build
-# host (tests/test_hello9.cpp).
-build/hello9: $(wildcard src/hello9/*.cpp src/hello9/*.h) $(BASE) $(SCREEN) $(PROC) $(IOM)
+# hello9: C++. The streaming tests (docs/phone-mirroring.md 7.8-7.10):
+# since 2026-11-04 a raw clip pushed frame by frame through LIVE's
+# HwStream, the code audi_stream_receiver uses for the phone's frames
+# (stream_server.cpp's headers need src/common/qnx/sys/pm.h). schedule.cpp
+# is plain C++, also tested on the build host (tests/test_live.cpp).
+build/hello9: $(wildcard src/hello9/*.cpp src/hello9/*.h) $(BASE) $(SCREEN) $(PROC) $(LIVE)
 LIBS_hello9 := -lgf
 # QNX's <sys/compiler_gnu.h> declares _Uint8t/_Uint32t (uint8_t, uint32_t)
 # with __aligned__ at their natural alignment, which g++ reports for every
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
 # audi_stream_receiver: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
-# pictures are JPEGs or PNGs, decoded on the CPU.
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON)
+# pictures are JPEGs or PNGs, decoded on the CPU, or (since 2026-11-04) an
+# H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp), which
+# makes it a C++ app; its .c files are still compiled as C.
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.cpp \
+    src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
+CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
 
 # pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
 # status screens. Text drawing + PNG writer, no device libraries.
@@ -240,7 +255,7 @@ check: build/$(APP)
 # hello6's clips 9 and 10 are c7 and c8, written to the card while they play.
 CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
-CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c10_h264_336_cs_live.mp4
+CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
 FWTOOLS_hello9 := testapp-file testapp-cmdline
@@ -264,7 +279,7 @@ sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/c
 	cp sd/apps.conf sd/screens.sh sd/README.md $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
-	    -e 's/@POST_S@/$(POST_S)/' -e 's/@FINAL_S@/$(FINAL_S)/' sd/run.sh > build/sd/run.sh
+	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root"
@@ -293,10 +308,17 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_hello9
-test: $(TESTBIN)
+           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live
+# test_live also checks the live stream against a real clip: check_live.py
+# (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
+# decodes the stream with a filled gap test_live writes afterwards.
+MEDIA_RUN = docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src $(MEDIA_IMAGE)
+test: $(TESTBIN) build/.media-image
+	rm -rf build/test_live.d && mkdir -p build/test_live.d
+	$(MEDIA_RUN) python3 -I tests/check_live.py prepare build/test_live.d
 	@for t in $(TESTBIN); do $(RUN) ./$$t || exit 1; done
 	$(RUN) python3 -I tests/check_png.py build/test_png.d
+	$(MEDIA_RUN) python3 -I tests/check_live.py check build/test_live.d
 build/test_proto: tests/test_proto.c tests/check.h src/audi_stream_receiver/proto.c src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.c src/audi_stream_receiver/vasm.h
 # audi_stream_receiver's JPEG / PNG decoding, on pictures stb_image_write encodes
@@ -326,13 +348,14 @@ build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello8 \
 	    -o $@ $(filter %.cpp,$^)
-# hello9's stream plan: CS-MP4 header, release schedule, byte mapping
-build/test_hello9: tests/test_hello9.cpp tests/check.h src/hello9/stream_plan.cpp \
-    src/hello9/stream_plan.h
+# LIVE's pure part (H.264 bits, CS-MP4 header, the live stream with gap
+# fill) and hello9's release schedule
+build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 live_stream) \
+    src/hello9/schedule.cpp src/hello9/schedule.h
 	mkdir -p build
-	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello9 \
-	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_hello9,$(TESTBIN)):
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
+$(filter-out build/test_hello8 build/test_live,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

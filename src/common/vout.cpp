@@ -87,9 +87,12 @@ int show()
 	return capture(true);
 }
 
-void hide()
+void hide(bool restore_vcap)
 {
-	capture(false);
+	if (restore_vcap)
+		capture(false);
+	else
+		log_msg("  videoctrl left alone (VCAP 0 may be the HMI's now)");
 	if (!lm_is_open && lm_open() != 0)
 		return;
 	log_msg("  unregister video displayable %d: rc=%d", kCid, lm_unregister_displayable(kCid));

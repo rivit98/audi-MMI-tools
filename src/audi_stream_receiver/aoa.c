@@ -19,6 +19,7 @@
 
 #include "aoa.h"
 #include "cpumon.h"
+#include "hwvideo.h"
 #include "log.h"
 #include "model.h"
 #include "proto.h"
@@ -285,6 +286,14 @@ static void on_video(struct link *l, uint8_t type, const uint8_t *p, unsigned n)
 	case VASM_DONE:
 		vasm_take(&l->vasm, &pic);
 		pic.rx_done_us = log_us();
+		if (pic.format == PROTO_FMT_H264) {
+			/* into the hardware stream; acked at once (proto.h) */
+			video_ack(pic.id, hwvideo_frame(pic.data, pic.size), 0);
+			free(pic.data);
+			break;
+		}
+		if (hwvideo_active())
+			hwvideo_stop("the phone sent a picture: back to pictures");
 		video_submit(&pic);
 		break;
 	default:
@@ -331,6 +340,13 @@ static void on_frame(uint8_t type, const uint8_t *p, unsigned n, void *arg)
 		log_msg("rx VIDEO_STOP");
 		vasm_free(&l->vasm);
 		video_stop("the phone stopped streaming");
+		hwvideo_stop("the phone stopped streaming");
+		break;
+	case PROTO_H264_CONFIG:
+		log_msg("rx H264_CONFIG, %u bytes", n);
+		hwvideo_config(p, n);
+		if (!l->hello_seen)
+			set_peer(l, (const uint8_t *)"phone app", 9);
 		break;
 	case PROTO_VIDEO_DETAILS:
 		if (n >= PROTO_VIDEO_DETAILS_LEN)
@@ -716,6 +732,7 @@ static void link_drop(const char *why, enum link_state next)
 	link_close(acc);
 	acc = NULL;
 	video_stop("USB link down");
+	hwvideo_stop("USB link down");
 	if (acc_entry != NULL)
 		dev_release(acc_entry);
 	acc_entry = NULL;
@@ -1038,6 +1055,7 @@ static void *manager(void *arg)
 {
 	unsigned attempt = 0;
 	uint8_t ack[PROTO_VIDEO_ACK_LEN];
+	uint8_t h264_status;
 	struct event ev;
 	int i, have, broken;
 
@@ -1083,6 +1101,9 @@ static void *manager(void *arg)
 		while (video_ack_pop(ack))         /* no link: they go nowhere */
 			if (acc != NULL)
 				link_send(acc, PROTO_VIDEO_ACK, ack, sizeof(ack));
+		while (hwvideo_status_pop(&h264_status))
+			if (acc != NULL)
+				link_send(acc, PROTO_H264_STATUS, &h264_status, 1);
 		if (acc == NULL)
 			acc_reopen_due();
 		handshake_due();
@@ -1117,6 +1138,7 @@ int aoa_start(const char *sd_path)
 	pthread_cond_init(&qcond, &ca);
 	pthread_condattr_destroy(&ca);
 	video_set_notify(wake);
+	hwvideo_set_notify(wake);
 	rc = pthread_create(&mgr_tid, NULL, manager, NULL);
 	if (rc != 0) {
 		log_msg("usb: manager thread: %s", strerror(rc));

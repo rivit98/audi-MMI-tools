@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon foreground: the car's display and the phone, showing the same picture - redrawn as vector paths from android/icon/ic_launcher.svg (108x108 grid; the path ends cut the play marks out by winding) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M38.5,33 H75.5 A4.5,4.5 0 0 1 80,37.5 V57.5 A4.5,4.5 0 0 1 75.5,62 H38.5 A4.5,4.5 0 0 1 34,57.5 V37.5 A4.5,4.5 0 0 1 38.5,33 Z"
+        android:fillColor="#FFF2F5F9" />
+    <path android:pathData="M39,35.5 H75 A2.5,2.5 0 0 1 77.5,38 V57 A2.5,2.5 0 0 1 75,59.5 H39 A2.5,2.5 0 0 1 36.5,57 V38 A2.5,2.5 0 0 1 39,35.5 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="34"
+                android:endX="0" android:endY="74">
+                <item android:offset="0" android:color="#FF22385A" />
+                <item android:offset="1" android:color="#FF0B1424" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M58.5,42 L58.5,53 L68,47.5 Z"
+        android:fillColor="#FFFF3048" />
+    <path android:pathData="M31.5,42.75 H41.5 A4.75,4.75 0 0 1 46.25,47.5 V71.5 A4.75,4.75 0 0 1 41.5,76.25 H31.5 A4.75,4.75 0 0 1 26.75,71.5 V47.5 A4.75,4.75 0 0 1 31.5,42.75 Z"
+        android:fillColor="#FF0D2645" />
+    <path android:pathData="M31.5,44 H41.5 A3.5,3.5 0 0 1 45,47.5 V71.5 A3.5,3.5 0 0 1 41.5,75 H31.5 A3.5,3.5 0 0 1 28,71.5 V47.5 A3.5,3.5 0 0 1 31.5,44 Z"
+        android:fillColor="#FFF2F5F9" />
+    <path android:pathData="M31.25,47.25 H41.75 A1.5,1.5 0 0 1 43.25,48.75 V70.25 A1.5,1.5 0 0 1 41.75,71.75 H31.25 A1.5,1.5 0 0 1 29.75,70.25 V48.75 A1.5,1.5 0 0 1 31.25,47.25 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="34"
+                android:endX="0" android:endY="74">
+                <item android:offset="0" android:color="#FF22385A" />
+                <item android:offset="1" android:color="#FF0B1424" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M34.95,45.25 H38.05 A0.45,0.45 0 0 1 38.5,45.7 V45.7 A0.45,0.45 0 0 1 38.05,46.15 H34.95 A0.45,0.45 0 0 1 34.5,45.7 V45.7 A0.45,0.45 0 0 1 34.95,45.25 Z"
+        android:fillColor="#FF9AA8BA" />
+    <path android:pathData="M34.25,56 L34.25,63 L40.25,59.5 Z"
+        android:fillColor="#FFFF3048" />
+</vector>

@@ -1339,6 +1339,127 @@ void check_sync(Result &r)
 	note(r, fmt("wait_for(50ms) %u ms", waited));
 }
 
+// ---- sync objects re-created at the same address -----------------------------------------
+//
+// QNX keeps a kernel sync object per address from a mutex's first lock until
+// pthread_mutex_destroy. With libstdc++'s default (PTHREAD_MUTEX_INITIALIZER,
+// trivial destructor) the next mutex at that address - the same stack slot,
+// a reused heap block - failed its first lock with EINVAL: hello9's second
+// HwStream on 2026-11-05. The SDK now destroys (include-c++/pre/bits/
+// os_defines.h); here each kind is built, used from two threads, destroyed
+// and built again in the same buffer, a few rounds.
+
+template <typename M> std::string reuse_rounds(const char *what)
+{
+	alignas(M) unsigned char buf[sizeof(M)];
+	for (int round = 0; round < 3; round++) {
+		M *m = new (buf) M();
+		try {
+			std::atomic<int> in{0};
+			std::thread other([&] {
+				std::lock_guard<M> g(*m);
+				in++;
+			});
+			{
+				std::lock_guard<M> g(*m);
+				in++;
+			}
+			other.join();
+			if (in != 2) {
+				m->~M();
+				return fmt("%s round %d: %d locks", what, round, in.load());
+			}
+		} catch (const std::system_error &e) {
+			m->~M();
+			return fmt("%s round %d: %s (%d)", what, round, e.what(), e.code().value());
+		}
+		m->~M();
+	}
+	return "";
+}
+
+std::string cv_reuse_rounds()
+{
+	alignas(std::condition_variable) unsigned char buf[sizeof(std::condition_variable)];
+	std::mutex m;
+	for (int round = 0; round < 3; round++) {
+		auto *cv = new (buf) std::condition_variable();
+		bool flag = false;
+		try {
+			std::thread other([&] {
+				std::lock_guard<std::mutex> g(m);
+				flag = true;
+				cv->notify_one();
+			});
+			{
+				std::unique_lock<std::mutex> lk(m);
+				cv->wait_for(lk, 2s, [&] { return flag; });
+			}
+			other.join();
+		} catch (const std::system_error &e) {
+			cv->~condition_variable();
+			return fmt("condition_variable round %d: %s (%d)", round, e.what(), e.code().value());
+		}
+		cv->~condition_variable();
+		if (!flag)
+			return fmt("condition_variable round %d: not woken", round);
+	}
+	return "";
+}
+
+// a class holding a mutex, made in the same stack frame twice (hello9's case)
+struct Holder {
+	std::mutex mu;
+	int n = 0;
+	void bump()
+	{
+		std::lock_guard<std::mutex> g(mu);
+		n++;
+	}
+};
+
+__attribute__((noinline)) std::string holder_once()
+{
+	Holder h;
+	try {
+		std::thread t([&] { h.bump(); });
+		h.bump();
+		t.join();
+	} catch (const std::system_error &e) {
+		return fmt("Holder on the stack: %s (%d)", e.what(), e.code().value());
+	}
+	return h.n == 2 ? "" : "Holder on the stack: lost a lock";
+}
+
+void check_sync_reuse(Result &r)
+{
+	for (std::string err : {reuse_rounds<std::mutex>("mutex"),
+	                        reuse_rounds<std::recursive_mutex>("recursive_mutex"),
+	                        reuse_rounds<std::timed_mutex>("timed_mutex"), cv_reuse_rounds(),
+	                        holder_once(), holder_once(), holder_once()}) {
+		if (!err.empty()) {
+			r.ok = false;
+			r.detail = err;
+			return;
+		}
+	}
+	// the same in heap blocks: freed and allocated again (often the same block)
+	for (int round = 0; round < 3; round++) {
+		auto h = std::make_unique<Holder>();
+		try {
+			std::thread t([&] { h->bump(); });
+			h->bump();
+			t.join();
+		} catch (const std::system_error &e) {
+			r.ok = false;
+			r.detail = fmt("Holder on the heap round %d: %s (%d)", round, e.what(), e.code().value());
+			return;
+		}
+		EXPECT(h->n == 2);
+	}
+	note(r, "mutex, recursive_mutex, timed_mutex, condition_variable x3; Holder stack x3, heap x3");
+}
+
 // ---- atomics ---------------------------------------------------------------------------
 
 void check_atomics(Result &r)
@@ -1494,6 +1615,7 @@ const std::vector<Check> list = {
 	{"chrono", check_chrono},
 	{"threads", check_threads},
 	{"sync", check_sync},
+	{"sync reuse", check_sync_reuse},
 	{"atomics", check_atomics},
 	{"atomics stress", check_atomics_stress},
 };

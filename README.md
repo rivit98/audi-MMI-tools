@@ -29,7 +29,7 @@ make sd SD_APPS="hello hello2"  # only these, in this order; the card gets only
 
 **Install on an SD card:** after `make sd`, copy everything *inside*
 `build/sd/` to the root of an empty FAT32 card. With the MMI fully
-booted, insert it in SD slot 1 and leave it in until the "all done"
+booted, insert it in SD slot 1 and leave it in until the last result
 screen has gone. The card carries its own short user guide,
 [`sd/README.md`](sd/README.md), copied there as `README.md`. It explains
 each test, what you should see, the verdicts, and which files to bring
@@ -260,6 +260,10 @@ docs/
                       threads/atomics rules, what isn't available
   qnx-sh-fpu-div0.md  why a divide by zero is a fatal SIGFPE on this platform
   gcc-sh4-treg-bug.md GCC 12.2's -O1+ `a == 0 && b == 0` miscompile (fixed in 16)
+  power-onoff.md      who reboots / powers off the unit (IOC via /dev/ipc/ch2,
+                      DSIPowerManagement) and how an app could ask for a reboot
+  vehicle-data.md     what the unit reads from the car: IOC -> /dev/ipc/ch5 (ndr,
+                      /dev/ndr), BAP on ch3/ch4, no raw CAN; how an app can read it
 src/
   common/             shared by the apps (src/<app>/ is only that app's logic)
     log.c             SD log, fsync per line
@@ -299,6 +303,7 @@ media/                hello6's test videos: mkclips.sh (ffmpeg, mmi-media image)
 tests/                host unit tests (make test)
 android/              Audi streaming: audi_stream_receiver sender app (Kotlin, Gradle in docker/Dockerfile)
 tools/aoa_host.py     desk stand-in for the MMI side (make aoa-host)
+tools/ch5dump.py      decode a /dev/ipc/ch5 capture (docs/vehicle-data.md §3)
 sd/run.sh             launched by copie_scr.sh on SD insert: runs the test apps
                       (@APPS@ and screen times filled by make)
 sd/screens.sh         run.sh's status screens as pngondemand layouts (sourced)
@@ -321,12 +326,13 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
 General procedure:
 1. FAT32 card. Copy `build/sd/*` to the root.
 2. Turn the ignition on and wait for the MMI to boot fully. Insert the card.
-3. A start screen comes first. Then each app gets a "Next" screen (what it
-   does and what you should see) and a result screen. The default run
-   is hello5, hello9 (about 4 min), then audi_stream_receiver, which runs until
-   the card is pulled: that is the end of the run, so its result screen
-   and the "all done" screen never appear. With an `SD_APPS` list that
-   doesn't end in audi_stream_receiver, wait for "all done" before pulling.
+3. A start screen comes first. Then the apps run one after another, each
+   followed by its result screen (each app shows its own instructions).
+   The default run is hello5, hello9 (about 4 min), then
+   audi_stream_receiver, which runs until the card is pulled: that is the
+   end of the run, so its result screen never appears. With an `SD_APPS`
+   list that doesn't end in audi_stream_receiver, wait for the last
+   result screen to go before pulling.
 
 If neither the apps' output nor `var/run.log` appears,
 `copie_scr.sh` didn't run.
@@ -336,21 +342,19 @@ If neither the apps' output nor `var/run.log` appears,
 `run.sh` (ksh, no native runner) does this for each app in `SD_APPS`:
 
 0. **Start screen ("MMI 3G+ native app tests")** for 5 s, once: what the run is,
-   and don't pull the card before "all done".
-1. **Screen "Next: <app>"** for 5 s: its title and what you should see or
-   do, its arguments and timeout, and the run order. This is the pause
-   before the app starts.
-2. **The app**, with stdout and stderr in `var/<app>_out.log`. Three `=== `
+   and don't pull the card before the last result screen has gone.
+1. **The app**, with stdout and stderr in `var/<app>_out.log`. Three `=== `
    lines are appended at the end: exit code, run time and verdict. A watcher
    sends TERM when the app runs over its timeout, and KILL 15 s later.
    Then `sloginfo` goes to `var/<app>_slog.txt` and core files are moved to
    `var/` (see "When an app crashes").
-3. **Screen "<app>: <verdict>"** for 8 s, with what the verdict means, the
-   exit code, run time and FAIL line count, and where its logs are.
+2. **Screen "<app>: <verdict>"** for 8 s, with what the verdict means, the
+   exit code, run time and FAIL line count.
 
-The run order on every screen shows the verdicts so far. Then a final
-screen "k of n apps OK" for 15 s. The verdicts, with exit
-code and run time, are in `var/summary.txt`.
+The verdicts, with exit code and run time, are in `var/summary.txt`.
+(Until 2026-11-04 each app also had a "Next" screen before it, every
+screen listed the run order, and the run ended on a "k of n apps OK"
+screen. The apps show their own instructions, so those went.)
 
 | Verdict | Meaning |
 |---|---|
@@ -361,10 +365,10 @@ code and run time, are in `var/summary.txt`.
 | `TIMEOUT` | stopped by the watcher |
 | `MISSING` | the binary isn't in `bin/` |
 
-Per-app timeouts, arguments, titles and on-screen descriptions are in
+Per-app timeouts, arguments, titles and descriptions are in
 [`sd/apps.conf`](sd/apps.conf), which `make sd` also copies to the card.
 hello5 runs steps `mntv` there. The screen times are
-`PRE_S`/`POST_S`/`FINAL_S` in the Makefile.
+`PRE_S`/`POST_S` in the Makefile.
 
 **Screens.** They are shown with the toolkit's `core/bin/showScreen`
 (DrGER's tool, already proven on the car), as
@@ -373,8 +377,8 @@ the time is up. showScreen can only show a PNG, so each screen is drawn
 on the car when it is needed, nothing is pre-rendered:
 
 1. a `screen_*` function in [`sd/screens.sh`](sd/screens.sh) prints the
-   screen's layout (`screen_start`, `screen_next`, `screen_result`,
-   `screen_done`) to `/tmp/mmi_apps/screen.layout`;
+   screen's layout (`screen_start`, `screen_result`) to
+   `/tmp/mmi_apps/screen.layout`;
 2. `bin/pngondemand` renders it to `/tmp/mmi_apps/screen.png`;
 3. `showScreen -t` shows that.
 
@@ -719,10 +723,27 @@ at most two pictures in flight.
   plus `VIDEO_DATA` chunks (id + ≤2046 B). A static screen produces no
   new images and so sends nothing. After a replug, the new link gets the
   last picture again.
-- *Format* (a drop-down, remembered): **JPEG** (q90), **PNG** (lossless;
-  one bigger than 512 KB goes as JPEG instead), or **PNG when still**
-  (JPEG while the screen changes; once it has not changed for 300 ms
-  the same picture goes again as PNG). An MMI app without PNG gets JPEG.
+- *Format* (a drop-down, remembered): **JPEG** (q90) or **PNG** (lossless;
+  one bigger than 512 KB goes as JPEG instead). An MMI app without PNG
+  gets JPEG. (**PNG when still**, JPEG while the screen changed and the
+  same picture as PNG once it stopped, was dropped on 2026-11-04; a phone
+  that had it saved falls back to JPEG.)
+- **H.264** (Format, since 2026-11-04, Android 10+): the phone's hardware
+  encoder, 720×432 at the Max fps slider's rate (now up to 25), decoded
+  by the MMI's DM642 (`src/audi_stream_receiver/README.md` "Hardware
+  H.264", docs/phone-mirroring.md §7.12). `make aoa-host` checks it at the
+  desk and saves `build/aoa-host/stream.h264`.
+  Since 2026-11-05 the screen is captured at k× (×3 landscape, ×4
+  portrait on a 2340×1080 phone) and box-filtered k:1 on the GPU into the
+  encoder (`GlScaler.kt`; switch **Sharp H.264**, on by default; off = the
+  old direct path, which blurred text), and **H.264 rate** picks 2.5, 4
+  (default), 6 or 8 Mbit/s (docs/phone-mirroring.md §7.13).
+- **Latency clock** (a switch): a big seconds.milliseconds clock on the
+  phone, mirrored to the MMI; one photo of both screens gives the delay.
+- Icon (2026-11-04): the car's display and the phone in front of it, both
+  showing the same picture, over the road. Source `android/icon/ic_launcher.svg`;
+  adaptive (and themed) icon as vector drawables, the notification icon
+  from the same shapes, PNGs for Android 6-7 by `android/icon/render.sh`.
 - Why the capture runs at k×: until 2026-10-30 the virtual display had
   the picture's own size. Android's mirroring then scaled 2340 px to
   800 (2.9:1) or 2340 to 480 (4.9:1) in one bilinear step. Bilinear
@@ -862,7 +883,8 @@ make apk                         # android/out/audi_streaming.apk  (= make -C an
 make apk-test                    # Kotlin unit tests (protocol, picture fit)
 make apk-install                 # adb install -r: adb runs in the container
 make aoa-host                    # desk test: this PC plays the MMI; the newest
-                                 # streamed picture lands in build/aoa-host/latest.jpg
+                                 # streamed picture lands in build/aoa-host/latest.jpg,
+                                 # an H.264 stream in build/aoa-host/stream.h264
 ```
 
 Everything builds and runs in Docker: `mmi-sdk` for the MMI side,

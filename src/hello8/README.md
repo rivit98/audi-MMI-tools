@@ -2,7 +2,7 @@
 
 The C++ test. hello8 is the first app built with `shle-nto-g++`: GCC 16 and
 its libstdc++, linked statically, C++20 ([`sdk/include-c++/README.md`](../../sdk/include-c++/README.md)).
-It runs 18 checks of the language runtime and the standard library and
+It runs 19 checks of the language runtime and the standard library and
 shows each as it finishes: PASS in green, or FAIL in red with the
 expectation that failed.
 
@@ -24,6 +24,7 @@ expectation that failed.
 | chrono | `steady_clock` and `system_clock` against `clock_gettime`/`time`, `sleep_for`, durations, the C++20 calendar |
 | threads | 4 threads with a mutex, thread arguments, exceptions in 4 threads at once, one static initialised from 4 threads, recursive/shared mutexes, `scoped_lock` |
 | sync | `condition_variable` (producer/consumer, timed wait), `call_once` |
+| sync reuse | `mutex`, `recursive_mutex`, `timed_mutex`, `condition_variable` built, locked from two threads, destroyed and built again in the same buffer (3 rounds each); a class holding a mutex made in the same stack frame 3 times and on the heap 3 times. On QNX a mutex never destroyed leaves a kernel sync object at its address, and the next one there failed its first lock with `EINVAL` (hello9, 2026-11-05) - the SDK now destroys them |
 | atomics | the operations, then 4 threads × 200000 `fetch_add`: counts lost updates |
 | atomics stress | 4 round-robin threads add to one counter for 1.5 s, three ways: plain load + add + store (the control, must lose updates), `fetch_add` built with GCC's old sh4 default gUSA (`gusa.cpp`, `soft-gusa,strict`), and the same `fetch_add` with the SDK's default SH-4A LL/SC (`llcs.cpp`, must lose none). Reports the lost updates of each |
 
@@ -41,7 +42,9 @@ expectation that failed.
   builds everything with LL/SC atomics. hello8 ran once more to confirm
   that build on the car (2026-11-03: 18 of 18, below) and has left the
   default run. Run it again after changing the SDK's C++ runtime or its
-  atomics model.
+  atomics model. **2026-11-05:** back in the default run for the new
+  `sync reuse` check (the SDK's `std::mutex` now calls
+  `pthread_mutex_init`/`pthread_mutex_destroy`), not yet run on the car.
 
 ## On the car
 

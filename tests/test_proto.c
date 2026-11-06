@@ -301,6 +301,47 @@ static void test_vasm_cut_short(void)
 	vasm_free(&a);
 }
 
+/* H.264 frames go through the same VIDEO_START / DATA; H264_CONFIG parses. */
+static void test_h264(void)
+{
+	struct vasm a;
+	struct vpic pic;
+	struct proto_h264_config c;
+	uint8_t p[64];
+	int dropped, bad;
+	unsigned n;
+	const uint8_t cfg[] = {25, 0x00, 0x70, 0x00, 0x00,     /* 25 fps, 28672 bytes */
+	                       3, 0, 0x67, 0x42, 0xc0,          /* SPS, 3 bytes */
+	                       2, 0, 0x68, 0xce};               /* PPS, 2 bytes */
+
+	vasm_init(&a, 100);
+	n = start(p, 30, 720, 432, PROTO_FMT_H264, 3);
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
+	n = data(p, 30, "abc", 3);
+	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
+	vasm_take(&a, &pic);
+	CHECK_EQ(pic.format, PROTO_FMT_H264);
+	free(pic.data);
+	vasm_free(&a);
+	CHECK_STR(proto_fmt_name(PROTO_FMT_H264), "H.264");
+
+	CHECK_EQ(proto_h264_config_parse(cfg, sizeof(cfg), &c), 0);
+	CHECK_EQ(c.fps, 25);
+	CHECK_EQ(c.frame_bytes, 28672);
+	CHECK_EQ(c.sps_len, 3);
+	CHECK_EQ(c.sps[0], 0x67);
+	CHECK_EQ(c.pps_len, 2);
+	CHECK_EQ(c.pps[1], 0xce);
+	CHECK_EQ(proto_h264_config_parse(cfg, sizeof(cfg) - 1, &c), -1);   /* PPS cut */
+	CHECK_EQ(proto_h264_config_parse(cfg, 10, &c), -1);                /* short */
+	memcpy(p, cfg, sizeof(cfg));
+	p[0] = 0;
+	CHECK_EQ(proto_h264_config_parse(p, sizeof(cfg), &c), -1);         /* 0 fps */
+	p[0] = 25;
+	p[5] = 0;
+	CHECK_EQ(proto_h264_config_parse(p, sizeof(cfg), &c), -1);         /* empty SPS */
+}
+
 int main(void)
 {
 	test_u32_le();
@@ -314,5 +355,6 @@ int main(void)
 	test_split_in_header();
 	test_oversized_skipped();
 	test_max_payload_accepted();
+	test_h264();
 	CHECK_DONE();
 }

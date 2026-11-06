@@ -66,3 +66,25 @@ unsigned proto_encode(uint8_t *out, unsigned cap, uint8_t type,
 		memcpy(out + PROTO_HDR, payload, len);
 	return PROTO_HDR + len;
 }
+
+int proto_h264_config_parse(const uint8_t *p, unsigned n, struct proto_h264_config *out)
+{
+	unsigned at;
+
+	if (n < PROTO_H264_CONFIG_MIN)
+		return -1;
+	out->fps = p[0];
+	out->frame_bytes = proto_get_u32(p + 1);
+	out->sps_len = proto_get_u16(p + 5);
+	at = 7;
+	if (out->sps_len == 0 || at + out->sps_len + 2 > n)
+		return -1;
+	out->sps = p + at;
+	at += out->sps_len;
+	out->pps_len = proto_get_u16(p + at);
+	at += 2;
+	if (out->pps_len == 0 || at + out->pps_len > n)
+		return -1;
+	out->pps = p + at;
+	return out->fps == 0 ? -1 : 0;
+}

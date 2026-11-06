@@ -148,7 +148,7 @@ tests/                  host unit tests (check.h)
 sd/                     run.sh, screens.sh, apps.conf, card README
 media/                  test clip generators
 android/                phone app (own Makefile)
-tools/                  aoa_host.py, f3swalk.py, gusa-scan.awk, Ghidra script
+tools/                  aoa_host.py, f3swalk.py, gusa-scan.awk, Ghidra script + resolve_decomp.py
 docs/                   this guide and the deep dives
 ```
 
@@ -196,8 +196,8 @@ planning. A FAIL on the car is then the car, not the code.
 
 - copies `bin/*` to `/tmp/mmi_apps/` and runs from there (FAT32 has no
   exec bit, and the card can be pulled mid-run);
-- per app: "Next" screen → app with stdout/stderr in `var/<app>_out.log`
-  → result screen. Screens are drawn on the car: `screens.sh` prints a
+- a start screen, then per app: the app with stdout/stderr in
+  `var/<app>_out.log` → its result screen. Screens are drawn on the car: `screens.sh` prints a
   layout, `bin/pngondemand` renders a PNG, `showScreen -t` shows it;
 - enforces the `apps.conf` timeout (TERM, KILL 15 s later);
 - saves `sloginfo` to `var/<app>_slog.txt` and moves core files to `var/`;
@@ -435,7 +435,7 @@ track never opened). io-media's own MP4 demuxer (`CDemuxMp4`) reads
 **32-bit box sizes only**, wants `moov` before `mdat`, loads every box but
 `mdat` at open, and has a 10 MB header budget.
 
-**Showing it** (`src/hello9/vout.cpp`):
+**Showing it** (`src/common/vout.cpp`):
 
 ```
 lm: unregister 41; register {41, 800, 480, flags 0x101}; show {41}; wait 500 ms
@@ -466,13 +466,16 @@ and ignores SIGTERM. Judge it by its `FINISHED` line.
 constant-sample-size MP4 (CS-MP4, `media/csmp4.py`): `ftyp`, `moov`, then a
 32-bit `mdat`; one constant `stsz` size; every frame padded to one size S
 with a filler NAL; `moov` declaring far more frames than exist. An app's own
-QNX resource manager serves it (`src/hello9/stream_server.cpp`;
+QNX resource manager serves it (`src/common/stream_server.cpp`;
 `src/common/qnx/sys/pm.h` makes `<sys/iofunc.h>` compile), with `st_size` =
 the declared total and reads that block until the frame exists. io-media
 reads it sequentially in 64 KB, ~2.7 frames ahead, waits out pauses of at
 least 5 s, and adds ~0.5 s of steady latency. After a pause the picture
 skips the ~9 frames that were queued, so a live source must keep a steady
-frame rate. A file growing on the card does not work (EIO).
+frame rate. A file growing on the card does not work (EIO). Since 04.11
+the whole path is one class, `src/common/hw_stream.h` (Makefile group
+`LIVE`, C++ apps only): push Annex-B frames, it builds the header from the
+SPS/PPS, pads, serves, plays, shows, and fills gaps with skip frames.
 [phone-mirroring.md](phone-mirroring.md) §2, §7.8–7.10,
 [src/hello9/README.md](../src/hello9/README.md).
 
@@ -604,10 +607,17 @@ phone-app bugs and MMI bugs can be told apart without the car.
 ## 16. Reverse-engineering workflow
 
 - **Ghidra** decompiles SH4. IDA has no SH4 decompiler (fine for xrefs and
-  disassembly). Headless Ghidra hangs on full SH4 analysis: use
-  `-analysisTimeoutPerFile 90` and create functions at prologues.
-  `tools/DumpDecomp.java` resolves the SH4 PIC idiom
-  `(literal + pc)` to call targets and strings.
+  disassembly). Headless Ghidra hangs on full SH4 analysis of small
+  binaries: use `-analysisTimeoutPerFile 90` and create functions at
+  prologues. For MMI3GApplication, `-analysisTimeoutPerFile 1500` completes
+  (about 11 minutes).
+- `tools/DumpDecomp.java` resolves the SH4 PIC idiom `(literal + pc)` to
+  call targets and strings. `tools/resolve_decomp.py` then replaces
+  Ghidra's truncated `PTR_s_…` labels with the full strings and
+  `PTR_FUN_…` slots with their targets, so log and trace strings become
+  greppable.
+- Existing dumps are in `third_party/decomp/P1001_rev51/` (gitignored, with
+  a README).
 - Firmware `.so` files lack section headers: carve a window and
   `objdump -b binary -m sh4` it (§5). An ELF with a corrupt section table
   loads in Ghidra after zeroing `e_shoff`/`e_shnum`.
@@ -625,7 +635,7 @@ phone-app bugs and MMI bugs can be told apart without the car.
   resource-manager stream); latency floor.
 - Confirm ch8 byte 15 as a power-state warning (turn the ignition off
   during `hello7`) and name the remaining button bits.
-- How the HMI shows the rear camera (VCAP 0 input 0).
+- How the HMI shows the rear camera: answered in [rear-camera.md](rear-camera.md). Still open: how an app can tell the camera is active before it touches VP1.
 - Reading CAN data from an app.
 - Optional: rebuild `libstdc++.a`/`libgcc_eh.a` with LL/SC so no gUSA is
   left, which lifts the C++ threading rules in §7.

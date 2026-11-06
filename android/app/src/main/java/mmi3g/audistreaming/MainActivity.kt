@@ -15,7 +15,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Choreographer
 import android.view.View
+import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.Button
 import android.widget.CompoundButton
@@ -37,8 +39,12 @@ import android.widget.TextView
  * "Stream screen" asks for screen capture and starts CaptureService, which
  * sends the screen to the MMI (at most "Max fps" pictures a second, 5 by
  * default; the MMI's acks slow it down further) through the link
- * published in [Streaming.link]. "Format" picks JPEG, PNG or PNG when still
- * (CaptureService; remembered). "Details on the MMI" puts the MMI's status
+ * published in [Streaming.link]. "Format" picks JPEG, PNG or H.264
+ * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
+ * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
+ * comparison) apply to H.264 only, also remembered. "Latency clock" shows a big running
+ * clock (seconds.milliseconds, redrawn every display frame) that the MMI
+ * mirrors: one photo of both screens gives the delay. "Details on the MMI" puts the MMI's status
  * bar (state, fps, timings) over a landscape picture; off, the picture has
  * the screen to itself. Portrait always shows the MMI's status panel. The
  * switch is remembered and sent again on every connection (the MMI starts
@@ -66,6 +72,16 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var detailsSwitch: CompoundButton
     private lateinit var fpsLabel: TextView
     private lateinit var videoView: TextView
+    private lateinit var clockView: TextView
+    private var clockOn = false
+    private val clockFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!clockOn) return
+            val ms = System.currentTimeMillis() % 100_000
+            clockView.text = "%02d.%03d".format(ms / 1000, ms % 1000)
+            Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
     private val ui = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
         override fun run() {
@@ -116,6 +132,8 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_DETAILS, on).apply()
             link?.sendDetails(on)
         }
+        clockView = findViewById(R.id.clock)
+        findViewById<CompoundButton>(R.id.clock_switch).setOnCheckedChangeListener { _, on -> setClock(on) }
         fpsLabel = findViewById(R.id.fps_label)
         Streaming.maxFps = getPreferences(MODE_PRIVATE).getInt(PREF_FPS, CaptureService.DEFAULT_FPS)
             .coerceIn(CaptureService.MIN_FPS, CaptureService.MAX_FPS)
@@ -131,6 +149,27 @@ class MainActivity : Activity(), AccessoryLink.Listener {
                     getPreferences(MODE_PRIVATE).edit().putString(PREF_FORMAT, Streaming.format.name).apply()
                 }
                 override fun onNothingSelected(parent: AdapterView<*>) {}
+            }
+        }
+        val prefs = getPreferences(MODE_PRIVATE)
+        Streaming.bitRate = prefs.getInt(PREF_BIT_RATE, CaptureService.DEFAULT_BIT_RATE)
+            .takeIf { it in CaptureService.BIT_RATES } ?: CaptureService.DEFAULT_BIT_RATE
+        findViewById<Spinner>(R.id.bit_rate).apply {
+            setSelection(CaptureService.BIT_RATES.indexOf(Streaming.bitRate))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
+                    Streaming.bitRate = CaptureService.BIT_RATES[pos]
+                    getPreferences(MODE_PRIVATE).edit().putInt(PREF_BIT_RATE, Streaming.bitRate).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>) {}
+            }
+        }
+        Streaming.sharp = prefs.getBoolean(PREF_SHARP, true)
+        findViewById<CompoundButton>(R.id.sharp).apply {
+            isChecked = Streaming.sharp
+            setOnCheckedChangeListener { _, on ->
+                Streaming.sharp = on
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_SHARP, on).apply()
             }
         }
         findViewById<SeekBar>(R.id.fps).apply {
@@ -177,7 +216,25 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     override fun onPause() {
         ui.removeCallbacks(refresh)
+        Choreographer.getInstance().removeFrameCallback(clockFrame)
         super.onPause()
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        if (clockOn) Choreographer.getInstance().postFrameCallback(clockFrame)
+    }
+
+    private fun setClock(on: Boolean) {
+        clockOn = on
+        clockView.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Choreographer.getInstance().postFrameCallback(clockFrame)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Choreographer.getInstance().removeFrameCallback(clockFrame)
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -306,5 +363,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_DETAILS = "details"
         private const val PREF_FPS = "max_fps"
         private const val PREF_FORMAT = "format"
+        private const val PREF_BIT_RATE = "bit_rate"
+        private const val PREF_SHARP = "sharp_h264"
     }
 }

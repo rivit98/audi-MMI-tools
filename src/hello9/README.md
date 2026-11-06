@@ -1,79 +1,101 @@
 # hello9
 
-The streaming test: can the unit's DM642 decoder show a **live** H.264
-stream, with the unit's own io-media left as it is? It runs the tests that
-came out of the reverse engineering of io-media
-([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.8), which
-moved here from hello6. Written in C++
+The streaming test: the unit's DM642 decoder showing a **live** H.264
+stream, with the unit's own io-media left as it is. 04.11 showed that it
+works ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
+Since then hello9 runs the code `audi_stream_receiver` uses for the
+phone's frames (`src/common/hw_stream.h`), fed from a clip on the card the
+way a phone would feed it. Written in C++
 ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 
-| Test | Source | Question |
+| Test | How frames come | Question |
 |---|---|---|
-| `c5` | plain MP4 on the card (720×336) | Control: seen on every hello6 run since 21.10. Black here means the display path broke, not the stream |
-| `c9` | constant-sample-size MP4 (CS-MP4) on the card | Does the DSP take frames padded to one size with a filler NAL? |
-| `c10g` | CS-MP4 whose header declares 10 min, written to the card while it plays (2 s head start) | Does io-media start on a file that's still growing, and keep up? |
-| `live` | **hello9 serves the stream itself** at `/dev/hello9/live.mp4`, 30 s | Does io-media play a stream whose reads wait for the frames? How far ahead does it read? What is the lag? |
-| `stall` | the same, with a 2 s pause at 8 s and a 5 s pause at 16 s | Does io-media wait out a gap in the stream, and catch up? |
+| `c5` | plain MP4 on the card (720×336), played as a file | Control: seen on every run since 21.10. Black here means the display path broke, not the stream |
+| `live` | c11 pushed frame by frame, 25 fps, 30 s; the header declares the receiver's default (~1.6 h) | Does the MMI-built stream play (header from the SPS/PPS, frames padded on the MMI, a `moov` declaring 150 000 frames)? Lag as on 04.11? |
+| `gap` | the same, with a 2 s pause at 8 s and a 5 s pause at 16 s; **gap fill on** | Do the skip frames work on the DSP? The picture should freeze on the **last frame before each pause (199, 399)** and go on without skipping |
+| `slow` | 15 fps, 20 s, gap fill on | Do skips make a slow sender up to 25 fps? The counter runs at 15 a second, smoothly |
+| `burst` | 25 fps, but 5 frames at a time every 200 ms, 20 s | Does io-media cope with clumped arrival (USB)? Lag? |
+| `s56` | as `live`, 15 s, every frame padded to twice the size (56 KB) | **Delay tuning:** is io-media's ~0.5 s a queue of bytes (the lag drops) or of frames (it stays)? |
+| `s112` | the same, 4× (112 KB) | the same, and what bigger frames cost (the phone's may need 64-256 KB) |
+| `f30` | the stream timed at 30 fps, frames pushed at 30 fps, 15 s | If the queue is frames, the lag drops to ~5/6 |
+| `c9` | constant-size MP4 file (on request) | Seen 04.11 |
+| `stall` | `gap` without gap fill (on request) | The 04.11 `stall`, for comparison: freezes ~9 frames early, then skips them |
+
+The default is `c5,live,gap,slow,burst,s56,s112,f30`, about 4.5 minutes. `c10g` (a CS-MP4
+growing on the card) is gone: it failed on 04.11 with EIO, and the
+resource manager made it unnecessary.
 
 How each piece works:
 
-- **Player:** each test plays through hello9's own io-media client
-  (`common/iom.c`, hello5's, the calls `testapp-file` makes). Every io-media
-  event is logged.
-- **Picture:** a layer-manager video displayable on VCAP 0, with VCAP 0
-  switched to input 1 (the DSP's video port) through dev-videoctrl
-  (`vout.cpp`). This is hello6's working path; VCAP 1 isn't tried.
+- **The clip:** `c11_h264_336.h264` (`media/mkclips.sh`), raw Annex-B as an
+  encoder hands it out: 550 frames, an IDR every 25, looped (frame 0 is an
+  IDR, so the counter on screen restarts). hello9 splits it into frames
+  (`h264::split_access_units`) and takes the SPS/PPS and the frame size S
+  (largest frame + filler, in 4 KB steps: 28 KB) from it.
+- **The feeder:** a thread pushes frame k when `schedule.h` says it is due
+  (pauses, rate, bursts), into `HwStream::push`, as the receiver's USB
+  thread pushes the phone's.
+- **HwStream** (`src/common/hw_stream.h`): `live::Stream` builds the
+  CS-MP4 header (`csmp4::build_header`, byte for byte what
+  `media/csmp4.py` writes, checked by `make test`), pads every frame to S
+  and keeps the last 128; `StreamServer` serves it at
+  `/dev/hello9/live.mp4` with blocking reads; once the first IDR is in,
+  `Player` creates the io-media graph and plays it; 1 s later `vout` puts
+  the picture on screen (VCAP 0 input 1).
+- **Gap fill** (`live::Stream::fill`, run every 10 ms by the server): when
+  the stream is 2+ frames behind its frame clock and nothing came for a
+  frame period, it appends **skip frames**: non-reference P frames with
+  every macroblock skipped, which repeat the picture. ffmpeg decodes them
+  as exact copies of the frame before (`make test`, `tests/check_live.py`).
+  They never put the stream ahead of the clock.
 - **The driver** turns the knob once when the moving picture appears. In
-  the `stall` test, they also turn it once more each time the picture moves
-  again after a freeze. hello9 logs every knob time.
+  `gap` and `stall`, they also turn it once more each time the picture
+  moves again after a freeze. hello9 logs every knob time.
 
-## The live stream
+## The resource manager
 
-`stream_server.cpp` is a QNX resource manager, with one thread and no
+`src/common/stream_server.cpp` (moved from hello9 on 04.11), one thread, no
 patches to anything on the unit:
 
-- **The path** ends in `.mp4`, so io-media's `iom.cfg` picks `mp4_parser`.
-  io-media opens it like any file (`open`/`read`/`lseek`/`fstat`, `pread`
-  also handled).
-- **The header** comes from c10 and is always available. It declares 10
-  minutes of 28 KB frames, and `st_size` is the declared size (430 MB).
-- **Frame k** is released k/25 s after the stream starts (plus any pauses
-  before it). It's read from c10 on the card, and the clip's 550 frames
-  loop. The loop point is a keyframe, so the counter on screen restarts.
-- **A read** whose bytes aren't released yet gets no reply until they are.
-  The reader blocks, as it would on a live stream. A 10 ms dispatch
-  timeout re-checks the waiting reads. If io-media gives up on a read
-  (unblock) it gets `EINTR`; at the end of a test, waiting reads get EOF.
+- **The path** ends in `.mp4`, so io-media picks its MP4 demuxer. io-media
+  opens it like any file (`open`/`read`/`lseek`/`fstat`, `pread` also
+  handled). `st_size` is the declared size.
+- **A read** whose bytes don't exist yet gets no reply until they do. The
+  reader blocks, as it would on a live stream. A 10 ms dispatch timeout
+  runs the gap fill and re-checks the waiting reads. If io-media gives up
+  on a read (unblock) it gets `EINTR`; at the end, waiting reads get EOF.
+  A read more than 10 s past the newest frame (a probe of the end) is
+  answered at once with filler.
 - **Logging:** the server never writes the log itself, because `log.c`
   fsyncs every line. It passes notes to the main thread, which logs the
   first 40 reads in detail and a status line every second.
 
-The pure part (header parsing, release schedule, byte → source mapping)
-is `stream_plan.cpp`, tested on the build host by `tests/test_hello9.cpp`
-(`make test`).
-
-**Lag** is measured on every io-media TIME event at position p: wall time
-since the stream started, minus the release time of the frame at p. That
-is how long after a frame "arrived" io-media says it plays it, which is
-the latency floor this path adds before the phone's encoder and the USB.
+**Lag** is measured on every io-media TIME event at position p: now,
+minus when the frame at p was pushed (`HwStream::lag_ms`). After a pause
+without fill io-media's clock runs ahead, so it means nothing there; with
+fill the stream stays on its clock, so it should stay meaningful.
 
 **`<sys/pm.h>`:** the resource-manager headers need it and the sysroot
 doesn't have it. `src/common/qnx/sys/pm.h` stands in; it covers one type
-used only by `_IO_POWER`, which hello9 doesn't handle.
+used only by `_IO_POWER`, which isn't handled.
 
 ## Running
 
-- **Run:** `hello9 <sd_path> [test,test,...]`. The default is all five, in
-  the order above, about 3.5 minutes. `make sd` puts the clips (from
-  `media/mkclips.sh`) on the card when hello9 is in `SD_APPS`.
+- **Run:** `hello9 <sd_path> [test,test,...]`, e.g. `c5,gap,stall`. `make
+  sd` puts the clips (c5, c9, c11 from `media/mkclips.sh`) on the card
+  when hello9 is in `SD_APPS`.
 - **Output:**
   - `hello9.log`: every step and every io-media event. For the live tests:
-    the stream's numbers, the first 40 reads, a status line per second
-    (released frames, how far io-media has read, waits, read-ahead,
-    position, lag). Then `RESULT` lines and the summary.
+    the stream (`hw:` line: size, POC type, S, frames declared, header
+    size, gap fill), the pauses and the last frame before each, the first
+    40 reads, a status line per second (frames pushed, skips, how far
+    io-media has read, waits, read-ahead, position, lag). Then `RESULT`
+    lines and the summary.
   - `hello9/`: `query_<test>.log` (io-media's view of the graph:
     `GetTrackInfo`, `GetVideoInfo`), `slog.txt` (the system log after the
-    tests, for io-media's own messages), `grow_c10.mp4`.
+    tests, for io-media's own messages).
+- **Film it:** the phone video settles what the log can't (where the
+  picture froze, whether it skipped). Keep the counter in frame.
 
 ## Reading the result
 
@@ -95,20 +117,29 @@ used only by `_IO_POWER`, which hello9 doesn't handle.
 | `reads`, `preads` | Read requests, and how many were `pread`s |
 | `read=` | Smallest..largest read size |
 | `waited`, `wait_max`, `wait_avg` | Reads that had to wait for their frames, and for how long |
-| `lead_max` | Read-ahead: how far past the newest released frame io-media asked |
+| `lead_max` | Read-ahead: how many frames past the newest one io-media asked for |
 | `unblocked` | Waiting reads io-media gave up on |
+
+`RESULT <test> frames` lines (live tests): `pushed` / `refused` by the
+feeder (with the first refusal), and the stream's `real`, `idr`, `skips`,
+`gaps`, `too_big`, `wait_idr`, `bad`, `max_frame`, `sample` (S),
+`evicted_reads`.
 
 | What you see | Meaning |
 |---|---|
 | c5 black | The display path broke: nothing else counts |
-| c9 still ERROR within ~40 ms, no TIME | Something else in the header is refused at open. Next suspect: the constant `stsz` size. Try an all-equal per-sample table (docs/phone-mirroring.md §7.9) |
-| c9 black, c5 seen | The filler NAL padding: pad inside the last slice instead |
-| c10g black, live seen | io-media read past the end of the growing file. Live streaming works through the resource manager |
-| `live` seen, lag steady | **Hardware streaming works.** The lag is the latency floor. Next: frames from the phone over AOA |
-| `live` seen, lag grows | io-media's clock runs ahead of the stream, or it buffers more and more |
-| `stall`: knob after each pause, lag back to normal | io-media waits out gaps |
-| `stall`: no knob after a pause, errors, or `unblocked` | io-media gives up on slow reads. The MMI must fill gaps itself (repeat-frame P-frames) |
-| `stall`: `lag` negative after a pause | Expected (04.11): io-media's clock runs on through a gap, so TIME positions run ahead of the stream. Use the phone video for stalls |
+| `live` black, ERROR at open | The MMI-built header differs from what played on 04.11 in something io-media checks. `make test` says it is byte-identical to csmp4.py's for the same frames, so suspect the size of the declaration (150 000 frames): run `gap` (600 s declared) to compare |
+| `live` seen, lag ~0.5 s steady | **The receiver's path works on the car.** Same as 04.11 |
+| `gap`: froze on 199 and 399, no skip after, knob after each pause | **Skip frames work on the DSP**: a sender that pauses loses nothing |
+| `gap`: froze ~9 frames early and skipped, as in `stall` | The skips didn't reach io-media or didn't release its queue: look at `skips` in `RESULT gap frames` and the per-second lines |
+| `gap`: garbage or a black picture after a pause | The DSP doesn't like the skip frames (POC type 2 with several non-reference frames in a row is outside the spec). Next: make them reference frames and renumber what follows |
+| `slow`: smooth, lag steady | Skips make up a slow sender |
+| `burst`: lag steady, no errors | Clumped arrival is fine |
+| `s56` / `s112` lag ≈ `live`'s | The queue is frames: bigger frames don't cost delay, so the phone's frame size cap only costs bandwidth |
+| `s56` / `s112` lag clearly lower | The queue is bytes: pad frames bigger to cut the delay (at the cost of io-media reading more) |
+| `f30` lag ≈ 5/6 of `live`'s | The queue is frames: a higher stream rate cuts the delay |
+| `s112` errors or stutter | io-media can't read 112 KB × 25 a second (2.8 MB/s) comfortably: keep the phone's frames smaller |
+| errors, `unblocked`, `refused` > 0 | Read the first refusal and the server notes |
 
 ## On the car
 
@@ -191,3 +222,13 @@ idle afterwards. The hardware path plus the server costs about 10 %.
   a steady rate), or the final state of a screen change isn't shown.
 - `c10g` has answered its question and can be dropped from the default
   list. Next steps: [docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10.
+
+**Built the same day for the next run:** the stream code moved to
+`src/common` (`hw_stream`, `live_stream`, `csmp4`, `h264`,
+`stream_server`, `player`, `vout`) and into `audi_stream_receiver`.
+hello9 now feeds the raw clip c11 through it, with gap fill (skip frames)
+on; the tests are `c5,live,gap,slow,burst` (above). `make test`: the
+MMI-built header and frames are byte-identical to `csmp4.py`'s, and
+ffmpeg decodes a filled gap with every skip an exact copy of the frame
+before. A host run of `gap` on c11 freezes on 199 for 49 frames and on 399
+for 125.

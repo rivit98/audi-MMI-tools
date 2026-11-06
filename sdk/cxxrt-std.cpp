@@ -17,6 +17,14 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <type_traits>
+
+// include-c++/pre/bits/os_defines.h must be in effect: a std::mutex that is
+// never destroyed leaves a kernel sync object behind, and the next one at
+// that address fails its first lock (EINVAL; hello9, 2026-11-05).
+static_assert(!std::is_trivially_destructible_v<std::mutex> &&
+                  !std::is_trivially_destructible_v<std::recursive_mutex>,
+              "std::mutex must call pthread_mutex_destroy on QNX");
 
 namespace std {
 

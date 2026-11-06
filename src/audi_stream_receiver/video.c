@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "hwvideo.h"
 #include "imgdec.h"
 #include "log.h"
 #include "perf.h"
@@ -85,7 +86,12 @@ void video_caps(uint8_t *out)
 	proto_put_u16(out + 4, (unsigned)port_w);
 	proto_put_u16(out + 6, (unsigned)port_h);
 	proto_put_u32(out + 8, VIDEO_MAX_BYTES);
-	out[12] = 1u << (PROTO_FMT_JPEG - 1) | 1u << (PROTO_FMT_PNG - 1);
+	out[12] = 1u << (PROTO_FMT_JPEG - 1) | 1u << (PROTO_FMT_PNG - 1) |
+	          1u << (PROTO_FMT_H264 - 1);
+	proto_put_u16(out + 13, HWVIDEO_MAX_W);
+	proto_put_u16(out + 15, HWVIDEO_MAX_H);
+	out[17] = HWVIDEO_FPS;
+	proto_put_u32(out + 18, HWVIDEO_MAX_FRAME);
 }
 
 void video_set_notify(void (*fn)(void))

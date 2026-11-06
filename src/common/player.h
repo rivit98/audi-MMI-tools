@@ -1,8 +1,8 @@
 // player.h - one io-media trackplayer graph through our own client
 // (common/iom.c, the calls testapp-file makes): an audio output, one input
 // URL, play, and its events turned into numbers.
-#ifndef HELLO9_PLAYER_H
-#define HELLO9_PLAYER_H
+#ifndef COMMON_PLAYER_H
+#define COMMON_PLAYER_H
 
 #include <cstdint>
 #include <functional>

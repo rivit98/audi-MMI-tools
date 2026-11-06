@@ -38,12 +38,86 @@ and [docs/usb-stack.md](../../docs/usb-stack.md). The frames are in
    phone's screen appears on the MMI: landscape on the whole screen,
    portrait on the left half with the status panel beside it. The
    phone's *Details on the MMI* switch adds a slim status bar over a
-   landscape picture. *Format* on the phone picks JPEG (fast), PNG
-   (sharp text, bigger) or PNG when still (JPEG while the screen moves,
-   PNG once it stops).
+   landscape picture. *Format* on the phone picks JPEG (fast) or PNG
+   (sharp text, bigger). (A third, *PNG when still*, was dropped on
+   2026-11-04.)
 4. Use the phone as usual. Back, Home, other apps, turning the phone,
    unplugging and replugging all keep the stream going. Stop it in the
    app or from its notification. Pull the SD card to end the MMI side.
+
+## Hardware H.264 (built 2026-11-04, not yet run on the car)
+
+Besides JPEG / PNG pictures decoded on the CPU, the app takes an **H.264
+stream** and has the unit's DM642 decode it: no CPU decoding, 25 fps,
+~0.5 s added by io-media ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
+On the phone: *Format* → **H.264** (Android 10+). The phone encodes its
+screen in hardware at 720×432 (the MMI's 720×576 limit, the screen's 5:3
+shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
+25 fps and fills the rest with skip frames.
+
+- **Protocol** (`proto.h`): `VIDEO_CAPS` sets bit 2 (H.264) and appends the
+  limits (720×576, 25 fps, frames up to 256 KB). The phone sends
+  `H264_CONFIG` (0x0B: fps, the largest frame, SPS, PPS), then its frames
+  as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each,
+  acked at once). The MMI answers `H264_STATUS` (0x0C): `PLAYING`, `SYNC`
+  (send an IDR), `REFUSED` (fall back to pictures), `CONFIG` (send the
+  config again).
+- **`hwvideo.cpp`** checks the config (Baseline, level ≤ 3.0, ≤ 720×576,
+  `live::check_decodable`), then runs `src/common/hw_stream.h` on its own
+  thread: the CS-MP4 header from the phone's SPS/PPS, frames padded to the
+  config's size (in 4 KB steps), a resource manager at
+  `/dev/audi_stream/live.mp4`, the io-media graph once the first IDR is
+  in, the picture 1 s later. Gaps are filled with skip frames. A new
+  config restarts the stream; the same config again changes nothing. The
+  stream ends on `VIDEO_STOP`, a JPEG / PNG picture, unplugging, or when
+  its declared frames run out (the 4 GB limit: ~1.6 h at 28 KB frames,
+  ~45 min at 64 KB; then it starts again and asks for an IDR). The last
+  8 MB of frames are kept for io-media (16-128 frames).
+- **The rear camera shares VCAP 0** (docs/rear-camera.md §9): an app that
+  sets VP1, or disables it, while the camera is up hides the camera from
+  the driver, and nothing tells an app whether it is up. So
+  `/dev/videoctrl` is touched only when the user starts or stops
+  streaming. A restart (new config, stream full) keeps the picture and
+  VCAP as they are and swaps only the io-media graph and the server.
+  **When io-media reports an error** (perhaps the HMI took the video for
+  its media or the camera), the stream ends without touching
+  `/dev/videoctrl`, and the phone is told `REFUSED` (pictures for the rest
+  of the connection). If no new stream follows a restart within 5 s, the
+  CPU-drawn screen comes back.
+- **Still a risk:** starting H.264 *while reversing* switches VCAP 0 to
+  the DSP (the camera picture goes until the next camera session), and
+  stopping it while reversing disables VCAP 0. Don't start or stop
+  streaming in reverse. Reopening the CPU-drawn screen shows displayables
+  {40, 16, 19}; whether that covers the camera's (0x11) is a question for
+  every app, not only this one.
+- **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
+  MediaCodec, Baseline 3.0, 2.5 Mbit/s CBR, an IDR only at the start and
+  when the MMI asks (`I_FRAME_INTERVAL` 10 s); frames are never dropped
+  on their own (the ones after would be garbage): a frame bigger than the
+  config's `frame_bytes` (64 KB at first) raises it (a new config, the MMI
+  restarts its stream, ~1-2 s black), and a queue of over 25 unacked
+  frames is thrown away up to the next IDR. If the encoder puts other
+  SPS/PPS before its IDRs than in its codec config, those become the
+  config. The phone app's status line shows rate, frame sizes and drops.
+- **Desk test** (`make aoa-host`): the PC plays the MMI, checks every frame
+  as the MMI would and saves the stream to `build/aoa-host/stream.h264`
+  (`ffplay` it).
+- **Latency:** the phone app's *Latency clock* switch shows a big
+  seconds.milliseconds clock. Stream with it on screen and take one photo
+  of the phone and the MMI together: the difference is the delay.
+- **The screen:** while the stream runs, the main loop closes the
+  CPU-drawn screen (the video displayable replaces it) and opens it again
+  afterwards.
+- **Log:** `h264:` lines: the config, the stream's start and end with its
+  totals, refused frames (the first 5), and every 10 s frames in, skips,
+  io-media's reads and the lag.
+- **Tested so far:** on the build host (`make test`: header, padding,
+  push / fill / read, skips decoded by ffmpeg; `make apk-test`: the
+  phone's protocol and H.264 helpers), and the same MMI code with a clip
+  instead of the phone in hello9 (`src/hello9/README.md`). The C++ code
+  makes this a C++ app since 04.11 (`docs/cpp-apps.md`); its `.c` files
+  are still C, and JPEG / PNG streaming works as before (confirmed by the
+  user).
 
 ## Text messages: dropped (2026-10-25)
 
@@ -133,8 +207,8 @@ after it (not yet run on the car):
   phone) and the phone averages each k×k block (`Downscale.kt`); JPEG
   q90;
 - PNG (`PROTO_FMT_PNG` 2): the MMI decodes it (`imgdec.c`, stb_image) and
-  says so in `VIDEO_CAPS`; the phone's *Format* drop-down picks JPEG,
-  PNG or PNG when still;
+  says so in `VIDEO_CAPS`; the phone's *Format* drop-down picks JPEG
+  or PNG (a "PNG when still" choice existed until 2026-11-04);
 - `VIDEO_START` carries the phone's downscale + encode time; `perf:`
   lines split size / decode / phone time by format, the CSV has `fmt`
   and `phone_ms` columns.

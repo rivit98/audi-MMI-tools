@@ -147,4 +147,28 @@ class ProtoTest {
         assertEquals(1, VideoFit.factor(1280, 720, VideoFit.Size(800, 450)))  // no room for 2x
         assertEquals(VideoFit.MAX_FACTOR, VideoFit.factor(8000, 8000, VideoFit.Size(100, 100)))
     }
+
+    @Test
+    fun capsWithH264Limits() {
+        // proto.h VIDEO_CAPS since 2026-11-04: 13 bytes + 720, 576, 25, 256 KB
+        val p = byteArrayOf(0x20, 3, 0xe0.toByte(), 1, 0x90.toByte(), 1, 0xe0.toByte(), 1,
+            0, 0, 8, 0, 7, 0xd0.toByte(), 2, 0x40, 2, 25, 0, 0, 4, 0)
+        val caps = Proto.videoCapsOrNull(p)!!
+        assertEquals(800, caps.landW)
+        assertEquals(720, caps.h264MaxW)
+        assertEquals(576, caps.h264MaxH)
+        assertEquals(25, caps.h264Fps)
+        assertEquals(256 * 1024, caps.h264MaxFrame)
+        assertEquals(true, caps.h264)
+        assertEquals(false, Proto.videoCapsOrNull(p.copyOf(13))!!.h264)       // older MMI app
+    }
+
+    @Test
+    fun h264ConfigMatchesTheCLayout() {
+        // proto.h H264_CONFIG: fps u8, frame_bytes u32, sps_len u16, sps, pps_len u16, pps
+        val f = Proto.h264Config(25, 0x10000, byteArrayOf(0x67, 0x42), byteArrayOf(0x68))
+        assertArrayEquals(byteArrayOf(0x0B, 12, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68), f)
+        assertEquals(Proto.H264_SYNC, Proto.h264StatusOrNull(byteArrayOf(1)))
+        assertNull(Proto.h264StatusOrNull(ByteArray(0)))
+    }
 }

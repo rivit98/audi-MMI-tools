@@ -65,19 +65,21 @@ ff -f lavfi -i "$(vf 720 336 'c7 H.264 720x336 fMP4')" "${SIL44[@]}" "${X264[@]}
 ff -f lavfi -i "$(vf 720 336 'c8 H.264 720x336 MPEG-PS')" "${SIL48[@]}" "${X264[@]}" \
   -c:a mp2 -b:a 192k -shortest -f vob "$OUT/c8_h264_336.mpg"
 
-# c9/c10: constant-sample-size MP4 (media/csmp4.py), the layout a live
-# stream can use: moov first with one-entry tables, every frame padded to
-# the same size with a filler NAL. c10's moov declares 10 minutes; hello9
-# writes it to the card while it plays, and serves it as its live stream.
+# c9: constant-sample-size MP4 (media/csmp4.py), the layout a live stream
+# uses: moov first with one-entry tables, every frame padded to the same
+# size with a filler NAL (played on the car 04.11).
+# c11: the raw H.264 (Annex-B), as an encoder hands it out. hello9 pushes
+# it frame by frame through the MMI's own live stream code (common/
+# hw_stream.h), which builds the header and pads the frames itself.
+# (c10, the CS-MP4 hello9 served until 04.11, is gone.)
 # vbv caps the I-frames, so the padded size stays small.
 CS264=(-c:v libx264 -profile:v baseline -level:v 3.0 -pix_fmt yuv420p -preset veryfast
   -b:v 1500k -maxrate 1500k -bufsize 400k -g "$FPS" -keyint_min "$FPS" -sc_threshold 0
   -bf 0 -refs 1 -an -f h264)
 ff -f lavfi -i "$(vf 720 336 'c9 H.264 720x336 const-size MP4')" "${CS264[@]}" "$OUT/c9.h264"
 python3 media/csmp4.py "$OUT/c9.h264" "$OUT/c9_h264_336_cs.mp4" "$FPS"
-ff -f lavfi -i "$(vf 720 336 'c10 const-size MP4, 10 min moov')" "${CS264[@]}" "$OUT/c10.h264"
-python3 media/csmp4.py "$OUT/c10.h264" "$OUT/c10_h264_336_cs_live.mp4" "$FPS" 600
-rm -f "$OUT"/*.h264
+rm -f "$OUT/c9.h264"
+ff -f lavfi -i "$(vf 720 336 'c11 live H.264, MMI-built stream')" "${CS264[@]}" "$OUT/c11_h264_336.h264"
 
 # what came out
 for f in "$OUT"/*.*; do

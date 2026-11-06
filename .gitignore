@@ -5,3 +5,5 @@ runs/
 
 # unpacked firmware (HN+R_EU_AU_P1001) and the openqnx source leak
 third_party/
+
+__pycache__

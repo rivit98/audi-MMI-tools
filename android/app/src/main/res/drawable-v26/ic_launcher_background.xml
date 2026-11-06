@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon background: navy, the road ahead - redrawn as vector paths from android/icon/ic_launcher.svg (108x108 grid; the path ends cut the play marks out by winding) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108">
+                <item android:offset="0" android:color="#FF16467A" />
+                <item android:offset="1" android:color="#FF081A33" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M40,108 L56,66 L60,66 L84,108 Z"
+        android:fillColor="#FF1E558F"
+        android:fillAlpha="0.55" />
+    <path android:pathData="M57.4,72 L58.6,72 L59.4,80 L56.6,80 Z M56.2,86 L59.8,86 L60.8,98 L55.2,98 Z"
+        android:fillColor="#FFF2F5F9"
+        android:fillAlpha="0.35" />
+</vector>
