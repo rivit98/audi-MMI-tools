@@ -1,11 +1,11 @@
 # Android Auto on the MMI 3G+ (P1001, rev 51)
 
-Written 2026-11-01. Expands option 5 of [phone-mirroring.md](phone-mirroring.md).
+Expands option 5 of [phone-mirroring.md](phone-mirroring.md).
 
 **Evidence labels.** *[repo]* = measured or read on this unit and recorded in
 this repo. *[recalled]* = protocol knowledge from the open-source projects
-listed in section 6, **not checked against their source in this session**.
-*[search]* = read from the repos' GitHub pages on 2026-11-01. *[estimate]* =
+listed in section 6, **not checked against their source**.
+*[search]* = read from the repos' GitHub pages. *[estimate]* =
 guess, no measurement.
 
 ## 1. Verdict
@@ -14,7 +14,8 @@ Feasible in principle. The protocol side is ordinary work. The risk sits in
 two places that the existing `audi_stream_receiver` work cannot answer:
 
 1. **Live H.264 video at 800x480.** The DM642 hardware decoder refuses
-   800-wide input and live containers [repo]. Software decode on the SH4 is
+   800-wide input [repo]; live H.264 at up to 720 wide works only through a
+   CS-MP4 stream ([native-apps.md](native-apps.md) §10). Software decode on the SH4 is
    unmeasured.
 2. **Live PCM audio out.** The only audible path found is file-based [repo].
 
@@ -54,11 +55,11 @@ usable assets are the protocol definitions and C++ reference code.
 
 | Piece | State | Notes |
 |---|---|---|
-| AOA transport | **Done** [repo] | `audi_stream_receiver` works since 21.10. Change the strings and switch to the 2d00/2d01 PIDs. USB speed of the host port not checked. |
+| AOA transport | **Done** [repo] | `audi_stream_receiver` works. Change the strings and switch to the 2d00/2d01 PIDs. USB speed of the host port not checked. |
 | Frame layer, control channel | To build | Plain C. |
 | TLS 1.2 client | To build | **No TLS library on the unit** [repo]. Compile mbedTLS or BearSSL. One handshake per connection. Bulk AES at ~1 MB/s is no problem at 792 MHz [estimate]. |
 | HU certificate + key | Open question | aasdk ships a `cert/` directory [search]. Source and legal status of that material is unclear; see section 7. |
-| Protobuf messages | To build | nanopb (C) generated from the `.proto` files in section 6. Full C++ is possible now (hello8: modern static libstdc++ works [repo]), but boost + protobuf C++ is too heavy. The "GCC 3.3 libstdc++" objection in phone-mirroring.md option 5 is outdated. |
+| Protobuf messages | To build | nanopb (C) generated from the `.proto` files in section 6. Full C++ is possible (hello8: modern static libstdc++ works [repo]), but boost + protobuf C++ is too heavy. The "GCC 3.3 libstdc++" objection in phone-mirroring.md option 5 is outdated. |
 | Input | Partly | The MMI has no touchscreen. Advertise rotary + D-pad. Knob detents and presses are decoded from `/dev/ipc/ch8` [repo]; push directions and other buttons are still open (platform-notes §8). |
 | Sensors | To build | Send fixed values: parked, day mode. |
 | Video | **Blocked / unmeasured** | Section 4.1. |
@@ -67,7 +68,7 @@ usable assets are the protocol definitions and C++ reference code.
 ### 4.1 Video
 
 - **DM642 hardware decoder.** H.264 Baseline 720x480 and 720x336 MP4 files
-  reach the screen via displayable 0x101 + VCAP0 input 1 (21.10). 800-wide,
+  reach the screen via displayable 0x101 + VCAP0 input 1. 800-wide,
   fMP4, H.264-in-PS and growing files fail with iom_errno 0x80002 [repo]. The
   DSP source has a `width < 720` assertion [repo]. AA's smallest advertised
   size is 800x480 [recalled], and the stream cannot be cropped or rescaled
@@ -85,7 +86,7 @@ usable assets are the protocol definitions and C++ reference code.
 ### 4.2 Audio
 
 `mixer:DSPOUT_TDM1_20_SAD` is audible, replaces the radio, mutes BT and
-follows the volume knob (hello5, 21.10 / 30.10) [repo]. It is used through
+follows the volume knob (hello5) [repo]. It is used through
 `testapp-file` with ~350 ms added per queued file [repo]. Nothing found yet
 that takes a live, gapless PCM stream. If none exists, AA runs video-only.
 Mic input (voice assistant) is not investigated; leave the mic service out

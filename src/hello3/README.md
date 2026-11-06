@@ -15,6 +15,21 @@ An FPS counter is drawn top left.
 - **Status:** no longer in the default run. More detail is in
   [docs/gpu-results.md](../../docs/gpu-results.md).
 
+How the GPU makes each scene (GLES 1.0 Common only, power-of-two
+textures, no per-frame upload):
+
+| Scene | How |
+|---|---|
+| 1 `pixels` | a 256×256 noise texture with `GL_NEAREST`, so each texel is one block; a random whole-texel jump of the texture matrix gives a new canvas every 100 ms, blocks shrinking 32 → 4 px |
+| 2 `plasma` | three layers of a 128×128 tileable plasma texture, each scrolled, rotated and scaled by its own texture matrix, alpha- and additively blended |
+| 3 `fill` | N = 1 … 32 full-screen textured, blended layers per frame (no screenshots here, they would skew the timing) |
+
+Reading the fill-rate table (`N layers: frames, ms, fps, Mpixel/s`): fps
+near 60 while N grows means fill rate to spare; fps falling as 1/N means
+fill-bound, and Mpixel/s is the blended fill rate; low fps even at N=1
+means a per-frame cost (`gfx_swap`'s `glFinish` + `eglWaitGL`, or the
+layer manager).
+
 ## On the car
 
 **Works**

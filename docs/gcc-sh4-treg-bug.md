@@ -1,40 +1,38 @@
 # sh4 GCC 12.2 miscompile: `a == 0 && b == 0` loses its second test
 
-Status: **fixed by changing compiler, and confirmed on the car.** The
-`mmi-sdk` image now uses Debian sid's `gcc-16-sh4-linux-gnu`
-(`16.2.0-3cross1`), which compiles every case below correctly at
-`-O1`/`-O2`/`-O3`/`-Os`. The build is back at `-O2`. The GCC 12 root cause
-(which commit fixed it) was never pinned down. The analysis below is kept as
-the record.
+Status: **avoided by changing compiler, confirmed on the car.** Debian
+bookworm's GCC 12.2 drops the second test of a short-circuit `== 0 && == 0`
+at `-O1` and above. Debian sid's `gcc-16-sh4-linux-gnu` (`16.2.0-3cross1`)
+compiles every case below correctly at `-O1`/`-O2`/`-O3`/`-Os`, so the
+`mmi-sdk` image uses it and the build runs at `-O2`. Which GCC commit fixed
+the bug was never pinned down.
 
-Verified with GCC 16.2 (2026-10-10): `sdk/canary.c` keeps both tests;
-`quit_poll` and the inlined `quit_request` in hello2 have all their
-loads/tests; the scan heuristic below flags only literal pools in all six
-apps; dynamic imports match the GCC 12 `-O0` build (minus `memset`/`strlen`/
-`memcmp`, now inlined).
+Checked with GCC 16.2: `sdk/canary.c` keeps both tests; `quit_poll` and the
+inlined `quit_request` in hello2 have all their loads/tests; the scan
+heuristic below flags only literal pools in all six apps; dynamic imports
+match the GCC 12 `-O0` build (minus `memset`/`strlen`/`memcmp`, which GCC 16
+inlines).
 
-Confirmed on the car the same day. `lmprobe` carried an on-car copy of the
-canary, compiled twice (once at the build's flags, once forced to `-O2`).
-Under the old toolchain it reported:
+On the car, a canary compiled twice (once at the build's flags, once forced
+to `-O2`) reported under GCC 12:
 
 ```
 build flags: (0,&0)=22 (0,&1)=0   correct
 forced -O2:  (0,&0)=22 (0,&1)=22  MISCOMPILED
 ```
 
-and under GCC 16 both lines read `correct`. That was the question the on-car
-canary existed to answer, so it has been **removed** (`src/lmprobe/canary.*`
-and `log_canary()` in `src/lmprobe/main.c`).
+and under GCC 16 both lines read `correct`. The on-car canary has been
+removed; the build-time one stays.
 
-**The build-time canary stays.** `sdk/canary.c` plus the `build/.canary` rule
-in the Makefile compile the test case with the apps' real `CFLAGS` and fail
-the build if the second compare is gone. It costs one compile of a six-line
-file, and the SDK image is built `FROM debian:sid-slim`, a rolling target:
-the package pin (`gcc-16-sh4-linux-gnu`) fixes only the major version, so a
-later `make sdk` can pull a different GCC 16.x. Since the original bug was a
-backend bug in `sh_treg_combine` that was never root-caused, there is no
-reason to assume a future 16.x cannot reintroduce it. The canary is what
-turns that into a build failure instead of another week on the car.
+**The build-time canary.** `sdk/canary.c` plus the `build/.canary` rule in
+the Makefile compile the test case with the apps' real `CFLAGS` and fail the
+build if the second compare is gone. It costs one compile of a six-line
+file. The SDK image is built `FROM debian:sid-slim`, a rolling target: the
+package pin (`gcc-16-sh4-linux-gnu`) fixes only the major version, so a
+later `make sdk` can pull a different GCC 16.x. The original bug is a
+backend bug in `sh_treg_combine` that was never root-caused, so a future
+16.x could bring it back. The canary turns that into a build failure
+instead of a miscompiled binary on the car.
 
 ## Summary
 
@@ -77,27 +75,24 @@ g:  tst   r4,r4
 
 Right (`-O0`): two `tst`s and a load through `p`.
 
-So `g(0, &one)` returns 22 instead of 0. `src/lmprobe/canary.c` runs exactly
-this on the car (forced `-O2` vs the build's `-O0`), and `sdk/canary.c` plus
-the `build/.canary` Makefile rule refuse to build if the apps' `CFLAGS`
-produce fewer than two compares.
+So `g(0, &one)` returns 22 instead of 0. `sdk/canary.c` plus the
+`build/.canary` Makefile rule refuse to build if the apps' `CFLAGS` produce
+fewer than two compares.
 
-## How it was found
+## How it shows up
 
-First car run (2026-10-10, `runs/10.10.2026 - first version run/`): hello2–4
-logged `lm_register_displayable(cid=40, …): Invalid argument`. The layer
-manager had in fact accepted every register: the slog shows
-`processPendingShowRequests: showDisplayable(cid=40)` during each app, and the
-next showScreen's `unregister(40)` found the displayable still there. Our
-check was
+The layer manager client checked
 
 ```c
 if (rc == 0 && data[4] == 0)
 	rc = EINVAL;
 ```
 
-and `build/hello2` compiled it as `tst r0,r0; bf ret; bf ret; mov #22,r0`,
-with no load of `data[4]`.
+and GCC 12 at `-O2` compiled it as `tst r0,r0; bf ret; bf ret; mov #22,r0`,
+with no load of `data[4]`. So `lm_register_displayable(cid=40, …)` returned
+`Invalid argument` although the layer manager had accepted the register:
+the slog shows `processPendingShowRequests: showDisplayable(cid=40)`, and the
+next `unregister(40)` finds the displayable still there.
 
 ## Where it is lost (lmgr.c at -O2)
 
@@ -143,45 +138,27 @@ inverted cstore. Then `try_eliminate_cstores` "simplifies"
 `T = (!T == 0)` to `T`, which leaves the stale T of the previous `rc == 0`
 test.
 
-## Analysis to do
+## Open questions
 
-1. **Read the pass.** `gcc/config/sh/sh_treg_combine.cc` at the
-   `releases/gcc-12.2.0` tag (Debian `12.2.0-13` = 12.2.0 + Debian patches).
-   Look at how a trace entry is classified as a cstore / inverted cstore
-   (`is_cmp_eq_zero`, `is_inverted_ccreg`, `find_set_of_reg`,
-   `bb_entry::cstore_type`, `trace_reg_uses`, `try_eliminate_cstores`). Find
-   why a load (`movsi_ie` from memory) gets `cstore_inverted`.
-   - Likely suspect: when tracing the ccreg *before* insn 58 finds no set in
-     the BB ("set of ccreg not found"), the classification falls back to a
-     default that means "inverted".
-2. **Check Debian's patches** for this package
-   (`apt-get source gcc-12-cross-ports` or sources.debian.org) for anything
-   touching `config/sh/`.
-3. **Check newer compilers.** Debian trixie cross-toolchain-ports (GCC 13/14
-   for sh4, if packaged), a crosstool-ng sh4 toolchain, and GCC trunk.
-   Compiler Explorer has no sh4 target as far as I know, so build or install
-   locally. Run `m.c` and `sdk/canary.c` on each.
-4. **Search GCC Bugzilla** (component `target`, keyword `sh_treg_combine`,
-   or `sh` + "cstore") for a known report and a fix commit to backport.
-5. **Reduce further / vary.** Does it need `== 0` on both sides? Try `!= 0`,
-   `== 5`, `||`, a register-held second operand instead of a load (the
-   `quit_poll` case below compares a loaded global too). This shows how
-   wide the pattern is.
-6. **Decide the toolchain.** Options:
-   - stay at `-O0` (current);
-   - a fixed newer GCC;
-   - a locally patched GCC 12;
-   - patch the pass out (there's no option to disable it:
-     `-fdisable-rtl-sh_treg_combine2` is rejected as an unknown pass,
-     because target passes are registered after option processing).
+- **Which GCC change fixed it.** Read `gcc/config/sh/sh_treg_combine.cc` at
+  `releases/gcc-12.2.0` (Debian `12.2.0-13` = 12.2.0 + Debian patches): how a
+  trace entry is classified as a cstore / inverted cstore
+  (`is_cmp_eq_zero`, `is_inverted_ccreg`, `find_set_of_reg`,
+  `bb_entry::cstore_type`, `trace_reg_uses`, `try_eliminate_cstores`), and
+  why a load (`movsi_ie` from memory) gets `cstore_inverted`. Likely
+  suspect: when tracing the ccreg before insn 58 finds no set in the BB
+  ("set of ccreg not found"), the classification falls back to a default
+  that means "inverted". GCC Bugzilla (component `target`,
+  `sh_treg_combine`, or `sh` + "cstore") may have the report.
+- **How wide the pattern is.** Does it need `== 0` on both sides? `!= 0`,
+  `== 5`, `||`, a register-held second operand instead of a load. Variants
+  that also fail on GCC 12 belong in `sdk/canary.c`.
 
-   Whatever is chosen, keep `build/.canary`, and extend `sdk/canary.c` with
-   the variants from step 5 that also fail.
-7. **Cost of `-O0`.** If staying at `-O0` matters for hello3/hello4 (CPU-side
-   work per frame), measure fps at `-O0` vs. a fixed compiler. Most
-   rendering is on the GPU.
+The pass can't be switched off from the command line:
+`-fdisable-rtl-sh_treg_combine2` is rejected as an unknown pass, because
+target passes are registered after option processing.
 
-## Also hit in the first-run binaries (built at -O2)
+## Other code GCC 12 miscompiled (at -O2)
 
 - `lm_register_displayable` in hello2, hello3, hello4 (the visible failure).
 - `quit_poll`: `if (quit_reason == QUIT_NONE && sd != NULL && …)` became a
@@ -191,8 +168,7 @@ test.
   has no compare before its `bf`.
 - Unverified: the duplicate-branch scan below also flagged `key_thread`,
   `signal_thread`, hello4 `main`/`mesh_*`/`p_light` and hello5 `main`. Some
-  may be real, some false positives. hello5's crash wasn't analysed with
-  this in mind.
+  may be real, some false positives.
 
 ### The scan heuristic
 
@@ -220,5 +196,5 @@ Known false positives:
   branch).
 
 A better version would scan the compiler's `.s` output (pools are `.long`
-there), reset at labels, and look at delay slots. With the `-O0` build, every
+there), reset at labels, and look at delay slots. With GCC 16, every
 remaining hit is a literal pool.

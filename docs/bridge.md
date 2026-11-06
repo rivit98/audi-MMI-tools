@@ -1,6 +1,6 @@
 # bridge: a laptop shell on the MMI over USB (parked)
 
-**Status: parked 2026-11-05. Nothing is built.** This doc records the idea,
+**Status: parked. Nothing is built.** This doc records the idea,
 why the obvious version can't work, and which options are left, so the work
 can start from here.
 
@@ -14,7 +14,7 @@ Labels:
 
 ## 1. The idea
 
-Today every change means a trip with the SD card: build, copy to the card,
+Every change means a trip with the SD card: build, copy to the card,
 walk to the car, insert, wait, pull, read the logs. bridge would leave only
 the first trip:
 
@@ -37,8 +37,8 @@ A USB link always has one **host**, which starts every transfer, and one
 | Side | Controller | Can be a USB device? |
 |---|---|---|
 | MMI | EHCI/OHCI host, driven by `io-usb` (docs/usb-stack.md) | no **[confirmed]** |
-| Android phone | dual-role (OTG) | yes. The phone was the device for AOA (`18d1:2d00`, car run 21.10) **[confirmed]** |
-| Laptop (Lenovo `21CFCTO1WW`, AMD Rembrandt) | xHCI host only (USB4 XHCI `1022:161d/161e/161f/15d6/15d7`) | **no**. `/sys/class/udc/` doesn't exist, so Linux sees no device-mode controller **[confirmed 2026-11-05]** |
+| Android phone | dual-role (OTG) | yes. The phone was the device for AOA (`18d1:2d00`) **[confirmed]** |
+| Laptop (Lenovo `21CFCTO1WW`, AMD Rembrandt) | xHCI host only (USB4 XHCI `1022:161d/161e/161f/15d6/15d7`) | **no**. `/sys/class/udc/` doesn't exist, so Linux sees no device-mode controller **[confirmed]** |
 
 So the **A-to-C cable used with the phone** is fine as a cable. With the
 laptop on the C end, though, both sides are hosts waiting for a device, and
@@ -96,8 +96,7 @@ side's bulk OUT endpoint arrives on the other side's bulk IN. **[unverified]**
 laptop ──Wi-Fi / wireless adb──► phone app ──USB, AOA──► bridge on the MMI
 ```
 
-The MMI-to-phone link already works (audi_stream_receiver, car runs
-21.10-05.11). The phone app would relay a byte stream between the AOA link
+The MMI-to-phone link already works (audi_stream_receiver). The phone app would relay a byte stream between the AOA link
 and a TCP socket, and the laptop connects with `adb forward` over wireless
 debugging or straight over Wi-Fi.
 
@@ -127,7 +126,7 @@ These are design notes, not decisions.
 - **One protocol, several transports.** Length-prefixed frames, each with a
   channel id: shell stdin/stdout, exec, file put/get, control. Send the same
   stream over the bridge cable, AOA, or TCP. A TCP transport lets `bridge` be
-  built for Linux and the whole protocol tested on the desk, before any car run.
+  built for Linux and the whole protocol tested on the desk, before it goes to the car.
 - **Shell:** `ksh -i` on a pty (QNX `openpty` / `/dev/ptyp*`, to be checked
   on 6.3.2) so line editing and Ctrl-C work. Fall back to plain pipes if the
   pty route fails.

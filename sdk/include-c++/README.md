@@ -14,13 +14,11 @@ As with any g++, `.c` files are compiled as C++. To mix in C files, put
 `-x c` before **each** one: g++'s driver applies it to the next file only.
 The Makefile's `CXX_APPS` rule does this.
 
-**Status:** builds, and `src/hello8` (18 checks) passes on the build host
-with glibc's libstdc++ (`make test`). On the car (2026-10-25) hello8 did
-not load: a `STB_GNU_UNIQUE` symbol from `libstdc++.a` (see below), fixed
-since. **On 2026-10-30 all 18 checks passed on the car**
-([`src/hello8/README.md`](../../src/hello8/README.md)), and `atomics
-stress` confirmed the gUSA problem described below: gUSA `fetch_add` lost
-9 % of its updates, SH-4A LL/SC none. The SDK builds with LL/SC since. **For app writers:**
+**Status:** `src/hello8` (18 checks) passes on the build host with
+glibc's libstdc++ (`make test`) and **on the car**
+([`src/hello8/README.md`](../../src/hello8/README.md)). Its `atomics
+stress` confirmed the gUSA problem described below: gUSA `fetch_add` loses
+updates, SH-4A LL/SC none, so the SDK builds with LL/SC. **For app writers:**
 [`docs/cpp-apps.md`](../../docs/cpp-apps.md) has the rules.
 
 ## Why not the car's own C++ libraries
@@ -35,7 +33,7 @@ containers, strings, exceptions and threads.
 ## How it fits together
 
 Debian's `libstdc++.a` and its headers are built for **glibc on sh4
-Linux**. Code generation is the same ABI as QNX (see the main README), so
+Linux**. Code generation is the same ABI as QNX (see docs/native-apps.md §3), so
 what is left is where libstdc++ meets the C library.
 
 **Headers.** `$SYSROOT/usr/include-c++` sits around libstdc++'s own
@@ -72,22 +70,20 @@ a symbol, ours wins.
 
 Weak references to the transactional-memory runtime (`_ITM_*`) stay
 unresolved. QNX's loader sets them to 0, and nothing calls them
-(confirmed on the car, 2026-10-25: they were not among the unknown
-symbols).
+(confirmed on the car: they are not among the unknown symbols).
 
 **After the link.** `libstdc++.a` defines some template statics with
 binding `STB_GNU_UNIQUE` (`std::string`'s `_S_empty_rep_storage`, `npos`,
 ...). GNU ld exports such a symbol to `.dynsym` and marks the file OS/ABI
 GNU. QNX 6.3's loader doesn't know the binding and reports the symbol as
-unknown (hello8 on 2026-10-25). `sdk/qnx-elf-fix.py`, run by the wrapper
+unknown and the program doesn't load. `sdk/qnx-elf-fix.py`, run by the wrapper
 after every link, rewrites `UNIQUE` to `GLOBAL` (equivalent in an
 executable) and the OS/ABI back to System V, and fails the build on IFUNC
 symbols or a TLS segment.
 
 ## What works
 
-Everything hello8 checks (`src/hello8/checks.cpp`; all passed on the car,
-2026-10-28):
+Everything hello8 checks (`src/hello8/checks.cpp`; all passed on the car):
 static constructors and destructors, function-local statics, exceptions
 (including across threads, `exception_ptr`, nested), RTTI and `dynamic_cast`,
 aligned `new`, `std::string`/`string_view`, `to_string`/`stoi`/`stod`, all
@@ -97,15 +93,15 @@ containers, `<algorithm>`, `<numeric>`, ranges and views, `span`,
 calendar), `std::thread`, mutexes (plain, recursive, shared, `scoped_lock`),
 `condition_variable`, `call_once`, `<atomic>`, `<charconv>`.
 
-**Mutexes are destroyed (since 2026-11-05).** libstdc++'s default
+**Mutexes are destroyed.** libstdc++'s default
 `std::mutex` is `PTHREAD_MUTEX_INITIALIZER` with a trivial destructor. QNX's
 kernel creates a sync object for a mutex's address at its first lock and
 keeps it until `SyncDestroy`, so a mutex that is never destroyed leaves one
 behind. The next statically initialised mutex at that address (the same
 stack slot, a reused heap block) then fails its first lock with `EINVAL`
 (openqnx `ker/nano_sync.c`, `sync_lookup`), which `std::mutex::lock` throws
-as `std::system_error`. hello9 died of it on 2026-11-05: the second
-`HwStream` in the same stack frame. gthr-posix's own switches turn on the
+as `std::system_error` (seen in hello9: a second `HwStream` in the same
+stack frame). gthr-posix's own switches turn on the
 init/destroy path (one kernel call each way); `cxxrt-std.cpp`
 static-asserts it, hello8's `sync reuse` checks it. `std::mutex` is no
 longer constexpr-constructible, so a namespace-scope mutex is initialised
@@ -135,10 +131,10 @@ storage.
   `-matomic-model=soft-gusa`: short sequences that the *Linux* kernel
   restarts if they are interrupted. QNX's kernel saves and restores the
   registers and doesn't restart them (openqnx
-  `services/system/ker/sh/kernel.s`). In hello8's `atomics stress` on
-  2026-10-30, 4 round-robin threads lost 11.6 M of 129 M gUSA
-  `fetch_add`s, and none with `movli.l`/`movco.l` (QNX's own `atomic_add`
-  uses them too). Since then `shle-nto-gcc` passes `-m4a
+  `services/system/ker/sh/kernel.s`). In hello8's `atomics stress`, 4
+  round-robin threads lost 9–64 % of 129 M gUSA `fetch_add`s, and none
+  with `movli.l`/`movco.l` (QNX's own `atomic_add` uses them too). So
+  `shle-nto-gcc` passes `-m4a
   -matomic-model=hard-llcs -Wa,--isa=sh4a` for everything we compile, the
   headers' inlined `std::atomic` and `shared_ptr` counts included. What
   is precompiled into `libstdc++.a` / `libgcc_eh.a` keeps gUSA: COW

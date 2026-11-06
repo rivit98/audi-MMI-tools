@@ -7,7 +7,7 @@ without the key combination.
 Every claim is labelled:
 
 - **[confirmed]**: read from the P1001 rev 51 binaries (address given) or
-  seen in a car run (run given).
+  seen on the car.
 - **[inferred]**: follows from confirmed facts, not exercised.
 - **[unverified]** / **[unknown]**: an assumption, or not found yet.
 
@@ -53,8 +53,8 @@ binary -m sh4 -EL --adjust-vma=0x8040000` in the `mmi-sdk` image).
 | Action | What happens |
 |---|---|
 | On/off key short or long press, display key | The IOC reports `SYSTEM_STATE_ONOFF_KEY_SP_REQ` / `..._LP_REQ` / `SYSTEM_STATE_DISPLAY_KEY_REQ` (strings at `0x088850b8`–`0x088851e0`) [confirmed]. The HMI goes to its off/standby state: screen dark, audio off. The SH4 keeps running [inferred]. |
-| MENU + knob press + top-right soft key, held | Reboots the unit. It brought the unit back after the GPU freeze of the 2026-10-11 run (gpu-results.md §4.4) [confirmed]. Which side detects it (IOC or HMI) is [unknown]. A short or partial press only does what the single keys do. |
-| Ignition off, car locked | The unit runs on for minutes and then loses power (30.10 run: ch8 byte 15 `02 → 03 → 00`, HMI `OnOff new system state is 5`, unit still running) [confirmed]. |
+| MENU + knob press + top-right soft key, held | Reboots the unit. It brings the unit back after a GPU freeze (gpu-results.md §4.4) [confirmed]. Which side detects it (IOC or HMI) is [unknown]. A short or partial press only does what the single keys do. |
+| Ignition off, car locked | The unit runs on for minutes and then loses power. Seen just before: ch8 byte 15 `02 → 03 → 00` and HMI `OnOff new system state is 5`, with the unit still running [confirmed]. |
 
 The run-on time is set by the timers on the GEM screen `OnOffTimer`
 (`engdefs/OnOffTimer.esd`): OFF 1 / OFF 2 delay (`per 3 0x00140102/3`),

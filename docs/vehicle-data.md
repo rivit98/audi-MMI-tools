@@ -48,8 +48,8 @@ function this document relies on.
   steering angle, gear position, temperatures, brake light, wipers, rain
   sensor, plus the unit's own gyro and accelerometer [confirmed, §3].
   `ndr` decodes them for the navigation.
-- **A shell `cat` of ch5 works.** sysinfo_dump.sh read 1,364 bytes in 3 s
-  on 2026-10-04; they parse with no bytes left over [confirmed, §3.3].
+- **A shell `cat` of ch5 works.** sysinfo_dump.sh read 1,364 bytes in 3 s;
+  they parse with no bytes left over [confirmed, §3.3].
 - **Car functions (BAP: parking aid, climate, door locking, cluster,
   lights) come through MMI3GApplication's MOST layer on ch3/ch4**
   [confirmed, §5]. That path is far harder to use (§6).
@@ -63,7 +63,7 @@ function this document relies on.
 |---|---|---|
 | IOC | Renesas V850, firmware `MuIOC/Main/51/default/V850app.bin` (589,760 B, version 1341, build string `AUDI-3G-9411-C0-Version:-T01`) plus bootloader `V850bolo.bin` | `metainfo2.txt` `[MuIOC\Main\51\default\Application]` [confirmed] |
 | Bus names in the IOC | `Antrieb`, `Komfort`, `Dashboard`, `Infotainment`, `Fahrwerk`, `Extended` | strings in `V850app.bin` [confirmed] |
-| Link | `/usr/bin/dev-ipc -I38 -c10 -A0xB0000 -V10EE -D9411 -vvv`: the FPGA (PCI vendor 0x10EE, device 0x9411), 10 channels | running unit, `processes.txt` (2026-10-04) [confirmed] |
+| Link | `/usr/bin/dev-ipc -I38 -c10 -A0xB0000 -V10EE -D9411 -vvv`: the FPGA (PCI vendor 0x10EE, device 0x9411), 10 channels | running unit, `processes.txt` [confirmed] |
 | Nodes | `/dev/ipc/ch2` … `ch11`, `debug`, `onoff`, `watchdog`; `/dev/ipc/ioc/ch5 → /dev/ipc/ch5` (made by `lnAll -f -Ps`) | `ls` in the sysinfo dump; `etc/mmi3g-srv-starter.cfg` [confirmed] |
 
 MMI3GApplication knows the sleep state of each bus separately
@@ -137,7 +137,7 @@ Handler names, lengths and log tags (`IGyro`, `RizW4`, `RevW4`, `StWhe`,
 `PrVer`) are [confirmed]. Field meanings beyond what the table says are
 not decoded yet.
 
-### 3.3 What our car sent (2026-10-04)
+### 3.3 What our car sent
 
 `tools/ch5dump.py` on `third_party/system-info-dump/var/sysinfo/epoch-20261004_101449/ipc/ch5.bin`:
 
@@ -151,7 +151,7 @@ not decoded yet.
 
 All 1,364 bytes parse [confirmed]. The car was parked, matching the
 stationary counter. That the subtag-1 car sends one wheel counter rather
-than four is [inferred] from the mask. 12 °C fits an October morning,
+than four is [inferred] from the mask. 12 °C fits the weather at capture time,
 so channel 1 is probably the outside temperature [inferred]; 490
 (49.0 °C?) may be a temperature inside the unit [unverified]. Steering
 angle, gear, brake and wiper records did not appear in 3 s with the car
@@ -250,21 +250,15 @@ protocol work and B adds speed, steering and gear.
   MMI3GApplication.
 - Which buses the unit is wired to (§2).
 
-## 8. Next car run
+A shell script on the SD card answers most of these, no app needed:
+`ls -lR /dev/ndr /dev/navi` and `cat` each `debug/name/sensor/*` node once;
+10 s captures of `/dev/ipc/ch5` (as sysinfo_dump.sh does: `cat … &`,
+sleep, kill), one file per state (ignition on, engine running, steering
+lock to lock, in reverse, rolling forwards, wipers on), decoded with
+`python3 -I tools/ch5dump.py <file>`; meanwhile, watch whether the
+navigation's position stays right (route B's risk).
 
-A shell script on the SD card, no app needed:
-
-1. `ls -lR /dev/ndr /dev/navi` and `cat` each `debug/name/sensor/*` node
-   once → answers §7's tree questions.
-2. 10 s captures of `/dev/ipc/ch5` (as sysinfo_dump.sh does: `cat … &`,
-   sleep, kill) in these states, one file each: ignition on, engine running,
-   steering lock to lock, in reverse, rolling forwards, wipers on.
-   `python3 -I tools/ch5dump.py <file>` on the desk, then fill in the
-   §3.2 payload columns.
-3. Note whether the navigation's position stays right during the captures
-   (route B's risk).
-
-## 9. Sources
+## 8. Sources
 
 | What | Where |
 |---|---|

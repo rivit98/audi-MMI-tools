@@ -94,35 +94,12 @@ re-enumerates as `18d1:2d00` / `2d01` with a single bulk IN/OUT interface
 because its `accessory_filter.xml` matches manufacturer `mmi3g` / model
 `audi_stream_receiver`.
 
-**First car run (12.10, Redmi Note 8 Pro in MTP mode, `2717:ff40`, iface
-06/01/01):** `usbd_connect` ok, insertion arrived, `GET_PROTOCOL` answered
-**version 2**, SEND_STRING 0 and 1 went through, then SEND_STRING 2 failed with
-status `0x02000005` = `CMP_ERR | DEV_NOANSWER` (a transaction the phone did
-not answer at all, not a STALL), ~200 ms after the phone appeared. The app
-then logged "not an Android (AOA) device" and never tried again, so START was
-never sent and the phone never switched. Cause of the no-answer unknown; the
-media launcher was probing the same device at the same moment (its 0xEE
-probe resets a device only after a failure that is not a STALL, so it is a
-suspect, not proven). Since then the handshake starts 1 s after insertion,
-and any failure other than a refused `GET_PROTOCOL` is retried up to 5 times.
+### What the media launcher does at insertion
 
-**Second car run (12.10 v2, same phone, same mode):** the 1 s delay and the
-retries did not help. Insertion at 28.0 s. Handshake 1/5 at 29.2 s:
-`GET_PROTOCOL` ok (version 2), then the **very first** `SEND_STRING` (index
-0) got `DEV_NOANSWER` within 2 ms. Retries 2/5 and 3/5 (1 s and 2 s later)
-got `DEV_NOANSWER` on `GET_PROTOCOL` itself, again within 0–2 ms. At 32.8 s
-io-usb reported the device **removed**, and no re-insertion appeared before
-the log ends (the card was pulled). So after the first failure the phone
-answered nothing at all, as if it had left the bus several seconds before
-io-usb noticed. Compared with v1: the failure is not tied to one string
-index (v1 failed on string 2, v2 on string 0) or to time since insertion
-(260 ms in v1, 1.3 s in v2). It always follows a successful `GET_PROTOCOL`
-within 45–210 ms.
-
-**What the media launcher does at insertion (read 19.10, P1001
-`vdev-medialaunch`, Ghidra project `ctf` `/mmi_usb`).** Its insertion
-callback `vml_insertion` (`0x0804e960`) runs when ours does and, for a
-still-image (06/xx) interface such as an Android phone in MTP/PTP mode:
+From P1001 `vdev-medialaunch` (Ghidra project `ctf` `/mmi_usb`). Its
+insertion callback `vml_insertion` (`0x0804e960`) runs when ours does and,
+for a still-image (06/xx) interface such as an Android phone in MTP/PTP
+mode:
 
 1. runs the MTP probe `0x080539c0`: attaches, sends `GET_DESCRIPTOR(string
    0xEE)` on EP0 (send helper `0x080537e0`, `usbd_io` with the default
@@ -137,131 +114,96 @@ still-image (06/xx) interface such as an Android phone in MTP/PTP mode:
    -H poll=1000,hub_detect`, so no `-c`) and then logs `Process bus event -
    Insertion` and starts the MTP driver.
 
-Both 12.10 handshakes ran inside that window (+0.2 s and +1.3 s after
-insertion). The 13.10 slog shows the same window for the run whose log was
-lost: insertion callback 00:05:20, `Process bus event` 00:05:22, no `MTP/PFS
-device detected!` (the probe failed or stalled), removal 00:05:26. A probe
-failure means `usbd_reset_device`. That fits v2's pattern: one answered
-request, then nothing answers, then a late removal. Two EP0 users at once
-on the phone is the likely trigger **[inferred]**. Since 19.10 audi_stream_receiver
-waits **4 s** after insertion before its first AOA request (`HANDSHAKE_FIRST_MS`),
-logs the time since insertion on every handshake, and shows "USB device
+So for ~2 s after insertion the media launcher may be using EP0 on the same
+device, and a failed probe resets it. audi_stream_receiver waits **4 s**
+after insertion before its first AOA request (`HANDSHAKE_FIRST_MS`), logs
+the time since insertion on every handshake, and shows "USB device
 xxxx:xxxx found - handshake in 4 s" on the screen. A reset phone comes back
-as a new insertion and starts over.
+as a new insertion and starts over. Any handshake failure other than a
+refused `GET_PROTOCOL` is retried, up to 5 times.
 
-**19.10 run:** audi_stream_receiver did not run at all. The card's run.sh had `APPS=hello5
-hello6 hello4`, and the run ended inside hello6. So nothing on the MMI
-listened when the phone was plugged in. audi_stream_receiver has to be the last app
-and runs until the card is pulled. Anything before it that freezes the unit
-(hello4's stress scene, hello6's earlier GPU phase) also costs this test.
+### On the car (Redmi Note 8 Pro, MTP mode `2717:ff40`, iface 06/01/01)
 
-**19.10 v2 run (`runs/19.10.2026 - v2 (usb only)/usb_tx_test.prev.log`,
-same phone, same MTP mode, 4 s delay):** insertion at 29.5 s, then:
+**[confirmed]** The full path works: AOA switch, accessory attach, bulk
+link, `HELLO` exchange. A working connection, in order:
 
-| try | after insertion | GET_PROTOCOL (IN) | SEND_STRING 0 (OUT) |
-|---|---|---|---|
-| 1 | 4.1 s | `DEV_NOANSWER` after 0 ms | — |
-| 2 | 5.3 s | `DEV_NOANSWER` after 0 ms | — |
-| 3 | 7.7 s | `DEV_NOANSWER` after 214 ms | — |
-| 4 | 11.0 s | **ok, version 2** | `DEV_NOANSWER` after 2 ms |
-| 5 | 15.2 s | **ok, version 2** | `DEV_NOANSWER` after 0 ms |
+1. `2717:ff40` (MTP) inserted, attach ok.
+2. Handshake 4.1 s after insertion: `GET_PROTOCOL` ok (version 2), strings
+   and `START` ok.
+3. The phone is removed and comes back as **`2717:ff40` again** (not yet
+   accessory). A second handshake, same result, removed again.
+4. **`18d1:2d00` accessory**, EP IN `0x81` / OUT `0x01`, 512 B each.
+5. If the phone app doesn't open the accessory (not open yet, or its "open
+   with" prompt pending **[inferred]**), bulk IN fails `0x02000005`
+   (`CMP_ERR` + `DEV_NOANSWER`) after ~18 s with 0 frames, and the phone
+   drops back to MTP. This shows up as one "USB link interrupted -
+   reconnecting"; audi_stream_receiver reconnects on its own.
+6. Next handshake → accessory → `HELLO` → CONNECTED.
 
-audi_stream_receiver then gave up and showed "accessory handshake failed - replug the
-phone" (photo 11:27). The phone stayed on the bus until the user unplugged
-it at +22.7 s. No reset, no re-insertion. The media launcher logged its
-insertion callback and, 2 s later, `Process bus event - Insertion`, then
-nothing until the removal. A second audi_stream_receiver run in the same boot saw no
-device (the card was pulled at the moment the phone went in again).
+- **The phone takes two `START`s on the first connection.**
+  audi_stream_receiver's "any `2717:ff40` → handshake" loop handles this
+  without a special case.
+- The media launcher sees each insertion and removal and doesn't get in
+  the way. It never logged `MTP/PFS device detected!` for this phone, in
+  any slog we have.
+- **The app must run when the phone is plugged in.** It runs until the card
+  is pulled, so it has to be the last app of a run; an app before it that
+  freezes the unit costs the USB test too.
 
-What this changes:
+**EP0 losing transactions.** In some boots, with the same phone, port and
+binary, control requests failed with status `0x02000005` = `CMP_ERR |
+DEV_NOANSWER` (a transaction the phone did not answer at all, not a
+STALL), and the handshake never completed. In other boots every control
+request was answered. What differs between those boots is not known.
 
-- **The media launcher's window doesn't explain it.** Every request here
-  came after its insertion work had finished (+2 s), and requests still
-  failed for 15 s. The phone was not reset either: it never left the bus.
-- **Failures are spread across request types.** Over the three runs with
-  this phone: GET_PROTOCOL (IN, 2 bytes) 4 ok / 5 failed, SEND_STRING (OUT,
-  7–22 bytes) 2 ok / 4 failed. Almost every failure is an immediate
-  `DEV_NOANSWER`: the controller got no handshake at all, which a device that
-  is merely slow or refusing would not cause (it would NAK, which times out,
-  or STALL).
-- **The stock stack fares no better with this phone.** `MTP/PFS device
-  detected!` (the media launcher's MTP probe succeeding) appears in **no**
-  slog we have. Slogs that cover this phone being plugged in exist from
-  three boots (12.10, 13.10, 19.10).
+- Failures hit both request types: `GET_PROTOCOL` (IN, 2 bytes) 4 ok / 5
+  failed, `SEND_STRING` (OUT, 7–22 bytes) 2 ok / 4 failed. Not tied to
+  one string index or to time since insertion (0.2–15 s).
+- Almost every failure is an immediate `DEV_NOANSWER` (0–2 ms, once
+  214 ms): the controller got no handshake at all, which a device that is
+  merely slow or refusing would not cause (it would NAK, which times out,
+  or STALL). A failing `SEND_STRING` came 45–210 ms after a successful
+  `GET_PROTOCOL`.
+- Once the phone answered nothing after the first failure and io-usb
+  reported it removed ~4 s later; another time it stayed on the bus,
+  never reset, until unplugged.
+- **The media launcher's window doesn't explain it:** requests sent after
+  its insertion work had finished (+2 s) still failed for 15 s. Starting
+  the handshake later (1 s, then 4 s) and retrying it from
+  `GET_PROTOCOL` did not help.
+- io-usb logs nothing about these failures in the slog.
 
-**[inferred]** The link to this phone loses control transactions
-at random. The phone's USB controller (a MediaTek SoC in a MIUI MTP gadget
+**[inferred]** The link to this phone loses control transactions at
+random. The phone's USB controller (a MediaTek SoC in a MIUI MTP gadget
 mode) or the car side (the port, its adapter cable, signal quality at high
-speed) are the suspects, not audi_stream_receiver's request format: the same
-requests succeed in between.
+speed) are the suspects, not audi_stream_receiver's request format: the
+same requests succeed in between.
 
-**21.10 run: the link works end to end** (`runs/21.10.2026 - usb/`, same
-phone and port, audi_stream_receiver alone on the card). From insertion to the first
-text:
+### Open questions (if `DEV_NOANSWER` comes back)
 
-| log time | event |
-|---|---|
-| 83.7 s | `2717:ff40` (MTP) inserted, attach ok |
-| 87.8 s | handshake 1/5, 4.1 s after insertion: `GET_PROTOCOL` ok (v2), strings and `START` ok |
-| 88.1 s | removed; back as **`2717:ff40` again** 1.1 s later (not yet accessory) |
-| 93.4 s | second handshake, same result; removed |
-| 94.7 s | **`18d1:2d00` accessory**, EP IN `0x81` / OUT `0x01`, 512 B each |
-| 113.0 s | bulk IN fails `0x02000005` (`CMP_ERR` + `DEV_NOANSWER`) after 18 s and 0 frames; the phone drops off the bus |
-| 114.0 s | back as `2717:ff40`; handshake → accessory again at 119.7 s |
-| 126.2 s | **`rx HELLO`** from `usb_tx_test-android/1 Xiaomi Redmi Note 8 Pro` → CONNECTED |
-| 151.7 / 157.2 / 163.6 s | `TEXT` seq 1–3 received and shown (`Test`, `Dziala`, `Jaka parowa wariacie`) |
+In order of how cheaply they can be answered:
 
-Every control request answered this time: 3 × `GET_PROTOCOL`, every
-`SEND_STRING` and 3 × `START`, no `DEV_NOANSWER` on EP0 at all. The media
-launcher saw each insertion and removal (slog `usb_slog_1..4.txt`) and
-never got in the way. It again never logged `MTP/PFS device detected!`.
-
-- **The phone takes two `START`s on the first connection.** After the first
-  it re-enumerates as `2717:ff40` again, and only the second makes it come
-  back as `18d1:2d00`. audi_stream_receiver's "any `2717:ff40` → handshake" loop
-  handles this without a special case.
-- **The first accessory session died after 18 s with no data.** The phone app
-  was most likely not open yet, or its "open with" prompt was pending
-  **[inferred]**. Android dropped the accessory and the phone came back in
-  MTP mode. audi_stream_receiver reconnected on its own, and the second session
-  connected 6 s after the endpoints were opened.
-- **What changed since 19.10 v2 is not known.** It was the same phone, port
-  and binary. Whatever made EP0 lose transactions on 12.10–19.10 (phone
-  state, cable seating) was gone in this boot. If `DEV_NOANSWER` comes back,
-  open questions 1–4 below still apply.
-
-Open questions from 19.10 v2 (the link was flaky then), in order of how
-cheaply they can be answered:
-
-0. **Does the MMI's own media menu ever show this phone** (MTP) on this
+1. **Does the MMI's own media menu ever show this phone** (MTP) on this
    port, and does a USB stick work there? If the stock stack can't use the
    phone either, our app is not the problem.
-
-
-1. **Does this phone finish the handshake with a PC?** Run `make aoa-host`
+2. **Does this phone finish the handshake with a PC?** Run `make aoa-host`
    with the phone in the same mode (MTP, `2717:ff40`). If it fails there too,
    it is the phone (MIUI's USB mode handling); try its "charging only" mode
    and `adb logcat | grep -i -e usb -e accessory`. If it passes, it is the
    unit.
-2. **A different phone or cable.** Any second Android phone (AOA is
+3. **A different phone or cable.** Any second Android phone (AOA is
    handled by the kernel's accessory driver, so normally in any USB mode,
    "charging only" included) and, if the car uses an adapter cable, another
    cable.
-3. **What did io-usb and the media launcher do at that moment?**
-   audi_stream_receiver now saves `sloginfo` to `var/usb_slog_<n>.txt` on the first
-   handshake failure and on every removal (up to 6). run.sh cannot do it,
-   because this test ends by pulling the card. On 19.10 v2 io-usb logged
-   nothing about the failures, so the slog can't answer this one.
-4. **Not built yet, worth doing if 0–2 point at the link:** retry each
+4. **Not built, worth doing if 1–3 point at the link:** retry each
    failed control request on its own (3 times, ~50 ms apart) instead of
-   restarting the handshake from GET_PROTOCOL, and before the handshake send
-   ~20 standard `GET_DESCRIPTOR(device)` requests and log how many fail. That
-   gives an error rate to compare between ports, cables and phones.
+   restarting the handshake from `GET_PROTOCOL`, and before the handshake
+   send ~20 standard `GET_DESCRIPTOR(device)` requests and log how many
+   fail. That gives an error rate to compare between ports, cables and
+   phones.
 
-**[confirmed on the car, 21.10]** The full path works end to end: AOA
-switch, accessory attach, bulk link, HELLO exchange, text frames. As
-predicted, the first accessory session dropping shows up as one "USB link
-interrupted - reconnecting". After that the reopen succeeds. When checking
-a real run, confirm the `usbd_connect` return code, which insertion
-instances arrive for `18d1:2d0x` (`ff`/`42` adb instances are skipped), the
-AOA `GET_PROTOCOL` result, and how many reopens happen.
+When checking a log, confirm the `usbd_connect` return code, which
+insertion instances arrive for `18d1:2d0x` (`ff`/`42` adb instances are
+skipped), the AOA `GET_PROTOCOL` result, and how many reopens happen. On a
+handshake failure and on every removal (up to 6) audi_stream_receiver saves
+`sloginfo` to `var/usb_slog_<n>.txt`.

@@ -2,7 +2,7 @@
 
 How to write, build, run and debug your own C and C++ programs on the Audi
 MMI 3G+ head unit: screen, GPU, sound, hardware video, input and USB. It
-collects what the car runs from October to November 2026 confirmed. The
+collects what was confirmed on the car. The
 deep dives are linked from each section.
 
 **Scope.** Everything was measured on one unit: MMI 3G+ 9411, train
@@ -26,8 +26,8 @@ make sd SD_APPS="hello7"          # build + lay out an SD card in build/sd/
 # boot the MMI fully, insert into SD slot 1
 ```
 
-The card runs the apps one after another, with a status screen before and
-after each one. Logs come back in `var/` on the card. If the screen
+The card shows a start screen, then runs the apps one after another, each
+followed by its result screen. Logs come back in `var/` on the card. If the screen
 freezes, reboot the MMI: hold **MENU + rotary knob + top-right soft key**.
 
 ## 2. The platform
@@ -67,11 +67,29 @@ real library loads.
 
 Stubbed today: `libc.so.2`, `libm.so.2`, `libgf.so.1`, `libEGL.so.6`,
 `libGLES_CM.so.6`, `libasound.so.2`, `libusbdi.so.2`. To add one, append it
-to `FWLIBS` in the Makefile and run `make sdk`.
+to `FWLIBS` in the Makefile and run `make sdk`. Two quirks: the device's
+`libc.so.2` exports GCC's SH helpers itself (`__set_fpscr`,
+`__fpscr_values`, `__sdivsi3_i4`), and it exports the linker-reserved
+`_DYNAMIC` and `_GLOBAL_OFFSET_TABLE_`, which `mkstubs.py` leaves out.
+
+The result matches the stock binaries:
+
+| | stock `/bin/cat` | qnx-audi (`qcc`) | ours |
+|---|---|---|---|
+| Type / base | `EXEC` @ `0x08040000` | `EXEC` | `EXEC` @ `0x08040000` |
+| Interpreter | `/usr/lib/ldqnx.so.2` | same | same |
+| Symbol hash | SysV | SysV | SysV |
+| Bind | — | `FLAGS_1 NOW` | `FLAGS_1 NOW` |
+| Data imports | — | `R_SH_COPY` (`errno`, …) | `R_SH_COPY` (`errno`, `_Stdout`, …) |
+| e_flags | `0x8` (sh3e) | — | `sh4a` (the loader only checks `e_machine`) |
+| `PT_GNU_STACK` | no | — | yes (GNU ld always emits it; the loader ignores it) |
 
 Headers with no public source were reconstructed and are locked by
-`_Static_assert`s: `sdk/include/gf/` (QNX GF, from the STABS of a
-6.3.2-built binary; the 6.4 docs are wrong for 6.3.2),
+`_Static_assert`s: `sdk/include/gf/` (QNX GF: signatures from the 6.4.1
+docs, layouts from the STABS in qnx-audi's 6.3.2-built `dbg-shle.elf`,
+`GF_ERR_*` and flag values from its disassembly; the 6.4 docs are wrong
+for 6.3.2: `gf_dev_info_t` has `reserved[6]` instead of vendor/device ids,
+and `vaddr` comes before `paddr`),
 `sdk/include/sys/asoundlib.h` (QSA, from the unit's `libasound`), and
 `sdk/include/sys/usbdi.h` (from the QNX 6.5 header, checked against the
 unit's `libusbdi`).
@@ -206,10 +224,21 @@ planning. A FAIL on the car is then the car, not the code.
   128), `TIMEOUT`, `MISSING`.
 
 Apps get the card path as `argv[1]` and write their own logs there.
+`sd/apps.conf` holds each app's timeout, arguments and title; the start
+and result screens last `PRE_S`/`POST_S` (Makefile). Screen rendering time
+counts towards them, and if pngondemand or showScreen fails, `run.sh`
+sleeps the rest, so timing never changes (errors in `var/run.log` and
+`var/showscreen.log`). When `showScreen -t` ends the HMI comes back, and the
+next app can take the screen at once (confirmed). If neither
+the apps' output nor `var/run.log` appears, `copie_scr.sh` didn't run.
 
-**Crashes.** The unit's "Audi 3G+ dumper" writes `<name>.core*` (gzip) to
-`/HBpersistence/core` (flash) and a `run fault pid … ip 0x…` line plus a
-backtrace to slog. Apps are ET_EXEC and unstripped, so
+**Crashes.** The unit runs the "Audi 3G+ dumper"
+(`dumper -m -w -z 1 -c -d /HBpersistence/core -d /mnt/persistence -f …`).
+It writes `<name>.core*` (gzip, reduced dump for our apps) to
+`/HBpersistence/core` (on flash; falls back to `/mnt/persistence`, then
+`/tmp`) and a `run fault pid … ip 0x…` line plus a backtrace to slog;
+`run.sh` moves our cores to `var/` so they don't fill the flash. Apps are
+ET_EXEC and unstripped, so
 `make addr APP=x ADDR=0x…` resolves an address inside the app directly. An
 address outside `0x0804xxxx` is in a shared library: take `mapaddr` from the
 slog line and disassemble that window of the firmware `.so` as raw binary
@@ -367,7 +396,8 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
 - **Text commands** (`write()` to `/dev/layermanager`):
   `s-shot <display> <file>`, `d-shot <cid> <file>`, `da-shot <cid> <file>`
   (type by extension: png/bmp/jpg/gif). These capture the HMI and CPU-drawn
-  VFBs, **never GL output**.
+  VFBs, **never GL output**. `v-level` / `s-level` also exist; meaning
+  unknown.
 - Pictures: `imgdec.c` (stb_image) decodes JPEG/PNG to ARGB, `img.c`
   (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
   `pngondemand` renders a small text-layout language to PNG
@@ -462,7 +492,7 @@ teardown: source 0, enable 0, update; unregister 41
 `GetVideoInfo`). `testapp-file` always exits 1, buffers its stdout fully
 and ignores SIGTERM. Judge it by its `FINISHED` line.
 
-**Live streaming (works, 04.11).** The container is a
+**Live streaming (works).** The container is a
 constant-sample-size MP4 (CS-MP4, `media/csmp4.py`): `ftyp`, `moov`, then a
 32-bit `mdat`; one constant `stsz` size; every frame padded to one size S
 with a filler NAL; `moov` declaring far more frames than exist. An app's own
@@ -472,8 +502,8 @@ the declared total and reads that block until the frame exists. io-media
 reads it sequentially in 64 KB, ~2.7 frames ahead, waits out pauses of at
 least 5 s, and adds ~0.5 s of steady latency. After a pause the picture
 skips the ~9 frames that were queued, so a live source must keep a steady
-frame rate. A file growing on the card does not work (EIO). Since 04.11
-the whole path is one class, `src/common/hw_stream.h` (Makefile group
+frame rate. A file growing on the card does not work (EIO). The
+whole path is one class, `src/common/hw_stream.h` (Makefile group
 `LIVE`, C++ apps only): push Annex-B frames, it builds the header from the
 SPS/PPS, pads, serves, plays, shows, and fills gaps with skip frames.
 [phone-mirroring.md](phone-mirroring.md) §2, §7.8–7.10,
@@ -566,10 +596,11 @@ after ~18 s. Both are handled by retrying.
 them.
 
 **Screen streaming, measured:** JPEG/PNG pictures, two in flight,
-decoded on the MMI with stb_image. 3 fps average at ~95 ms latency,
-0 bad pictures in 230. JPEG 800×368 decodes in ~61 ms, PNG in ~46 ms.
-The MMI side was ~30 % busy, which puts its ceiling near 10 fps; the phone
-sets the rate. Streaming stops when the phone locks (Android revokes
+decoded on the MMI with stb_image. ~3 fps at 80–160 ms latency, 0 bad
+pictures in 230. JPEG 800×368 decodes in ~61 ms, PNG in ~46 ms.
+About 100 ms of MMI work per picture puts its ceiling near 10 fps; the
+phone sets the rate. **Hardware H.264**: 25 fps, ~0.6 s lag, MMI
+CPU ~24 % ([src/audi_stream_receiver/README.md](../src/audi_stream_receiver/README.md)). Streaming stops when the phone locks (Android revokes
 MediaProjection).
 
 **Desk testing:** `make aoa-host` makes the PC play the MMI's part, so
@@ -631,12 +662,14 @@ phone-app bugs and MMI bugs can be told apart without the car.
 - Keep knob/button input away from the HMI; a key sequence to send an app
   to the background and back.
 - Live PCM audio, rather than files.
-- Live H.264 through io-media (CS-MP4 with a 32-bit `mdat`, then a
-  resource-manager stream); latency floor.
+- Latency floor of live H.264 through io-media (measured: steady ~0.5 s, §10).
 - Confirm ch8 byte 15 as a power-state warning (turn the ignition off
   during `hello7`) and name the remaining button bits.
 - How the HMI shows the rear camera: answered in [rear-camera.md](rear-camera.md). Still open: how an app can tell the camera is active before it touches VP1.
 - Reading CAN data from an app.
+- Layer manager details beyond what qnx-audi used: register flags `2`
+  (bit 0 selects a different displayable class), and what `{cid, 16, 19}`
+  in the show list on exit means.
 - Optional: rebuild `libstdc++.a`/`libgcc_eh.a` with LL/SC so no gUSA is
   left, which lifts the C++ threading rules in §7.
 
@@ -653,8 +686,8 @@ What a native contribution should keep:
   A bare `SCREEN_H` already collided with a constant.
 - **Neutral identities:** run dir `/tmp/mmi_apps`, AOA manufacturer
   `mmi3g`, package ids under `mmi3g.*`.
-- **Label claims** confirmed / inferred / unverified, and say which car
-  run or binary address backs each one. Write results up in `docs/`, so
+- **Label claims** confirmed / inferred / unverified, and say which
+  measurement or binary address backs each one. Write results up in `docs/`, so
   nothing needs re-testing.
 - **Give the screen back.** Every exit path unregisters its displayables
   and restores the HMI's show list, crash or not (displayables outlive the
@@ -685,14 +718,4 @@ Before upstreaming, decide:
 
 ## Further reading
 
-| Doc | For |
-|---|---|
-| [platform-notes.md](platform-notes.md) | every confirmed platform fact, with sources |
-| [gpu-results.md](gpu-results.md) | GL measurements, budgets, the freezes |
-| [cpp-apps.md](cpp-apps.md) | C++ rules in full |
-| [qnx-sh-fpu-div0.md](qnx-sh-fpu-div0.md) | the divide-by-zero trap, decoding FPSCR from a core |
-| [gcc-sh4-treg-bug.md](gcc-sh4-treg-bug.md) | the GCC 12 miscompile and the canary |
-| [usb-stack.md](usb-stack.md) | io-usb/libusbdi behaviour, AOA history |
-| [phone-mirroring.md](phone-mirroring.md) | video decoder, display path, streaming options |
-| [android-auto.md](android-auto.md) | what an Android Auto receiver would need |
-| [../README.md](../README.md) | every app, the test run, the stream receiver |
+The list of apps and of every doc is in the [README](../README.md#docs).

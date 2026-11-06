@@ -2,7 +2,7 @@
 
 **Yes, C++ is safe to use for apps, within the rules below.** GCC 16 with
 C++20 and its standard library runs on the car: all 18 of hello8's checks
-passed on 2026-10-30 (language runtime, exceptions, RTTI, containers,
+pass there (language runtime, exceptions, RTTI, containers,
 algorithms, strings, `<chrono>`, `<random>`, threads, mutexes, condition
 variables, atomics). What doesn't work mostly fails at build time. Two things still
 need care at run time:
@@ -98,8 +98,7 @@ for control flow in a per-frame loop.
 
 ## Threads and atomics
 
-**The SDK builds with SH-4A LL/SC atomics** (since 2026-10-30;
-`sdk/shle-nto-gcc` passes `-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a`).
+**The SDK builds with SH-4A LL/SC atomics** (`sdk/shle-nto-gcc` passes `-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a`).
 `fetch_add` compiles to:
 
 ```
@@ -114,8 +113,7 @@ A context switch can't break it: the interrupt clears the reservation,
 the same way. The ELF header says `sh4a` then, and QNX's loader doesn't
 mind (it checks only `e_machine`).
 
-**GCC's sh4 default, gUSA, is broken on QNX** (that was the SDK's
-default until 2026-10-30):
+**GCC's sh4 default, gUSA, is broken on QNX:**
 
 ```
 mova   1f, r0        ! r0 = end of the sequence
@@ -133,10 +131,10 @@ sequence. QNX's kernel doesn't know the convention (openqnx
 
 - **Lost updates.** A thread switched out between the load and the store
   writes back a stale value when it resumes. That wipes out everything the
-  other threads added in between. On the car (hello8 `atomics stress`,
-  2026-10-30) 4 round-robin threads lost **11.6 M of 129 M** gUSA
-  `fetch_add`s (9 %), and on 2026-11-03 **83.2 M of 129 M** (64 %). The same loop with LL/SC lost **0 of 129 M**, at the
-  same speed. A plain load/store control lost 53 %, so the threads did
+  other threads added in between. On the car (hello8 `atomics stress`)
+  4 round-robin threads lost **9–64 %** of 129 M gUSA `fetch_add`s
+  (11.6 M to 83.2 M). The same loop with LL/SC lost **0 of 129 M**, at
+  the same speed. A plain load/store control lost 53 %, so the threads did
   interleave.
 - **A signal handler kills the process.** To deliver a signal to a
   handler, QNX builds the signal frame below the thread's `r15`. Inside a

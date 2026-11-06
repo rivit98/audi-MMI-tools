@@ -7,7 +7,7 @@ appears on screen.
 - **Run:** `hello <sd_path>`. If the path is missing, it tries the usual SD
   mount points.
 - **Output:** `hello.txt` on the card.
-- **Status:** no longer in the default run.
+- **Status:** not in the default run.
 
 ## On the car
 

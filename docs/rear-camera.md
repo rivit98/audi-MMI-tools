@@ -8,7 +8,7 @@ with what this means for our own apps, which share the same capture unit.
 Every claim is labelled:
 
 - **[confirmed]**: read from the P1001 rev 51 binaries (address given) or
-  seen in a car-run slog (run given).
+  seen in the unit's slog on the car.
 - **[inferred]**: follows from confirmed facts, not exercised.
 - **[unverified]** / **[unknown]**: an assumption, or not found yet.
 
@@ -93,7 +93,7 @@ them by index:
   [confirmed: dev-videoctrl `main` 0x08047060].
 - **The car's camera is NTSC 720×480.** Our camera ECU delivers NTSC. On
   every camera event the ADV7180 reports reg 0x10 = 0x07 (in lock, FSC
-  lock, autodetect result NTSC-M/J) [confirmed: all car-run slogs].
+  lock, autodetect result NTSC-M/J) [confirmed: slog, every camera event].
   Whether the cfg's camera B input is wired on this car is [unknown].
 
 ---
@@ -128,7 +128,7 @@ camera ECU                          MMI3GApplication (3GPLUS → CarParkingSyste
 ```
 
 - **What ends a session.** The camera ECU decides when to drop its request
-  [inferred]. In the car slogs a session lasts 8–90 s, so it covers the
+  [inferred]. On the car a session lasts 8–90 s, so it covers the
   reversing itself plus a follow-up time.
   - The follow-up time can be set over BAP (fct 0x10).
   - A speed limit comes back as status fct 0x13, bit 2 "SpeedToHigh"
@@ -165,11 +165,11 @@ ready. The native `COnOffPresCtrl` / `COnOffFSMHandler` covers that window
     "Waiting for RVC failed!").
   - An `EPHHandover` attribute (NO_REQUEST / ONE_DEVICE / LAST_REQ_RVC /
     LAST_REQ_SIDEVIEW) tells Java what was on screen.
-- **The car-run events were not early RVC.** On 3.11 run1
-  MMI3GApplication started at 00:00:06 and its parking service at 00:00:12.
-  The `'RUN'` line at 00:01:49 is only srv-starter waiting for
-  `/tmp/startLVM`, so the 00:01:33 camera event went through the normal
-  Java path [confirmed: slog].
+- **Camera events seen on the car were not early RVC.** MMI3GApplication
+  starts ~6 s after boot and its parking service ~12 s after. A camera event
+  1:33 after boot went through the normal Java path; the srv-starter
+  `'RUN'` line at 1:49 is only srv-starter waiting for `/tmp/startLVM`
+  [confirmed: slog].
 
 ---
 
@@ -410,16 +410,15 @@ hello9, live streaming) uses input 1. These HMI facts matter
     active-path table.
   - The watchdog is off and nothing re-asserts the path periodically.
   - If its cached path already matches, `setVideoPathInHW` sends nothing.
-- **Seen on the car, 25.10.**
-  1. At 00:06:33 the HMI switched the camera on (VP0 source 1, VP1
-     source 0, enable).
-  2. At 00:06:52 hello6 set VP1 to source 1 (DSP) and enabled it. The HMI
+- **Seen on the car.**
+  1. The HMI switched the camera on (VP0 source 1, VP1 source 0, enable).
+  2. 19 s later hello6 set VP1 to source 1 (DSP) and enabled it. The HMI
      sent nothing, so VCAP 0 was switched from the camera to our clip
      [inferred: slog].
-  3. At 00:07:02 hello6's teardown sent source 0 + ENABLE 0 + UPDATE. Two
-     `vcap disabled` lines follow at that second; the second is probably
-     the HMI's camera stop [inferred]. Whether the driver saw the camera
-     or our clip during those 10 s wasn't noted.
+  3. 10 s later hello6's teardown sent source 0 + ENABLE 0 + UPDATE. Two
+     `vcap disabled` lines follow in the same second; the second is
+     probably the HMI's camera stop [inferred]. Whether the driver saw the
+     camera or our clip during those 10 s wasn't noted.
 - **Our app can hide the camera from the driver.** Any app that sets VP1's
   source or enable while the camera is up does exactly that. The next
   camera session repairs it, because the HMI's stop path clears its cache
@@ -445,11 +444,10 @@ hello9, live streaming) uses input 1. These HMI facts matter
 
 ---
 
-## 10. Evidence from car runs
+## 10. The camera in slog
 
-Every reversing event in the run slogs (12.10, 19.10 v2, 25.10, 28.10, 3.11
-run1/run2) logs the same dev-videoctrl sequence within one second
-[confirmed]:
+Every reversing event seen on the car logs the same dev-videoctrl sequence
+within one second [confirmed]:
 
 ```
 VP0: hue changed to 0              ← standard + source + B/C/S/H, one UPDATE

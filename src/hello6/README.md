@@ -1,15 +1,19 @@
 # hello6
 
-Checks the assumptions behind phone screen mirroring
-([docs/phone-mirroring.md](../../docs/phone-mirroring.md)) in four phases:
+Checks the assumptions behind phone screen mirroring (tests T1–T3 of
+[docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7) in four phases:
 
-- **`s`:** system info
-- **`c`:** CPU benchmarks: memcpy, pixel conversion, LZ4
-- **`v`:** video. Ten test clips are decoded by the unit's DM642 DSP
-  through io-media and shown on a video layer, with capture enabled
-  through `/dev/videoctrl`. The driver turns the knob when the picture is
-  visible.
-- **`g`:** GPU upload and draw benchmarks
+| Phase | What | Output |
+|---|---|---|
+| `s` system info | `pidin`, mounts, `/dev/io-media`, `/dev/snd`, efs tool locations; the unit's `ShowVideoMemory`, `memusage`, `hbhogs` (not `ShowDisplayables`: `ShowDisplayables 0` blanked the screen) | `hello6/sysinfo_before.txt`, `sysinfo_after.txt` |
+| `c` CPU | memcpy, RGB565→BGRA, LZ4 on UI/photo/random 800×480 frames | `RESULT` lines |
+| `g` GPU | CPU stores/memcpy to and from the VFB; `glTexSubImage2D` RGB565/RGBA/BGRA and DXT1 upload MB/s; visible upload+draw fps | `RESULT` lines |
+| `v` video | 10 clips of 22 s (`media/mkclips.sh`) played by the unit's `testapp-file` with `-o mixer:DSPOUT_*` (its default output can't attach), each shown on a video displayable (cid 41) two ways, 7 s each: VCAP 1 (flags `0x201`, VP 2), then VCAP 0 input 1 (`0x101`, VP 1 source 1, the DSP's video port). The driver turns the knob when the picture is visible. Clips 9–10 are written to the card while they play | `hello6/play_<k>.log`, `hogs_<k>.txt`, `RESULT video_<k>` lines |
+
+The unit's tools come from its efs (`/mnt/efs-system/bin`), with this
+firmware's copies on the card as a fallback
+([docs/native-apps.md](../../docs/native-apps.md) §14). The clips:
+`make clips`; the LZ4 test: `make test` (`test_lz4`, against liblz4).
 
 Text screens say what is happening and what to do. A summary screen comes
 at the end.
@@ -19,12 +23,11 @@ at the end.
 - **Output:** `hello6.log` (`RESULT` lines, summary) and `hello6/`
   (sysinfo, per-clip player logs, io-media queries, CPU load, system log).
 
-Since 2026-10-30 the clips are 22 s (were 30 s) and each capture attempt
-7 s (was 10 s). The driver saw the picture and turned the knob 2.4–4 s
-into the attempt every time, and that saves about a minute per run.
+Each capture attempt is 7 s: the driver sees the picture and turns the
+knob 2.4–4 s into the attempt.
 
-**Out of the default run since 2026-11-03, done.** Its ten clips gave
-the same answer four runs in a row (21.10, 25.10, 30.10, 03.11).
+**Not in the default run: done.** Its ten clips give the same answer on
+every run.
 
 **The result: the unit's DM642 DSP decodes video and it reaches the
 screen** on a layer-manager video displayable (flags `0x101`) with
@@ -39,7 +42,8 @@ VCAP 0 switched to input 1 through `/dev/videoctrl`:
   - Growing copies of those.
 
 This is the base of mirroring option 2a, and hello9's c5 control rechecks
-it on every hello9 run.
+it on every hello9 run. c5 plays through hello9's own io-media client, so
+the display path doesn't need `testapp-file`.
 
 **Still open, but not for hello6 to answer** (another run gives the same
 result):
@@ -54,45 +58,28 @@ The streaming tests that came out of hello6 are
 
 ## On the car
 
-**2026-11-03** (all ten clips, both ways, 368 s, after hello5;
-`runs/3.11.2026 - run2/`, phone video for clips 1–3 and most of the rest)
-gave the same result for the fourth time: clips 1, 2, 3, 5 and 6 played
-their 22 s (35 TIME events) and were seen on VCAP 0 input 1, one knob
-turn each. VCAP 1 had none. Clips 4 and 7–10 never started (`testapp-file`
-killed with signal 9 at the end of each attempt). The same day hello9's
-control clip (c5) played through hello9's own io-media client, so the
-display path doesn't need `testapp-file`.
+Per clip (log and phone video):
 
-**2026-10-30** (all ten clips, both ways, 430 s, after hello8 and hello5)
-was the same as 21.10 and 25.10, clip for clip:
-- Clips 1, 2, 3, 5 and 6 played their 30 s (47 TIME events), with one
-  knob turn each on VCAP 0 input 1, 2.4–4.0 s after capture was enabled.
-- VCAP 1 had no knob turns.
-- Clips 4 and 7–10 never started.
+| clip | VCAP 0 input 1 | VCAP 1 |
+|---|---|---|
+| 1 MPEG-2 720×576 | seen, played to the end | black |
+| 2 MPEG-4 640×480 AVI | seen, played to the end | black |
+| 3 H.264 720×480 | seen, played to the end | black |
+| 4 H.264 800×480 | never started | never started |
+| 5 H.264 720×336 | seen, played to the end | black |
+| 6 the same without audio | seen, played to the end | black |
+| 7 fragmented MP4 | never started | never started |
+| 8 H.264 in MPEG-PS | never started | never started |
+| 9, 10 growing copies (written while playing) | never started | never started |
 
-After clip 6 the driver stopped watching, and the car was most likely
-switched off (ch8 power-state sequence, `docs/platform-notes.md` §8). That is the
-"interrupted after the 5th video" (the 5th one seen). The unit kept
-running, and hello6 finished clips 7–10 and its summary on its own.
-Those five fail without a picture anyway, so nothing was lost.
-
-**2026-10-25** (all ten clips, both ways, 428 s) repeated 21.10 exactly,
-on the log and on the phone video:
-
-- **On screen through VCAP 0 input 1:** clips 1 (MPEG-2 720×576), 2
-  (MPEG-4 640×480 AVI), 3 (H.264 720×480), 5 (H.264 720×336) and 6 (the
-  same without audio). Each played its 30 s to the end (47 TIME events),
-  and the driver turned the knob once for each.
-- **VCAP 1 stayed black for all ten** (no knob turn, nothing on the video).
-- **Never started:** clip 4 (H.264 800×480), 7 (fragmented MP4), 8 (H.264
-  in MPEG-PS) and the growing files 9 and 10 (the same containers, written
-  while playing). Each time io-media's `GetTrackInfo` failed with
-  `iom_errno=0x80002`, no TIME event came, and hello6 killed the player
-  after its cap.
-- During clip 2's VCAP 1 attempt the car was put in reverse: the MMI's
-  own rear-view camera took the screen (with its parking overlay) and gave
-  it back afterwards. hello6 didn't notice; nothing else was affected.
-- The car was driven during the test; nothing depended on that.
+- A clip that plays runs its full length (35 TIME events for 22 s), with
+  one knob turn on VCAP 0 input 1.
+- A clip that never starts: io-media's `GetTrackInfo` fails with
+  `iom_errno=0x80002`, no TIME event comes, and hello6 kills
+  `testapp-file` (signal 9) at the end of the attempt.
+- Putting the car in reverse during an attempt: the MMI's own rear-view
+  camera takes the screen (with its parking overlay) and gives it back
+  afterwards. hello6 doesn't notice; nothing else is affected.
 
 **Works**
 - **Video decode and display:** these clips play on screen:

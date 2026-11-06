@@ -5,8 +5,6 @@ The phone's screen on the MMI, over USB. An Android phone app
 or PNG pictures, a few a second, over Android Open Accessory (AOA). This app
 receives them, decodes them on the CPU and shows them full screen.
 
-*Renamed from `usb_tx_test` on 2026-11-03 (phone app: `mmi3g.usbtx` -> Audi streaming, `mmi3g.audistreaming`). Car logs before that date are `usb_tx_test.log` / `usb_tx_perf.csv`.*
-
 ```
 phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen + audi_stream_receiver.log
 ```
@@ -18,14 +16,126 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake or a removal also saves
   the system log to `var/usb_slog_<n>.txt`. The previous run's files are
   kept as `audi_stream_receiver.prev.log` and `var/usb_slog_prev_<n>.txt`.
-- **Build:** `make` (MMI side), `make apk` (phone app), `make test` and
-  `make apk-test` (protocol, pictures, JPEG/PNG, downscale), `make aoa-host` (desk test:
-  the PC plays the MMI).
+- **Build:**
 
-How the USB side works, what the unit's USB stack does and the full
-protocol are in the main [README](../../README.md#audi_stream_receiver-make-sd-sd_appsaudi_stream_receiver)
-and [docs/usb-stack.md](../../docs/usb-stack.md). The frames are in
-`proto.h` (= `android/.../Proto.kt`).
+  ```sh
+  make sd SD_APPS=audi_stream_receiver   # MMI side only (the default run has it last)
+  make test                 # C unit tests: protocol, pictures, JPEG/PNG, UTF-8, wrap, drawing
+  make apk                  # android/out/audi_streaming.apk (= make -C android)
+  make apk-test             # Kotlin unit tests
+  make apk-install          # adb install -r, adb runs in the container
+  make aoa-host             # desk test: the PC plays the MMI; the newest picture lands in
+                            # build/aoa-host/latest.jpg, an H.264 stream in stream.h264
+  ```
+
+  The phone app builds in its own image (`mmi-android`), the desk test in
+  `mmi-aoa-host`. For `apk-install` and `aoa-host`, stop a host adb server
+  first (`adb kill-server`): only one program can own the phone's USB
+  interface. The APK is signed with a fixed key in `android/keystore/`, so
+  reinstalls keep working after `make clean`.
+
+What the unit's USB stack does, and what that forces on a client:
+[docs/usb-stack.md](../../docs/usb-stack.md).
+
+## How it works
+
+**USB.** `audi_stream_receiver` connects to io-usb (`-lusbdi`) with a
+wildcard filter and does the
+[Android Open Accessory](https://source.android.com/docs/core/interaction/accessories/aoa)
+handshake with any new device (vendor requests 51/52/53). An Android phone
+re-enumerates as `18d1:2d00`/`2d01` with a bulk IN/OUT interface (`ff/ff`),
+no root or USB debugging needed. Android starts the phone app because its
+`accessory_filter.xml` matches manufacturer `mmi3g` / model
+`audi_stream_receiver`.
+
+**Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
+`type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say who
+is at each end. The MMI sends `VIDEO_CAPS` with them: a landscape box
+(800×480, the whole screen), a portrait box (400×480, the left half),
+512 KB max per picture, and the formats it takes (bit 0 JPEG, bit 1 PNG,
+bit 2 H.264). A phone streams only to an MMI that sent it. A picture is
+`VIDEO_START` (id, w, h, format, size, the phone's downscale + encode ms)
+plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACK` (id,
+shown/bad/dropped, decode ms). `VIDEO_STOP` (or the link going down) brings
+back the status screen. `VIDEO_DETAILS` (`show u8`) switches the status bar
+over a landscape picture; the phone sends it on every connection, and the
+MMI starts with it off. `0x02`/`0x03` are retired (below).
+
+**Pictures, phone side** (`CaptureService`, a MediaProjection foreground
+service). The phone mirrors its screen into a virtual display at **k
+times** the picture that fits the box (`VideoFit.factor`: the largest
+k ≤ 4 that fits the screen; a 1080×2340 phone captures 1600×736 for
+800×368, 880×1920 for 220×480), resized when the phone turns. When fewer
+than two pictures are in flight and 1/*Max fps* (slider 1–15, default 5)
+has passed, it takes the newest image, averages each k×k block into one
+pixel (`Downscale.box`), compresses it as *Format* says (JPEG q90, or PNG;
+a PNG over 512 KB goes as JPEG) and sends it. A static screen sends
+nothing; after a replug the new link gets the last picture again. The k×
+capture is there because Android's own one-step bilinear scale skips most
+of a thin text stroke past 2:1 (blurred text, see [Results](#results-on-the-car)).
+The activity is not recreated when the phone turns (`configChanges` in the
+manifest), and it only ever clears the link it set itself: when it was
+recreated, the old activity's late `onClosed` cleared the new shared link,
+and the capture service waited for an MMI that was connected all along.
+
+**Pictures, MMI side.** It reassembles the picture (`vasm.c`), decodes it
+on the main thread (`video.c`, stb_image), draws it and acks it. A picture
+stays in flight until its ack (or 3 s). With two in flight the next
+picture is already waiting when the current one is shown; only the newest
+waiting one is kept, so a slow MMI lowers the rate instead of queueing.
+The picture keeps the phone's shape, never rotated or stretched:
+
+- **Landscape** (w ≥ h): centred on the whole screen (800×368 for a 19.5:9
+  phone). *Details on the MMI* draws a 28 px status bar over the top
+  (state, fps, decode and copy times).
+- **Portrait**: full height on the left (220×480), the status panel in the
+  remaining ~580 px.
+
+CPU writes into the VFB run at ~9 MB/s, so a full copy costs ~160 ms. So
+`screen.c` keeps a RAM copy of each VFB surface and writes only the
+changed stretch of each row (`copy=changed`, the default; a full copy
+every 30 s and for a new surface). `audi_stream_receiver <sd> copy=full`
+(arguments in `sd/apps.conf`) brings back the full copy, to compare.
+
+**Robustness.** io-usb callbacks only queue events; a manager thread does
+the work. Unplugging, a transfer error, or a device that isn't Android
+(USB stick, iPod) never ends the app: it goes back to *Waiting for phone*.
+A link that breaks while the phone stays plugged in is reopened on the
+same device, up to 5 tries. `usbd_connect` is retried every 2 s if io-usb
+isn't there. It stops only on SD removal or SIGTERM/INT/HUP (no
+watchdog), then gives the screen back.
+
+## Logs: perf and CPU
+
+Every log line is fsynced to the card, so the threads that move pictures
+only put records into a RAM ring (`perf.c`), and a low-priority thread
+writes:
+
+- `perf: window` every 10 s of streaming and `perf: stream` when it stops:
+  pictures shown, fps, dropped, bad; avg/max ms of `rx` (USB), `wait`,
+  `decode`, `render`, `copy` (into the VFB), `flip` and `latency`
+  (`VIDEO_START` in to on screen); per format the count, KB, MMI decode
+  and phone time; VFB KB per picture, main loop busy %, process CPU %.
+- `audi_stream_perf.csv`, one line per picture with the same fields in µs
+  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,fmt,phone_ms`),
+  128 lines per fsync.
+
+The first three pictures of a stream are also logged one by one. With a
+1 ms clock tick (`perf: clock resolution`), single µs values are good to
+±1 ms; averages are fine.
+
+`src/common/cpumon.c` (always on) reads once a second the app's own CPU
+time, each thread's, and the kernel idle thread's (procnto pid 1), and
+every 10 s logs
+
+```
+cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usbd 6%, usb 2%, perf 1%
+```
+
+`others` is the rest of the unit (navigation, media, HMI). `usbd` is
+io-usb's callbacks (USB receive), `usb` the manager thread; threads under
+0.5 % are left out. A window with own load ≥ 50 % ends in ` - HIGH`. The
+screen footer shows the last second.
 
 ## Using it
 
@@ -39,13 +149,12 @@ and [docs/usb-stack.md](../../docs/usb-stack.md). The frames are in
    portrait on the left half with the status panel beside it. The
    phone's *Details on the MMI* switch adds a slim status bar over a
    landscape picture. *Format* on the phone picks JPEG (fast) or PNG
-   (sharp text, bigger). (A third, *PNG when still*, was dropped on
-   2026-11-04.)
+   (sharp text, bigger).
 4. Use the phone as usual. Back, Home, other apps, turning the phone,
    unplugging and replugging all keep the stream going. Stop it in the
    app or from its notification. Pull the SD card to end the MMI side.
 
-## Hardware H.264 (built 2026-11-04, not yet run on the car)
+## Hardware H.264
 
 Besides JPEG / PNG pictures decoded on the CPU, the app takes an **H.264
 stream** and has the unit's DM642 decode it: no CPU decoding, 25 fps,
@@ -91,7 +200,11 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   {40, 16, 19}; whether that covers the camera's (0x11) is a question for
   every app, not only this one.
 - **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
-  MediaCodec, Baseline 3.0, 2.5 Mbit/s CBR, an IDR only at the start and
+  MediaCodec, Baseline 3.0, CBR at the *H.264 rate* drop-down (2.5, 4
+  (default), 6 or 8 Mbit/s). With *Sharp H.264* (default on) the screen
+  is captured at k× and box-filtered k:1 on the GPU into the encoder
+  (`GlScaler.kt`), as the pictures are; off = the direct capture path,
+  which blurs text (docs/phone-mirroring.md §7.13). An IDR only at the start and
   when the MMI asks (`I_FRAME_INTERVAL` 10 s); frames are never dropped
   on their own (the ones after would be garbage): a frame bigger than the
   config's `frame_bytes` (64 KB at first) raises it (a new config, the MMI
@@ -111,114 +224,63 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 - **Log:** `h264:` lines: the config, the stream's start and end with its
   totals, refused frames (the first 5), and every 10 s frames in, skips,
   io-media's reads and the lag.
-- **Tested so far:** on the build host (`make test`: header, padding,
-  push / fill / read, skips decoded by ffmpeg; `make apk-test`: the
-  phone's protocol and H.264 helpers), and the same MMI code with a clip
-  instead of the phone in hello9 (`src/hello9/README.md`). The C++ code
-  makes this a C++ app since 04.11 (`docs/cpp-apps.md`); its `.c` files
-  are still C, and JPEG / PNG streaming works as before (confirmed by the
-  user).
+- **Tests:** on the build host, `make test` (header, padding, push / fill
+  / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
+  protocol and H.264 helpers); the same MMI code with a clip instead of
+  the phone runs in hello9 (`src/hello9/README.md`). `hwvideo.cpp` makes
+  this a C++ app (`docs/cpp-apps.md`); its `.c` files are still C.
 
-## Text messages: dropped (2026-10-25)
+## Retired frame types: `0x02`, `0x03`
 
-Until 2026-10-25 the phone app could also send **typed text**. Each line
-went as a `TEXT` frame (`seq u16` + UTF-8), the MMI showed it in a list
-(and as a caption over a landscape picture for 15 s) and answered `ACK`,
-and the phone ticked it off. It was the first thing that worked over the
-link (2026-10-21) and proved the USB path end to end.
+The phone app could once send typed text: `TEXT` (`0x02`, `seq u16` +
+UTF-8), answered by `ACK` (`0x03`). It was removed on both sides
+(`Proto.kt`, `proto.h`, `tools/aoa_host.py`, the MMI's message list):
+the link is for the phone's screen. The numbers are **retired, not
+free**: an old phone app that still sends `TEXT` gets `rx unknown frame
+type 0x02` in the log and nothing else. Don't reuse them.
 
-It was removed because it won't be needed: what the link is for is the
-phone's screen. Removed on both sides: the phone's text field, Send
-button and sent list; `TEXT`/`ACK` in `Proto.kt`, `proto.h` and
-`tools/aoa_host.py`; the MMI's message list and caption (`model.c`,
-`ui.c`). The MMI's screen without a picture now says what to do next
-instead.
+## Results on the car
 
-Frame types `0x02` (`TEXT`) and `0x03` (`ACK`) are **retired, not free**:
-an old phone app that still sends `TEXT` gets `rx unknown frame type 0x02`
-in the log and nothing else. Don't reuse the numbers.
+Phone: Redmi Note 8 Pro.
 
-## On the car
+**USB / AOA.** The path works end to end: AOA switch (`GET_PROTOCOL`
+version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
+`0x01`, `HELLO` / `HELLO_REPLY`.
 
-**2026-10-21:** the USB path works end to end. A Redmi Note 8 Pro in MTP
-mode was switched into accessory mode, said `HELLO`, and three texts were
-received and shown. On the first connection the phone needs two AOA
-`START`s before it comes back as an accessory. An accessory session that
-nobody opens on the phone drops after ~18 s, and the app reconnects by
-itself. The 12.10–19.10 runs failed on `DEV_NOANSWER` for EP0 requests with
-the same phone (docs/usb-stack.md).
+- On the first connection the phone needs two AOA `START`s before it
+  comes back as an accessory.
+- An accessory session that nobody opens on the phone drops after ~18 s;
+  the app reconnects by itself.
+- In some boots EP0 requests to the same phone failed with
+  `DEV_NOANSWER` (docs/usb-stack.md).
 
-**2026-10-25:** first run with screen streaming. **No picture reached the
-MMI.**
+**JPEG / PNG pictures.** Work, turning the phone included (landscape
+800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped;
+*Details* on/off works.
 
-- The USB side was fine again: AOA handshake on the 2nd insertion
-  (`GET_PROTOCOL` version 2, `START`), accessory `18d1:2d00` with endpoints
-  IN `0x81` / OUT `0x01`, `HELLO` and `HELLO_REPLY`. One `TEXT` ("E")
-  arrived and was shown.
-- The phone showed *Stop stream* (capture running), but its status said
-  *Video: waiting for the MMI; sent 0*, while its header said *Connected
-  to MMI*. The MMI never got a `VIDEO_START`.
-- The MMI log has a new `HELLO` from the phone at +25 s, +56 s and +68 s
-  with no USB removal in between, each soon after the phone was turned or
-  the screen-capture prompt was answered (phone video).
-- **Cause:** turning the phone recreated the app's activity. The old
-  activity closed its link and the new one opened another (the new
-  `HELLO`s). The old activity's `onClosed` callback arrived after that
-  and cleared the shared `Streaming.link`, so the capture service waited
-  for an MMI that was connected all along.
-- **Fixed** (not yet run on the car): the activity is no longer recreated
-  on rotation (`configChanges` in the manifest); `onClosed` from an old
-  link is ignored; the activity only ever clears the link it set itself.
+| | full VFB copy | changed-span copy (`copy=changed`) |
+|---|---|---|
+| copy into the VFB | ~160 ms (1.5 MB) | 18–19 ms (~30 KB) |
+| present (render + copy + flip) | ~200 ms whatever the size | render 23 + copy 18–19 + flip 3 ms |
+| rate | ~2 fps | 2–4 fps per 10 s window (avg ~3), set by the phone |
 
-**2026-10-28:** streaming works, turning the phone included. 79
-pictures shown, 0 bad, 0 dropped. Landscape 800×368 changed to portrait
-220×480 mid-stream with no errors, at a steady 1.9–2.0 fps (the phone's
-fixed 500 ms tick then). Per picture: decode 55–65 ms (landscape) / 22 ms
-(portrait), present ~200 ms whatever the size. The full-screen VFB copy
-(~160 ms) is most of that. While streaming, the unit's CPU (slog) went
-from ~25 % to 40–60 %.
+- Decode: landscape 800×368 JPEG 55–65 ms, PNG ~46 ms; portrait 220×480
+  JPEG ~22 ms. A landscape picture costs the MMI ~100 ms in total, so it
+  could do ~10 fps; the phone (*Max fps*, a static screen, its capture and
+  compress) sets the rate. Gaps between pictures 92–668 ms.
+- Latency (`VIDEO_START` in to on screen): 80–160 ms average, max 285 ms.
+- Main loop 18–56 % busy, process CPU ~27 %. The unit's CPU goes from
+  ~25 % to 40–60 % while streaming.
+- **Blurred text, cause:** the MMI copies the picture 1:1 (ARGB, no
+  scaling), so blur comes from the phone. Capturing at the picture's own
+  size makes Android scale the 2340×1080 screen down 2.9:1 (landscape) /
+  4.9:1 (portrait) in one bilinear step, which skips most of a thin
+  stroke's pixels; JPEG q60 added ringing. Hence the k× capture + k×k box
+  average and JPEG q90.
+- The stream stops when the phone locks: Android revokes the screen
+  capture and the phone sends `VIDEO_STOP`.
 
-Changed after it (not yet run on the car): landscape on the whole screen
-with *Details on the MMI* (`VIDEO_DETAILS`); *Max fps* slider (default 5)
-instead of the 500 ms tick; two pictures in flight; the main loop waits
-on a condition variable instead of sleeping 10/50 ms; changed-span VFB
-copy (`copy=changed`); perf records (`perf: window` / `perf: stream`
-lines, `audi_stream_perf.csv`).
-
-**2026-10-30:** all of the 28.10 changes work. 166 pictures in 54 s,
-0 bad, 0 dropped; portrait 220×480, then landscape 800×368; *Details*
-on/off worked. Avg 3.0 fps (2.8–3.5 per 10 s window), latency 95 ms
-(max 285). Per landscape picture: decode 56 ms, render 23, copy 18–19
-(changed spans, ~30 KB instead of 1.5 MB), flip 3: ~100 ms, so the MMI
-could do ~10 fps. Main loop busy ~30 %, process CPU 27 % (40–60 % unit
-CPU on 28.10). The gaps between pictures were 92–668 ms, so the phone
-(the fps slider, a screen that didn't change, or the phone's capture
-and compress) set the rate. The end was a clean `VIDEO_STOP`, then the
-unplug.
-
-**The text was blurred.** The MMI copies the picture 1:1 (ARGB, no
-scaling), so it came blurred from the phone: the capture had the
-picture's own size, and Android's mirroring scaled the 2340×1080 screen
-down 2.9:1 (landscape) / 4.9:1 (portrait) in one bilinear step, which
-skips most of a thin stroke's pixels. JPEG q60 added ringing. Changed
-after it (not yet run on the car):
-
-- the capture runs at k× the picture (2× landscape, 4× portrait on this
-  phone) and the phone averages each k×k block (`Downscale.kt`); JPEG
-  q90;
-- PNG (`PROTO_FMT_PNG` 2): the MMI decodes it (`imgdec.c`, stb_image) and
-  says so in `VIDEO_CAPS`; the phone's *Format* drop-down picks JPEG
-  or PNG (a "PNG when still" choice existed until 2026-11-04);
-- `VIDEO_START` carries the phone's downscale + encode time; `perf:`
-  lines split size / decode / phone time by format, the CSV has `fmt`
-  and `phone_ms` columns.
-
-**Next run:** landscape, a screen with small text (settings, a chat, a
-web page). Each *Format* for ~30 s: hold still for a while, then scroll.
-Compare text sharpness (photo of the MMI screen) and per format, from
-the `perf:` lines: KB, MMI `decode` and `phone` time, and fps. And the
-first `cpu:` lines: own load idle, then while streaming each format
-(`main` = decode + draw, `usbd` = USB receive), and whether `unit` gets
-near 100 %. PNG costs
-maybe 2–10× the bytes and slower encodes on the phone, and its decode on
-the SH4 has never been measured.
+**H.264.** Plays on the MMI: 720×432 Baseline, lag 600–650 ms steady, MMI
+CPU ~24 % (receiver 4 %, against ~45 % for JPEG). With the direct capture
+path the picture is blurry. *Sharp H.264* and the *H.264 rate* drop-down
+are built, not yet confirmed on the car (docs/phone-mirroring.md §7.13).

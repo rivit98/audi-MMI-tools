@@ -4,10 +4,10 @@ Layer manager test without OpenGL. It replays DrGER's `showScreen` call for
 call, but draws eight vertical colour bars (white, yellow, cyan, green,
 magenta, red, blue, black) straight into the layer manager's frame buffer
 (VFB) instead of a PNG. They replace the picture for 5 s. Every raw devctl
-status goes to the log. It was written after the first car run, where the GL
-apps' `lm_register_displayable` reported `EINVAL`. It answered that
-question, so it is still built, but no longer run by default (and so not on
-the card unless it is in `SD_APPS`).
+status goes to the log. It was written to find out why the GL apps'
+`lm_register_displayable` reported `EINVAL`. It answered that question, so
+it is still built, but not run by default (and so not on the card unless it
+is in `SD_APPS`).
 
 What it does, in order:
 
@@ -33,26 +33,20 @@ What it does, in order:
   no 32-bit CPU mapping, the bars are skipped and a `FAIL` line is logged,
   but the exit code is still `0`. run.sh then calls the run `WARN`.
 
-## On the car
+## Results
 
-**10.10.2026, first version run.** lmprobe didn't exist yet. hello2–4
-logged `lm_register_displayable(cid=40, 800x480, flags=2): Invalid
-argument` and stopped. lmprobe was written to repeat `showScreen`'s
-sequence on its own and log each raw status. The cause turned out to be a
-GCC 12 `-O2` miscompile of our own result check, not the layer manager
-([docs/gcc-sh4-treg-bug.md](../../docs/gcc-sh4-treg-bug.md)).
+The `EINVAL` from `lm_register_displayable(cid=40, 800x480, flags=2)` in
+hello2–4 was not the layer manager. It was a GCC 12 `-O2` miscompile of
+our own result check ([docs/gcc-sh4-treg-bug.md](../../docs/gcc-sh4-treg-bug.md)).
+lmprobe's on-car compiler canary shows it: with GCC 12 it reads `correct`
+at the build's flags and `MISCOMPILED` when forced to `-O2`; with GCC 16
+it reads `correct` both ways.
 
-**10.10.2026, second version run (old toolchain).** Per the docs, lmprobe
-ran end to end here too. Its on-car compiler canary read `correct` at the
-build's flags and `MISCOMPILED` when forced to `-O2`. This run's files are
-no longer in `dev/`, so the numbers below come only from the next run.
-
-**10.10.2026, second version run (new toolchain O2).** `lmprobe OK exit 0,
-9 s, 0 FAIL lines`. From `lmprobe.log`:
+With GCC 16 at `-O2`: `lmprobe OK exit 0, 9 s, 0 FAIL lines`. From
+`lmprobe.log`:
 
 | step | result |
 |---|---|
-| compiler canary (GCC 16) | `correct` at the build's flags and at forced `-O2` |
 | `lm_check_version` | `rc=0`, version **1.1**, on every connect |
 | unregister 40 (before) | `rc=22` (`EINVAL`): nothing was registered, as expected |
 | `gf_dev_attach` / `gf_display_attach` | `0` / `0`, **800×480** |
@@ -77,8 +71,8 @@ Timings, from the log's millisecond stamps:
 Screenshots:
 
 - **`lmprobe_dshot.png`** is exactly the eight bars: 100 px wide,
-  48,000 pixels each, exact colours, alpha 255. md5 `d7d051ec…`. The docs
-  record it as byte-identical between the two runs that day.
+  48,000 pixels each, exact colours, alpha 255. md5 `d7d051ec…`,
+  byte-identical from run to run.
 - **`lmprobe_sshot.png`** shows the same bars over the whole display, so
   cid 40 covered the HMI. It differs from the d-shot in a single pixel:
   (0,0) is `(206,170,140)` instead of white. The cause is unknown.

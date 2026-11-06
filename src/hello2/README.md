@@ -12,6 +12,20 @@ whole display) and hands the screen back.
 - **Status:** no longer in the default run. More detail is in
   [docs/gpu-results.md](../../docs/gpu-results.md).
 
+What each file proves:
+
+| File | Proves |
+|---|---|
+| `hello2.log` | every bring-up step with its result (a failure ends with `FAIL <call>: <error>`), the diagnostics below, fps per second |
+| `hello2_glread.bmp` | `glReadPixels` at t=5 s: GL rendered |
+| `hello2_dshot.png` | layer manager snapshot of displayable 40: rendering reached the VFB |
+| `hello2_sshot.png` | snapshot of the whole display: our layer is what is visible |
+
+The diagnostics: layer manager version; gf device, display mode, refresh,
+layer count, every pixel format of the top layer, VFB surface info; EGL
+version, vendor, client APIs, extensions and every config; GL vendor,
+renderer, version, extensions, limits and RGBA/depth/stencil bits.
+
 ## On the car
 
 **Works**

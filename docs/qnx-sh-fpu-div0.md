@@ -1,6 +1,6 @@
 # QNX/SH: a divide by zero is fatal, by design
 
-Status: **understood, worked around where it bit us.** Not a bug in our code
+Status: **understood; worked around in the GL fog path.** Not a bug in our code
 or in the compiler — it is how QNX runs the SH4 FPU. Anything we build for
 this unit has to assume a float divide by zero kills the process.
 
@@ -55,11 +55,11 @@ The Audi dumper's slog line gives the faulting address, and the core file's
 divide-by-zero **raised** — `PR` clear because GCC had switched to single
 precision for the surrounding float code.
 
-## The case that bit us: hello4's fog probe
+## Example: linear fog in libGLES_CM
 
-`hello4` died with `SIGFPE code=3 fltno=9 ip=78232656 mapaddr=00032656` at
-the start of probe `fog`, identically under GCC 12 and GCC 16, so it was
-never a compiler problem. `mapaddr` is the offset inside the mapped library,
+`hello4`'s probe `fog` dies with `SIGFPE code=3 fltno=9 ip=78232656
+mapaddr=00032656` without the fix below, the same under GCC 12 and GCC 16, so
+it is not a compiler problem. `mapaddr` is the offset inside the mapped library,
 and `libGLES_CM.so.6`'s text segment starts at vaddr 0, so offset `0x32656`
 disassembles directly:
 
@@ -83,7 +83,7 @@ that:
 
 1. Setting `GL_FOG_MODE` to `GL_LINEAR` first, while the context's fog START
    and END are both still `0.0` (the driver's initial state — the GL spec
-   says they should be `0.0`/`1.0`). This is what actually crashed.
+   says they should be `0.0`/`1.0`). This is the case hello4's probe hits.
 2. Writing a new range one call at a time, where the new START equals the old
    END. `hello4`'s probe steps through `{1,3}`, `{3,7}`, `{6,9}`, so
    `glFogf(GL_FOG_START, 3)` with END still `3` would have crashed too — a
