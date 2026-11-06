@@ -15,3 +15,5 @@ appears on screen.
 - It writes to the SD card: `hello.txt` came back with "hello world" in it.
 - The unit reports `QNX localhost 6.3.2 2009/10/30-15:33:18EDT HB_SH7785
   shle`.
+
+![hello1.png](./hello1.png)

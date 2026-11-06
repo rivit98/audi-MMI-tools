@@ -46,3 +46,5 @@ renderer, version, extensions, limits and RGBA/depth/stencil bits.
   - the display snapshot (`hello2_sshot.png`) shows the navigation map,
     not hello2's picture
 - **User clip planes:** the driver offers none (`clip planes 0`).
+
+![hello2](./hello2.mp4)
