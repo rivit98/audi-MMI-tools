@@ -10,8 +10,10 @@
 
 extern "C" {
 #include "log.h"
-#include "proto.h"
 }
+
+#include "aoa.h"
+#include "proto.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -21,9 +23,10 @@ extern "C" {
 #include <memory>
 #include <mutex>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <vector>
 
-#include <pthread.h>
 #include <unistd.h>
 
 namespace {
@@ -52,11 +55,10 @@ bool restart_pending = false;           // stream full: same config again
 std::deque<uint8_t> statuses;
 unsigned last_sync_ms = 0;
 uint32_t refused_total = 0, refused_logged = 0;
-void (*notify)(void) = nullptr;
 
-std::atomic<bool> active{false};
+std::atomic<bool> is_active{false};
 std::atomic<bool> quit{false};
-pthread_t thread;
+std::thread thread;
 bool thread_started = false;
 unsigned graphs = 0;
 unsigned kept_since = 0;                // hw thread: screen kept for a stream that may follow
@@ -77,7 +79,7 @@ enum class End {
 // mu held
 void queue_status(uint8_t code)
 {
-	if (code == PROTO_H264_SYNC) {
+	if (code == proto::kH264Sync) {
 		if (log_ms() - last_sync_ms < kSyncEveryMs && last_sync_ms != 0)
 			return;
 		last_sync_ms = log_ms();
@@ -86,19 +88,13 @@ void queue_status(uint8_t code)
 		statuses.push_back(code);
 }
 
-void notify_sender()
-{
-	if (notify != nullptr)
-		notify();
-}
-
 const char *status_name(uint8_t c)
 {
 	switch (c) {
-	case PROTO_H264_PLAYING: return "PLAYING";
-	case PROTO_H264_SYNC: return "SYNC";
-	case PROTO_H264_REFUSED: return "REFUSED";
-	case PROTO_H264_CONFIG_WANTED: return "CONFIG";
+	case proto::kH264Playing: return "PLAYING";
+	case proto::kH264Sync: return "SYNC";
+	case proto::kH264Refused: return "REFUSED";
+	case proto::kH264ConfigWanted: return "CONFIG";
 	}
 	return "?";
 }
@@ -109,7 +105,7 @@ void status(uint8_t code)
 		std::lock_guard<std::mutex> lock(mu);
 		queue_status(code);
 	}
-	notify_sender();
+	aoa::wake();
 }
 
 // hw thread: give up a picture left on for a stream that didn't come.
@@ -161,7 +157,7 @@ void teardown(const char *why, End how = End::Stop)
 	        ps.max_pos_ms < 0 ? 0.0 : ps.max_pos_ms / 1000.0, ps.error_events,
 	        ps.error_events ? ": " : "", ps.first_error.c_str());
 	if (how != End::Restart)
-		active = false;
+		is_active = false;
 	else
 		kept_since = log_ms();
 }
@@ -169,15 +165,16 @@ void teardown(const char *why, End how = End::Stop)
 // hw thread: a stream from an H264_CONFIG payload.
 void setup(const std::vector<uint8_t> &payload)
 {
-	struct proto_h264_config c;
-	if (proto_h264_config_parse(payload.data(), (unsigned)payload.size(), &c) != 0) {
+	auto parsed = proto::parse_h264_config(payload.data(), (unsigned)payload.size());
+	if (!parsed) {
 		log_msg("h264: H264_CONFIG malformed (%zu bytes): refused", payload.size());
 		forget_config();
 		release_held_video(true);
-		active = false;
-		status(PROTO_H264_REFUSED);
+		is_active = false;
+		status(proto::kH264Refused);
 		return;
 	}
+	const proto::H264Config &c = *parsed;
 	HwOptions o;
 	o.cfg.sps.assign(c.sps, c.sps + c.sps_len);
 	o.cfg.pps.assign(c.pps, c.pps + c.pps_len);
@@ -192,48 +189,53 @@ void setup(const std::vector<uint8_t> &payload)
 	std::snprintf(g, sizeof(g), "audi_stream_%d_%u", (int)getpid(), ++graphs);
 	o.graph = g;
 	o.video_on_already = video_held;
+	o.vcap_mode = c.vcap_mode == proto::kVcapBob ? vout::Mode::Bob
+	            : c.vcap_mode == proto::kVcapWeave ? vout::Mode::Weave
+	            : c.vcap_mode == proto::kVcapOddOnly ? vout::Mode::OddOnly
+	            : vout::Mode::Keep;
 
 	h264::Sps sps;
 	std::string err = h264::parse_sps(o.cfg.sps.data(), o.cfg.sps.size(), sps);
 	if (err.empty())
 		err = live::check_decodable(sps, c.fps);
-	if (err.empty() && c.frame_bytes > HWVIDEO_MAX_FRAME)
+	if (err.empty() && c.frame_bytes > hwvideo::kMaxFrame)
 		err = "frame_bytes " + std::to_string(c.frame_bytes) + " over " +
-		      std::to_string(HWVIDEO_MAX_FRAME);
+		      std::to_string(hwvideo::kMaxFrame);
 	log_msg("h264: config: %u fps, frames up to %u bytes (padded to %u), SPS %u / PPS %u "
-	        "bytes, %ux%u profile %u level %u POC type %u%s%s",
+	        "bytes, %ux%u profile %u level %u POC type %u, capture mode %s%s%s",
 	        c.fps, (unsigned)c.frame_bytes, (unsigned)o.cfg.sample_size, c.sps_len, c.pps_len,
 	        sps.width, sps.height, (unsigned)sps.profile, (unsigned)sps.level, sps.poc_type,
+	        vout::mode_name(o.vcap_mode),
 	        err.empty() ? "" : ": refused, ", err.c_str());
 	if (!err.empty()) {
 		forget_config();
 		release_held_video(true);
-		active = false;
-		status(PROTO_H264_REFUSED);
+		is_active = false;
+		status(proto::kH264Refused);
 		return;
 	}
 
 	std::unique_ptr<HwStream> h(new HwStream());
-	active = true;                       // the main loop closes its screen
+	is_active = true;                       // the main loop closes its screen
 	err = h->start(o);
 	video_held = false;                  // h owns the picture now
 	if (!err.empty()) {
 		log_msg("h264: %s: refused", err.c_str());
 		forget_config();
 		h->stop();
-		active = false;
-		status(PROTO_H264_REFUSED);
+		is_active = false;
+		status(proto::kH264Refused);
 		return;
 	}
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		hw.swap(h);
 		refused_logged = 0;
-		queue_status(PROTO_H264_PLAYING);
+		queue_status(proto::kH264Playing);
 		last_sync_ms = 0;
-		queue_status(PROTO_H264_SYNC);   // start at an IDR
+		queue_status(proto::kH264Sync);   // start at an IDR
 	}
-	notify_sender();
+	aoa::wake();
 	log_msg("h264: streaming at %s, graph %s; waiting for the first IDR", kPath, o.graph.c_str());
 }
 
@@ -267,7 +269,7 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 	w.waited = ss.waited;
 }
 
-void *run(void *)
+void run()
 {
 	Window w;
 	unsigned window_t0 = 0;
@@ -306,10 +308,10 @@ void *run(void *)
 		}
 
 		HwStream *h = hw.get();          // only this thread changes hw
-		if (h == nullptr && active && log_ms() - kept_since > kKeepScreenMs) {
+		if (h == nullptr && is_active && log_ms() - kept_since > kKeepScreenMs) {
 			log_msg("h264: no new stream after %u s: the screen goes back", kKeepScreenMs / 1000);
 			release_held_video(true);
-			active = false;
+			is_active = false;
 		}
 		if (h != nullptr) {
 			std::string err = h->poll([&w, h](unsigned, int64_t pos) {
@@ -320,7 +322,7 @@ void *run(void *)
 			if (!err.empty()) {
 				log_msg("h264: %s", err.c_str());
 				teardown("the graph would not play", End::Error);
-				status(PROTO_H264_REFUSED);
+				status(proto::kH264Refused);
 				continue;
 			}
 			const PlayStats &ps = h->player().stats();
@@ -331,7 +333,7 @@ void *run(void *)
 				// pictures for this connection.
 				log_msg("h264: io-media error: %s", ps.first_error.c_str());
 				teardown("io-media reported an error", End::Error);
-				status(PROTO_H264_REFUSED);
+				status(proto::kH264Refused);
 				continue;
 			}
 			if (h->playing() && !was_playing) {
@@ -340,7 +342,7 @@ void *run(void *)
 			}
 			if (h->stream().sync_wanted()) {
 				log_msg("h264: a reference frame was dropped: asking for an IDR");
-				status(PROTO_H264_SYNC);
+				status(proto::kH264Sync);
 			}
 			for (const std::string &n : h->server().take_notes())
 				if (n.find("unblocked") != std::string::npos || n.find("far read") != std::string::npos ||
@@ -354,38 +356,35 @@ void *run(void *)
 		usleep(kTickMs * 1000);
 	}
 	teardown("the app is stopping");
-	return nullptr;
 }
 
 } // namespace
 
-extern "C" {
+namespace hwvideo {
 
-void hwvideo_start(void)
+void start()
 {
 	if (thread_started)
 		return;
 	quit = false;
-	thread_started = pthread_create(&thread, nullptr, run, nullptr) == 0;
-	if (!thread_started)
+	try {
+		thread = std::thread(run);
+		thread_started = true;
+	} catch (const std::system_error &) {
 		log_msg("h264: no thread: hardware video off");
+	}
 }
 
-void hwvideo_shutdown(void)
+void shutdown()
 {
 	if (!thread_started)
 		return;
 	quit = true;
-	pthread_join(thread, nullptr);
+	thread.join();
 	thread_started = false;
 }
 
-void hwvideo_set_notify(void (*fn)(void))
-{
-	notify = fn;
-}
-
-void hwvideo_config(const uint8_t *payload, unsigned n)
+void config(const uint8_t *payload, unsigned n)
 {
 	std::vector<uint8_t> p(payload, payload + n);
 	{
@@ -397,16 +396,17 @@ void hwvideo_config(const uint8_t *payload, unsigned n)
 		}
 		if (!hw || config_pending)
 			return;                  // on its way: setup() says PLAYING
-		queue_status(PROTO_H264_PLAYING);
+		queue_status(proto::kH264Playing);
 	}
 	log_msg("h264: H264_CONFIG again, the same: nothing to do");
-	notify_sender();
+	aoa::wake();
 }
 
-int hwvideo_frame(const uint8_t *data, unsigned size)
+proto::PicStatus frame(const uint8_t *data, unsigned size)
 {
+	using proto::PicStatus;
 	bool wake = false;
-	int ack;
+	PicStatus ack;
 	std::string note;                    // logged after the lock: log.c fsyncs
 	{
 		std::lock_guard<std::mutex> lock(mu);
@@ -416,29 +416,29 @@ int hwvideo_frame(const uint8_t *data, unsigned size)
 				note = gate.taken() ? "the stream is starting" : "before any H264_CONFIG";
 			if (gate.taken()) {
 				// setup() asks for an IDR when it is done
-				ack = PROTO_VIDEO_DROPPED;
+				ack = PicStatus::Dropped;
 			} else {
 				if (gate.ask(log_ms())) {
-					queue_status(PROTO_H264_CONFIG_WANTED);
+					queue_status(proto::kH264ConfigWanted);
 					wake = true;
 				}
-				ack = PROTO_VIDEO_BAD;
+				ack = PicStatus::Bad;
 			}
 		} else {
 			std::string why;
 			live::Push p = hw->push(data, size, &why);
-			ack = PROTO_VIDEO_SHOWN;
+			ack = PicStatus::Shown;
 			if (p != live::Push::Ok) {
 				refused_total++;
 				if (refused_logged++ < kLogRefusals)
 					note = std::string(live::push_name(p)) + (why.empty() ? "" : ", ") + why;
-				ack = p == live::Push::WaitIdr ? PROTO_VIDEO_DROPPED : PROTO_VIDEO_BAD;
+				ack = p == live::Push::WaitIdr ? PicStatus::Dropped : PicStatus::Bad;
 				if (p == live::Push::WaitIdr) {
-					queue_status(PROTO_H264_SYNC);
+					queue_status(proto::kH264Sync);
 					wake = true;
 				} else if (p == live::Push::ConfigChanged) {
 					if (gate.ask(log_ms())) {
-						queue_status(PROTO_H264_CONFIG_WANTED);
+						queue_status(proto::kH264ConfigWanted);
 						wake = true;
 					}
 				} else if (p == live::Push::Full) {
@@ -450,11 +450,11 @@ int hwvideo_frame(const uint8_t *data, unsigned size)
 	if (!note.empty())
 		log_msg("h264: frame (%u bytes) refused: %s", size, note.c_str());
 	if (wake)
-		notify_sender();
+		aoa::wake();
 	return ack;
 }
 
-void hwvideo_stop(const char *why)
+void stop(const char *why)
 {
 	std::lock_guard<std::mutex> lock(mu);
 	if (!hw && !gate.taken())
@@ -465,22 +465,22 @@ void hwvideo_stop(const char *why)
 	gate.forget();
 }
 
-int hwvideo_status_pop(uint8_t *code)
+bool status_pop(uint8_t *code)
 {
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		if (statuses.empty())
-			return 0;
+			return false;
 		*code = statuses.front();
 		statuses.pop_front();
 	}
 	log_msg("h264: tx H264_STATUS %s", status_name(*code));
-	return 1;
+	return true;
 }
 
-int hwvideo_active(void)
+bool active()
 {
-	return active ? 1 : 0;
+	return is_active;
 }
 
-} // extern "C"
+} // namespace hwvideo

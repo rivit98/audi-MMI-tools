@@ -27,12 +27,13 @@ import java.util.concurrent.Executors
  * MMI, the next already there waiting, so the MMI never sits idle while
  * the phone captures, compresses and sends. The MMI keeps only the newest
  * waiting picture, so nothing queues up. A picture counts as done when
- * the MMI acks it (shown, bad or dropped) or after [ACK_TIMEOUT_MS].
+ * the MMI acks it (shown, bad or dropped). Only how many are in flight is
+ * kept ([FlightWindow]): acks are counts, for no id in particular.
  *
- * H.264 (format FMT_H264): the MMI acks each frame as soon as it is in its
- * stream, so up to [H264_IN_FLIGHT] are allowed; what the MMI says about
- * the stream (H264_STATUS) lands in [h264] for the capture service to pick
- * up.
+ * H.264 (format FMT_H264): the MMI counts each frame as done as soon as it
+ * is in its stream and acks them in batches, so up to [H264_IN_FLIGHT] are
+ * allowed; what the MMI says about the stream (H264_STATUS) lands in [h264]
+ * for the capture service to pick up.
  */
 class AccessoryLink(
     private val usb: UsbManager,
@@ -58,8 +59,6 @@ class AccessoryLink(
         @Volatile var shown = 0
         @Volatile var bad = 0
         @Volatile var dropped = 0
-        @Volatile var decodeMs = 0
-        @Volatile var roundTripMs = 0L
         @Volatile var bytes = 0
         @Volatile var w = 0
         @Volatile var h = 0
@@ -74,8 +73,7 @@ class AccessoryLink(
         @Volatile var playing = false
     }
     val h264 = H264State()
-    private val flight = Any()
-    private val inFlight = LinkedHashMap<Int, Long>()    // id -> sent at (elapsedRealtime)
+    private val inFlight = FlightWindow(ACK_TIMEOUT_MS)
 
     val description: String get() = "${accessory.manufacturer} ${accessory.model}"
 
@@ -98,21 +96,13 @@ class AccessoryLink(
     /** True if [sendPicture] would take a picture now. */
     fun readyForPicture(maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
         if (closed) return false
-        synchronized(flight) {
-            expire(SystemClock.elapsedRealtime())
-            return inFlight.size < maxInFlight
-        }
+        expire()
+        return inFlight.hasRoom(maxInFlight)
     }
 
-    // flight held
-    private fun expire(now: Long) {
-        val it = inFlight.entries.iterator()
-        while (it.hasNext()) {
-            val e = it.next()
-            if (now - e.value < ACK_TIMEOUT_MS) continue
-            Log.w(TAG, "picture ${e.key} never acked")
-            it.remove()
-        }
+    private fun expire() {
+        val lost = inFlight.expire(SystemClock.elapsedRealtime())
+        if (lost > 0) Log.w(TAG, "$lost pictures never acked")
     }
 
     /** Queues a picture (format Proto.FMT_*); false if maxInFlight are
@@ -120,12 +110,8 @@ class AccessoryLink(
     fun sendPicture(id: Int, w: Int, h: Int, format: Int, data: ByteArray, phoneMs: Int,
                     maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
         if (closed) return false
-        val now = SystemClock.elapsedRealtime()
-        synchronized(flight) {
-            expire(now)
-            if (inFlight.size >= maxInFlight) return false
-            inFlight[id] = now
-        }
+        expire()
+        if (!inFlight.take(maxInFlight, SystemClock.elapsedRealtime())) return false
         video.sent++
         video.bytes = data.size
         video.w = w
@@ -135,7 +121,7 @@ class AccessoryLink(
     }
 
     fun sendVideoStop() {
-        synchronized(flight) { inFlight.clear() }
+        inFlight.clear()
         write(Proto.encode(Proto.VIDEO_STOP, ByteArray(0)))
     }
 
@@ -212,7 +198,7 @@ class AccessoryLink(
                 if (videoCaps != caps) Log.i(TAG, "MMI video caps $caps")
                 videoCaps = caps
             }
-            Proto.VIDEO_ACK -> Proto.videoAckOrNull(payload)?.let(::onVideoAck)
+            Proto.VIDEO_ACKS -> Proto.videoAcksOrNull(payload)?.let(::onVideoAcks)
             Proto.H264_STATUS -> Proto.h264StatusOrNull(payload)?.let { code ->
                 Log.i(TAG, "MMI H264_STATUS $code")
                 when (code) {
@@ -227,24 +213,18 @@ class AccessoryLink(
     }
 
     // reader thread
-    private fun onVideoAck(ack: Proto.VideoAck) {
-        when (ack.status) {
-            Proto.VIDEO_SHOWN -> { video.shown++; video.decodeMs = ack.decodeMs }
-            Proto.VIDEO_BAD -> video.bad++
-            else -> video.dropped++
-        }
-        synchronized(flight) {
-            inFlight.remove(ack.id)?.let { sentAt ->
-                video.roundTripMs = SystemClock.elapsedRealtime() - sentAt
-            }
-        }
+    private fun onVideoAcks(acks: Proto.VideoAcks) {
+        video.shown += acks.shown
+        video.bad += acks.bad
+        video.dropped += acks.dropped
+        inFlight.done(acks.total, SystemClock.elapsedRealtime())
     }
 
     companion object {
         private const val TAG = "AudiStreaming"
         const val ACK_TIMEOUT_MS = 3000L
         const val MAX_IN_FLIGHT = 2
-        const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked at once
+        const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked every ~0.2 s
         val HELLO = "audi_streaming-android/1 ${Build.MANUFACTURER} ${Build.MODEL}"
     }
 }

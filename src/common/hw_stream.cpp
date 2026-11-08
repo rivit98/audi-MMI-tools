@@ -16,8 +16,10 @@ std::string HwStream::start(const HwOptions &o)
 	playing_ = failed_ = false;
 	t_play_ = t_video_ = 0;
 	video_on_ = o.video_on_already;
-	if (video_on_)
+	if (video_on_) {
 		t_video_ = log_ms();
+		vout::set_mode(o.vcap_mode);
+	}
 	std::string err = stream_.configure(o.cfg);
 	if (!err.empty())
 		return "stream: " + err;
@@ -59,7 +61,7 @@ std::string HwStream::poll(const std::function<void(unsigned, int64_t)> &on_time
 		t_play_ = log_ms();
 	}
 	if (playing_ && !video_on_ && opts_.show_video && log_ms() - t_play_ >= opts_.video_after_ms) {
-		vout::show();
+		vout::show(opts_.vcap_mode);
 		video_on_ = true;
 		t_video_ = log_ms();
 	}

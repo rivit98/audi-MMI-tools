@@ -517,7 +517,8 @@ binds the VCAP to the layer and shows black. dev-videoctrl's devctls
 | `0x80080501` | `DEVCTL_VP_SET_SOURCE` | `gf_vcap_set_input_source(vcap, value)` |
 | `0x8008050b` | `DEVCTL_VP_ENABLE` | value ≠ 0 `gf_vcap_enable`, 0 `gf_vcap_disable` |
 | `0x80040507` | `DEVCTL_UPDATE` (4 bytes) | applies all pending values, then `gf_vcap_update` |
-| `0x80080500/02..05`, `0x8014_0509`, `0x800c050a`, `0x8008050c` | standard, colour, viewport, input dimensions, deinterlacing | (not used) |
+| `0x8008050c` | deinterlacing | `gf_vcap_set_flags`: 0 `BOB`, 1 `WEAVE`, 2 `ODD ONLY`; slog `VP<n>: mode changed to ...` |
+| `0x80080500/02..05`, `0x8014_0509`, `0x800c050a` | standard, colour, viewport, input dimensions | (not used) |
 | `0xc0080506` | `DEVCTL_VP_GET_STATUS` | |
 
 Setters only store the value; nothing happens before UPDATE. A payload that
@@ -562,6 +563,8 @@ The HMI's own sequence for VP 1 (slog at boot) also sets an input viewport
 (x 6, width 708, height 480), input dimensions 720×480 and `WEAVE`
 deinterlacing before enabling. None of these are needed for a correct
 picture. Those devctls are available if a stream needs them (§7.3 table).
+The phone's *Capture mode* drop-down picks the deinterlacing for a stream
+(`H264_CONFIG`'s `vcap_mode`); "Unchanged" leaves what the HMI last set.
 
 **Conclusions**
 
@@ -1012,20 +1015,38 @@ frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 The *Sharp H.264* switch alone makes little visible difference, so the higher
 rate may matter as much as the filter:
 
-- `GlScaler.kt` / `GlBox.kt`: the virtual display renders at k× the
-  picture into a SurfaceTexture (k = the largest ≤ 4 with k× the mirrored
-  screen within the screen: ×3 = 2160×1296 landscape, Android's step then
-  2340 → 2160; ×4 portrait). A GLES2 pass box-filters it k:1 into the
+- `GlScaler.kt` / `GlBox.kt`: the virtual display renders at the screen's
+  shape into a SurfaceTexture, sized so the part kept is k× the picture
+  (k = the largest ≤ 4 that stays within the screen: ×3 landscape, ×4
+  portrait). A GLES2 pass box-filters it k:1 into the
   encoder's input surface (EGL_RECORDABLE_ANDROID, the capture's
   timestamps): even k with (k/2)² bilinear taps at 2×2 corners, odd k
   with k² nearest taps, highp coordinates. The encoder's rate limit and
   repeat-previous-frame are unchanged. GL setup failing (or drawing
   failing later) falls back to the direct path for the rest of the
   session. Shaders checked with glslang; `GlBoxTest` covers the taps.
-- Switch **Sharp H.264** (default on) for an A/B; drop-down **H.264
-  rate** 2.5 / 4 (default) / 6 / 8 Mbit/s. Either change restarts the
-  encoder like the fps slider. The status line shows `(x3)` or `(direct)`
-  and the rate.
+- Switch **Sharp H.264** (default on, off = k 1) for an A/B; drop-down
+  **H.264 rate** 2.5 / 4 (default) / 6 / 8 Mbit/s. The rate restarts the
+  encoder like the fps slider; the switch doesn't. The status line shows
+  `(x3)` or `(direct)` and the rate.
+
+**The navigation bar stays off the MMI [built, not yet on the car]**
+(`ScreenCrop.kt`, checkbox *Hide navigation buttons*, default on, Android 11+):
+the bar's edge comes from `WindowMetrics` (it follows the rotation), and only
+the rest of the capture reaches the picture, in both H.264 and JPEG. A rotation
+or a change of the switches resizes the capture under the same encoder, so the
+MMI doesn't restart. Without the GPU step (GL failed) the bar stays. The picture
+limits don't change: 720×432 is still sent, more of it is content. With a
+132 px bar on 2340×1080:
+
+| Phone | Bar kept: picture → panel | Bar left out: picture → panel |
+|---|---|---|
+| Landscape | 720×332 → 800×369 | 720×352 → 800×391 |
+| Portrait | 198×432 → 220×480 | 210×432 → 233×480 |
+
+Android's own scaling step is also closer to 1:1 (2340 → 2289 instead of 2160).
+An app in front that hides the bar can't be detected, so a full-screen video or
+game loses the same strip.
 
 **Open questions:**
 

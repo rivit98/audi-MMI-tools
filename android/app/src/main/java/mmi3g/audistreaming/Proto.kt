@@ -15,16 +15,18 @@ package mmi3g.audistreaming
  *   retired), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
  *   format u8, size u32, phoneMs u16 = scale + encode time, for the MMI's
  *   perf log; older MMI apps ignore it), VIDEO_DATA 0x07 (phone: id u16 + bytes),
- *   VIDEO_ACK 0x08 (MMI: id u16, status u8, decodeMs u16), VIDEO_STOP 0x09
- *   (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 = the MMI's
- *   status bar over a landscape picture, 0 = the picture alone).
+ *   VIDEO_STOP 0x09 (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 =
+ *   the MMI's status bar over a landscape picture, 0 = the picture alone),
+ *   VIDEO_ACKS 0x0D (MMI: shown u16, bad u16, dropped u16: this many more
+ *   pictures are done; a JPEG at once, H.264 frames in batches). 0x08 was
+ *   VIDEO_ACK, one per picture, retired.
  *
  *   Hardware H.264 (MMI apps with H.264; proto.h has the details):
  *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
  *   u8, h264MaxFrame u32, and sets format bit 2. H264_CONFIG 0x0B (phone:
- *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps; NAL units
- *   without start codes) starts or restarts the stream; then each encoded
- *   frame (Annex-B) goes as a picture with format FMT_H264, acked at once.
+ *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps, vcapMode u8;
+ *   NAL units without start codes) starts or restarts the stream; then each encoded
+ *   frame (Annex-B) goes as a picture with format FMT_H264, counted in VIDEO_ACKS on arrival.
  *   H264_STATUS 0x0C (MMI: code u8): PLAYING, SYNC (send an IDR), REFUSED
  *   (send pictures instead), CONFIG (send H264_CONFIG again).
  */
@@ -34,11 +36,11 @@ object Proto {
     const val VIDEO_CAPS = 0x05
     const val VIDEO_START = 0x06
     const val VIDEO_DATA = 0x07
-    const val VIDEO_ACK = 0x08
     const val VIDEO_STOP = 0x09
     const val VIDEO_DETAILS = 0x0A
     const val H264_CONFIG = 0x0B
     const val H264_STATUS = 0x0C
+    const val VIDEO_ACKS = 0x0D
 
     const val FMT_JPEG = 1
     const val FMT_H264 = 3
@@ -48,11 +50,6 @@ object Proto {
     const val H264_SYNC = 1
     const val H264_REFUSED = 2
     const val H264_CONFIG_WANTED = 3
-
-    // VIDEO_ACK status
-    const val VIDEO_SHOWN = 0
-    const val VIDEO_BAD = 1
-    const val VIDEO_DROPPED = 2
 
     const val HDR = 3
     const val START_LEN = 13
@@ -79,7 +76,10 @@ object Proto {
         fun takes(format: Int): Boolean = formats and (1 shl (format - 1)) != 0
     }
 
-    data class VideoAck(val id: Int, val status: Int, val decodeMs: Int)
+    /** How many more pictures are done, since the last VIDEO_ACKS. */
+    data class VideoAcks(val shown: Int, val bad: Int, val dropped: Int) {
+        val total: Int get() = shown + bad + dropped
+    }
 
     fun videoCapsOrNull(p: ByteArray): VideoCaps? = when {
         p.size < 13 -> null
@@ -89,22 +89,23 @@ object Proto {
     }
 
     /** H264_CONFIG: the stream's rate, the largest frame, SPS and PPS (NAL
-     * units, no start codes). */
-    fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray): ByteArray {
-        val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size)
+     * units, no start codes), VCAP 0's field mode (VcapMode.ordinal). */
+    fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray, vcapMode: Int): ByteArray {
+        val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size + 1)
         p[0] = fps.toByte()
         put32(p, 1, frameBytes)
         put16(p, 5, sps.size)
         sps.copyInto(p, 7)
         put16(p, 7 + sps.size, pps.size)
         pps.copyInto(p, 9 + sps.size)
+        p[9 + sps.size + pps.size] = vcapMode.toByte()
         return encode(H264_CONFIG, p)
     }
 
     fun h264StatusOrNull(p: ByteArray): Int? = if (p.isEmpty()) null else p[0].toInt() and 0xff
 
-    fun videoAckOrNull(p: ByteArray): VideoAck? =
-        if (p.size < 5) null else VideoAck(u16(p, 0), p[2].toInt() and 0xff, u16(p, 3))
+    fun videoAcksOrNull(p: ByteArray): VideoAcks? =
+        if (p.size < 6) null else VideoAcks(u16(p, 0), u16(p, 2), u16(p, 4))
 
     fun videoDetails(show: Boolean): ByteArray =
         encode(VIDEO_DETAILS, byteArrayOf(if (show) 1 else 0))

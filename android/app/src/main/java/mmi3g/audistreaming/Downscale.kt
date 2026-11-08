@@ -17,14 +17,15 @@ object Downscale {
     const val MAX_FACTOR = 16
 
     /** src: rows of srcStride pixels, at least outH * k of them; out gets
-     * outW x outH pixels, stride outW. */
-    fun box(src: IntArray, srcStride: Int, k: Int, outW: Int, outH: Int, out: IntArray) {
+     * outW x outH pixels, stride outW. srcOffset: where in src the first
+     * block starts. */
+    fun box(src: IntArray, srcStride: Int, k: Int, outW: Int, outH: Int, out: IntArray, srcOffset: Int = 0) {
         require(k in 1..MAX_FACTOR) { "factor $k" }
-        require(outW * k <= srcStride && src.size >= (outH * k - 1) * srcStride + outW * k)
+        require(outW * k <= srcStride && src.size >= srcOffset + (outH * k - 1) * srcStride + outW * k)
         require(out.size >= outW * outH)
         if (k == 1) {
             for (y in 0 until outH) {
-                val s = y * srcStride
+                val s = srcOffset + y * srcStride
                 val o = y * outW
                 for (x in 0 until outW) out[o + x] = src[s + x] or OPAQUE
             }
@@ -33,7 +34,7 @@ object Downscale {
         val n = k * k
         val half = n / 2
         for (y in 0 until outH) {
-            val row0 = y * k * srcStride
+            val row0 = srcOffset + y * k * srcStride
             val o = y * outW
             for (x in 0 until outW) {
                 var even = 0          // bytes 0 and 2, one 16-bit lane each

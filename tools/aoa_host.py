@@ -1,17 +1,17 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pyusb==1.3.1"]
+# dependencies = ["pyusb==1.3.1", "av==19.0.2", "pygame==2.6.1"]
 # ///
 """aoa_host.py - a desk stand-in for the MMI side of audi_stream_receiver.
 
-Does what src/audi_stream_receiver/aoa.c does, with libusb on a PC: switches a USB
+Does what src/audi_stream_receiver/aoa.cpp does, with libusb on a PC: switches a USB
 Android phone into accessory mode (AOA), then speaks the audi_stream_receiver
 protocol (src/audi_stream_receiver/proto.h): HELLO / HELLO_REPLY, then the phone's
 screen. Replug the phone at will; it goes back to waiting, like the MMI
 receiver. Ctrl-C to stop.
 
 Video: announces the MMI's boxes (VIDEO_CAPS, 800x480 screen, as
-src/audi_stream_receiver/video.c), reassembles the phone's pictures, acks each as
+src/audi_stream_receiver/video.cpp), reassembles the phone's pictures, acks each as
 shown and, with --save DIR, keeps the newest one as DIR/latest.jpg.
 
 H.264 (the phone app's "H.264" format): announces the MMI's limits
@@ -23,15 +23,30 @@ DIR/stream.h264 (a new config starts a new file): `ffplay DIR/stream.h264`,
 or `python3 media/csmp4.py DIR/stream.h264 out.mp4 25` for the MMI's own
 container. Every 25 frames: frame rate, sizes, IDRs.
 
+Window (tools/aoa_screen.py; --no-display or no display at hand: none): what
+the MMI's screen would show. It runs in this process; USB runs in a child
+process, because that one starts over whenever the USB bus changes. Acks go
+out before a frame reaches the window, so they say nothing about decoding: this
+shows when and why the phone stops sending, not the MMI's timing.
+
+Log lines carry the time of day, to line up with what you do on the phone. A pause
+in the frames of GAP_S or more gets its own lines, and so does how a stream ended.
+
 Run with `make aoa-host` (Docker, USB passthrough, saves into
 build/aoa-host/) or `uv run tools/aoa_host.py [--save DIR]` (needs access to
-/dev/bus/usb). Stop adb first if it holds the phone.
+/dev/bus/usb). Stop adb first if it holds the phone. Test with `make aoa-host-test`.
 """
 
+import fcntl
+import json
 import os
+import signal
 import struct
+import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import usb.core
@@ -47,8 +62,8 @@ AOA_GET_PROTOCOL, AOA_SEND_STRING, AOA_START = 51, 52, 53
 HANDSHAKE_FIRST_S, HANDSHAKE_RETRY_S, HANDSHAKE_TRIES = 4, 5, 5
 SYS_USB_DEVICES = "/sys/bus/usb/devices"
 HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired
-VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_ACK, VIDEO_STOP, VIDEO_DETAILS = 5, 6, 7, 8, 9, 10
-H264_CONFIG, H264_STATUS = 11, 12
+VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_STOP, VIDEO_DETAILS = 5, 6, 7, 9, 10  # 8: VIDEO_ACK, retired
+H264_CONFIG, H264_STATUS, VIDEO_ACKS = 11, 12, 13
 H264_PLAYING, H264_SYNC, H264_REFUSED, H264_CONFIG_WANTED = 0, 1, 2, 3
 VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
@@ -60,11 +75,91 @@ CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, M
                    H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME)
 EXT = {FMT_JPEG: "jpg"}
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
+GAP_S = 1.0
+PIPE_BYTES = 1024 * 1024
+
+
+def log(message: str) -> None:
+    """One line with the time of day."""
+    now = time.time()
+    print(f"{time.strftime('%H:%M:%S', time.localtime(now))}.{int(now * 1000) % 1000:03} {message}",
+          flush=True)
+
+
+class ScreenLink:
+    """The USB process's end of the pipe to the window: a JSON head, then a binary body."""
+
+    def __init__(self, fd: int | None) -> None:
+        """fd None: no window, everything sent is dropped."""
+        self.fd = fd
+
+    def send(self, kind: str, body: bytes = b"", **fields) -> None:
+        """One message; with the window gone this process has no more reason to run."""
+        if self.fd is None:
+            return
+        head = json.dumps({"kind": kind, **fields}).encode()
+        data = memoryview(struct.pack("<II", len(head), len(body)) + head + body)
+        try:
+            while data:
+                data = data[os.write(self.fd, data):]
+        except OSError:
+            log("the window is gone: stopping")
+            sys.exit(0)
+
+
+def read_messages(fd: int) -> Iterator[tuple[dict, bytes]]:
+    """The window's end: (head, body) until the USB process is gone."""
+    with open(fd, "rb") as pipe:
+        while len(sizes := pipe.read(8)) == 8:
+            head_len, body_len = struct.unpack("<II", sizes)
+            yield json.loads(pipe.read(head_len)), pipe.read(body_len)
+
+
+SCREEN = ScreenLink(int(sys.argv[sys.argv.index("--screen-fd") + 1])
+                    if "--screen-fd" in sys.argv else None)
+
+
+def link_state(state: str, detail: str) -> None:
+    """The link state on the window's status panel (= src/audi_stream_receiver/model.h)."""
+    SCREEN.send("link", state=state, detail=detail)
+
+
+class FrameGaps:
+    """Notices pauses in the phone's frames, and says how long before a stream's end."""
+
+    def __init__(self, gap_s: float = GAP_S) -> None:
+        """No frame seen yet."""
+        self.gap_s, self.last, self.in_gap = gap_s, None, False
+
+    def frame(self, now: float) -> None:
+        """A frame arrived."""
+        if self.last is not None and now - self.last >= self.gap_s:
+            log(f"frames back after a pause of {now - self.last:.1f} s")
+        self.last, self.in_gap = now, False
+
+    def idle(self, now: float) -> None:
+        """Called now and then; logs a pause once, while it lasts."""
+        if self.last is not None and not self.in_gap and now - self.last >= self.gap_s:
+            log(f"no frames for {now - self.last:.1f} s (no VIDEO_STOP, link up)")
+            self.in_gap = True
+
+    def ended(self, why: str, now: float) -> None:
+        """The stream ended: log why and how long since its last frame."""
+        ago = "no frames" if self.last is None else f"last frame {now - self.last:.1f} s before"
+        log(f"stream ended: {why}, {ago}")
+        self.last, self.in_gap = None, False
 
 
 def frame(ftype: int, payload: bytes = b"") -> bytes:
     """Encode one protocol frame."""
     return struct.pack("<BH", ftype, len(payload)) + payload
+
+
+def ack_frame(status: int) -> bytes:
+    """VIDEO_ACKS for one picture: this host acks at once, the MMI batches H.264 frames."""
+    counts = [0, 0, 0]
+    counts[status] = 1  # VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED
+    return frame(VIDEO_ACKS, struct.pack("<HHH", *counts))
 
 
 class Decoder:
@@ -88,7 +183,7 @@ class Decoder:
                 return out
             ftype, n = struct.unpack_from("<BH", self.buf)
             if n > MAX_PAYLOAD:
-                print(f"  oversized frame ({n} bytes) skipped")
+                log(f"  oversized frame ({n} bytes) skipped")
                 self.buf, self.skip = self.buf[HDR:], n
                 continue
             if len(self.buf) < HDR + n:
@@ -103,7 +198,7 @@ def find_accessory():
 
 
 class Handshakes:
-    """When to try AOA on each device, like aoa.c: a phone just enumerated may not answer yet."""
+    """When to try AOA on each device, like aoa.cpp: a phone just enumerated may not answer yet."""
 
     def __init__(self, first_s: float = HANDSHAKE_FIRST_S, retry_s: float = HANDSHAKE_RETRY_S,
                  tries: int = HANDSHAKE_TRIES) -> None:
@@ -131,7 +226,7 @@ def try_switch(dev) -> str | None:
         version = ver[0] | ver[1] << 8 if len(ver) == 2 else 0
         if version < 1:
             return f"AOA version {version}"
-        print(f"{dev.idVendor:04x}:{dev.idProduct:04x} speaks AOA v{version}, switching")
+        log(f"{dev.idVendor:04x}:{dev.idProduct:04x} speaks AOA v{version}, switching")
         for i, s in enumerate(STRINGS):
             dev.ctrl_transfer(0x40, AOA_SEND_STRING, 0, i, s.encode() + b"\0", timeout=1000)
         dev.ctrl_transfer(0x40, AOA_START, 0, 0, None, timeout=1000)
@@ -159,13 +254,14 @@ BUS_AT_START = bus_devices()
 def restart_if_bus_changed() -> None:
     """Replace this process with a new one if USB devices came or went since it started."""
     if bus_devices() != BUS_AT_START:
-        print("USB devices changed: restarting to see them", flush=True)
+        log("USB devices changed: restarting to see them")
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def wait_for_accessory():
     """Switch any Android device to accessory mode and return it."""
     handshakes = Handshakes()
+    link_state("waiting", "plug the phone into the USB port")
     while True:
         restart_if_bus_changed()
         acc = find_accessory()
@@ -178,9 +274,10 @@ def wait_for_accessory():
             attempt = handshakes.tried(key, now)
             why = try_switch(dev)
             if why is None:
+                link_state("switching", "phone is switching to accessory mode")
                 break
             if attempt in (1, HANDSHAKE_TRIES):  # first and last: other USB devices refuse too
-                print(f"{dev.idVendor:04x}:{dev.idProduct:04x}: no AOA ({why}), "
+                log(f"{dev.idVendor:04x}:{dev.idProduct:04x}: no AOA ({why}), "
                       f"try {attempt} of {HANDSHAKE_TRIES}")
         time.sleep(1)
 
@@ -262,23 +359,23 @@ class H264:
             (pps_len,) = struct.unpack_from("<H", payload, 7 + sps_len)
             pps = payload[9 + sps_len:9 + sps_len + pps_len]
         except struct.error:
-            print("H264_CONFIG malformed: refused")
+            log("H264_CONFIG malformed: refused")
             self.status(H264_REFUSED, ep_out)
             return
         if payload == self.config:
-            print("H264_CONFIG again, the same: nothing to do")
+            log("H264_CONFIG again, the same: nothing to do")
             self.status(H264_PLAYING, ep_out)
             return
         if not sps or not pps or not 0 < fps <= 30 or frame_bytes > H264_MAX_FRAME:
-            print(f"H264_CONFIG refused: {fps} fps, frames {frame_bytes} B, SPS {len(sps)} / PPS {len(pps)} B")
+            log(f"H264_CONFIG refused: {fps} fps, frames {frame_bytes} B, SPS {len(sps)} / PPS {len(pps)} B")
             self.status(H264_REFUSED, ep_out)
             return
         profile, level = sps[1], sps[3]
-        print(f"H264_CONFIG: stream at {fps} fps, frames up to {frame_bytes} B, SPS {len(sps)} B "
+        log(f"H264_CONFIG: stream at {fps} fps, frames up to {frame_bytes} B, SPS {len(sps)} B "
               f"(profile {profile}, level {level / 10:.1f}, POC type {sps_poc_type(sps)}), "
               f"PPS {len(pps)} B")
         if profile != 66 or level > 30:
-            print("  (the MMI refuses this: Baseline 3.0 at most)")
+            log("  (the MMI refuses this: Baseline 3.0 at most)")
         self.config, self.frame_bytes, self.started = payload, frame_bytes, False
         self.frames = self.bytes = self.biggest = self.idrs = self.refused = 0
         self.t0 = time.monotonic()
@@ -289,12 +386,13 @@ class H264:
             self.files += 1
             name = os.path.join(SAVE_DIR, "stream.h264" if self.files == 1 else f"stream{self.files}.h264")
             self.out = open(name, "wb")
-            print(f"  saving to {name}")
+            log(f"  saving to {name}")
+        SCREEN.send("h264_config", b"".join(b"\0\0\0\1" + nal for nal in (sps, pps)))
         self.status(H264_PLAYING, ep_out)
         self.status(H264_SYNC, ep_out)
 
     def on_frame(self, data: bytes) -> int:
-        """One frame (Annex-B); the VIDEO_ACK status the MMI would give."""
+        """One frame (Annex-B); how it went on the MMI, for VIDEO_ACKS."""
         if self.config is None:
             return VIDEO_BAD
         nals = nal_units(data)
@@ -304,7 +402,7 @@ class H264:
             self.refused += 1
             return VIDEO_DROPPED
         if need > self.frame_bytes:
-            print(f"frame of {need} B > {self.frame_bytes} B: refused (the MMI would ask for an IDR)")
+            log(f"frame of {need} B > {self.frame_bytes} B: refused (the MMI would ask for an IDR)")
             self.refused += 1
             self.started = False
             return VIDEO_BAD
@@ -317,7 +415,7 @@ class H264:
             self.out.write(data)
         if self.frames % 25 == 0 or self.frames <= 2:
             secs = max(time.monotonic() - self.t0, 0.001)
-            print(f"H.264 frame #{self.frames}: {self.frames / secs:.1f} fps, "
+            log(f"H.264 frame #{self.frames}: {self.frames / secs:.1f} fps, "
                   f"{self.bytes * 8 / secs / 1000:.0f} kbit/s, avg {self.bytes // self.frames} B, "
                   f"max {self.biggest} B of {self.frame_bytes}, IDR {self.idrs}, refused {self.refused}")
         return VIDEO_SHOWN
@@ -329,10 +427,10 @@ class Pictures:
     def __init__(self) -> None:
         """Nothing received yet."""
         self.cur, self.data, self.shown, self.t0 = None, b"", 0, time.monotonic()
-        self.h264 = H264()
+        self.h264, self.gaps = H264(), FrameGaps()
 
     def start(self, payload: bytes, ep_out) -> None:
-        """A new picture; refused like vasm.c does."""
+        """A new picture; refused like vasm.h does."""
         pid, w, h, fmt, size = struct.unpack_from("<HHHBI", payload)
         phone_ms = struct.unpack_from("<H", payload, 11)[0] if len(payload) >= 13 else 0
         box = (SCREEN_W // 2, SCREEN_H) if w < h else (SCREEN_W, SCREEN_H)
@@ -340,8 +438,8 @@ class Pictures:
             box = (H264_MAX_W, H264_MAX_H)
         if (fmt not in EXT and fmt != FMT_H264) or not 0 < size <= MAX_BYTES or \
                 not (0 < w <= box[0] and 0 < h <= box[1]):
-            print(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes (box {box[0]}x{box[1]})")
-            ep_out.write(frame(VIDEO_ACK, struct.pack("<HBH", pid, VIDEO_BAD, 0)), timeout=2000)
+            log(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes (box {box[0]}x{box[1]})")
+            ep_out.write(ack_frame(VIDEO_BAD), timeout=2000)
             self.cur = None
             return
         self.cur, self.data = (pid, w, h, fmt, size, phone_ms), b""
@@ -357,7 +455,10 @@ class Pictures:
         self.cur = None
         if fmt == FMT_H264:
             ack = self.h264.on_frame(self.data)
-            ep_out.write(frame(VIDEO_ACK, struct.pack("<HBH", pid, ack, 0)), timeout=2000)
+            ep_out.write(ack_frame(ack), timeout=2000)
+            if ack == VIDEO_SHOWN:
+                self.gaps.frame(time.monotonic())
+                SCREEN.send("h264", self.data)
             if ack == VIDEO_DROPPED or (ack == VIDEO_BAD and self.h264.config):
                 self.h264.status(H264_SYNC, ep_out)
             elif ack == VIDEO_BAD:
@@ -369,72 +470,116 @@ class Pictures:
             with open(name + ".tmp", "wb") as f:
                 f.write(self.data)
             os.replace(name + ".tmp", name)
-        ep_out.write(frame(VIDEO_ACK, struct.pack("<HBH", pid, VIDEO_SHOWN, 0)), timeout=2000)
+        ep_out.write(ack_frame(VIDEO_SHOWN), timeout=2000)
+        self.gaps.frame(time.monotonic())
+        SCREEN.send("jpeg", self.data)
         if self.shown <= 3 or self.shown % 20 == 0:
             fps = self.shown / max(time.monotonic() - self.t0, 0.001)
-            print(f"picture #{self.shown} id {pid}: {w}x{h} {'portrait' if w < h else 'landscape'}, "
+            log(f"picture #{self.shown} id {pid}: {w}x{h} {'portrait' if w < h else 'landscape'}, "
                   f"{EXT[fmt]} {size} bytes (phone {phone_ms} ms), {fps:.1f} fps on average")
 
 
 def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
     """React to one frame from the phone."""
     if ftype == HELLO:
-        print(f"phone HELLO: {payload.decode(errors='replace')}")
+        log(f"phone HELLO: {payload.decode(errors='replace')}")
+        link_state("connected", payload.decode(errors="replace"))
         ep_out.write(frame(HELLO_REPLY, HELLO_TEXT), timeout=2000)
         ep_out.write(frame(VIDEO_CAPS, CAPS), timeout=2000)
     elif ftype == HELLO_REPLY:
-        print(f"phone HELLO_REPLY: {payload.decode(errors='replace')}")
+        log(f"phone HELLO_REPLY: {payload.decode(errors='replace')}")
+        link_state("connected", payload.decode(errors="replace"))
     elif ftype == VIDEO_START and len(payload) >= 11:
         pics.start(payload, ep_out)
     elif ftype == VIDEO_DATA and len(payload) >= 2:
         pics.data_chunk(payload, ep_out)
     elif ftype == VIDEO_STOP:
-        print(f"VIDEO_STOP after {pics.shown} pictures, {pics.h264.frames} H.264 frames")
+        log(f"VIDEO_STOP after {pics.shown} pictures, {pics.h264.frames} H.264 frames")
         pics.h264.config = None
+        pics.gaps.ended("VIDEO_STOP from the phone", time.monotonic())
+        SCREEN.send("stop", why="ended by VIDEO_STOP")
     elif ftype == H264_CONFIG:
         pics.h264.on_config(payload, ep_out)
     elif ftype == VIDEO_DETAILS and len(payload) >= 1:
-        print(f"VIDEO_DETAILS: status bar over landscape {'on' if payload[0] else 'off'}")
+        log(f"VIDEO_DETAILS: status bar over landscape {'on' if payload[0] else 'off'}")
+        SCREEN.send("details", on=payload[0] != 0)
     else:
-        print(f"frame type {ftype}, {len(payload)} bytes ignored")
+        log(f"frame type {ftype}, {len(payload)} bytes ignored")
 
 
 def session(acc) -> None:
     """Talk to the accessory until it goes away."""
     iface, ep_in, ep_out = open_endpoints(acc)
-    print(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
+    log(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
           f"OUT 0x{ep_out.bEndpointAddress:02x}; open Audi streaming on the phone")
     dec, pics = Decoder(), Pictures()
+    link_state("accessory", "open Audi streaming on the phone")
     try:
         ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)
         ep_out.write(frame(VIDEO_CAPS, CAPS), timeout=2000)
     except usb.core.USBTimeoutError:
-        print("(HELLO not taken yet - the phone app is not open)")
+        log("(HELLO not taken yet - the phone app is not open)")
     try:
         while True:
             try:
                 data = bytes(ep_in.read(16384, timeout=1000))
             except usb.core.USBTimeoutError:
+                pics.gaps.idle(time.monotonic())
                 continue
+            pics.gaps.idle(time.monotonic())
             for ftype, payload in dec.feed(data):
                 handle(ftype, payload, ep_out, pics)
     finally:
+        if pics.gaps.last is not None:
+            pics.gaps.ended("USB link down", time.monotonic())
+        SCREEN.send("stop", why="ended by USB link down")
         usb.util.release_interface(acc, iface)
         usb.util.dispose_resources(acc)
+
+
+def run_with_window() -> int | None:
+    """The window here, USB in a child process; None if no window can open."""
+    import aoa_screen  # noqa: PLC0415 - the USB process doesn't need av and pygame loaded
+
+    try:
+        screen = aoa_screen.Screen()
+    except aoa_screen.NoDisplayError as e:
+        log(f"no window ({e})")
+        return None
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so that the worker is stopped too
+    read_end, write_end = os.pipe()
+    fcntl.fcntl(write_end, fcntl.F_SETPIPE_SZ, PIPE_BYTES)
+    worker = subprocess.Popen([sys.executable, *sys.argv, "--screen-fd", str(write_end)],
+                              pass_fds=(write_end,))
+    os.close(write_end)
+    model = aoa_screen.ScreenModel()
+    threading.Thread(target=aoa_screen.pump, args=(read_messages(read_end), model),
+                     daemon=True).start()
+    try:
+        return screen.run(model, lambda: worker.poll() is None)
+    finally:
+        worker.terminate()
+        worker.wait()
 
 
 def main() -> int:
     """Loop: wait for a phone, talk to it, start over when it drops."""
     if "--check" in sys.argv:          # image build: dependencies resolve, libusb loads
-        print(f"ok, libusb backend: {usb.core.find(find_all=True) is not None}")
+        import aoa_screen  # noqa: F401, PLC0415 - av and pygame load too
+
+        log(f"ok, libusb backend: {usb.core.find(find_all=True) is not None}")
         return 0
-    print("waiting for an Android phone on USB...")
+    if SCREEN.fd is None and "--no-display" not in sys.argv:
+        code = run_with_window()
+        if code is not None:
+            return code
+    log("waiting for an Android phone on USB...")
     while True:
         acc = wait_for_accessory()
         try:
             session(acc)
         except usb.core.USBError as e:
-            print(f"link down: {e}; waiting again")
+            log(f"link down: {e}; waiting again")
             time.sleep(1)
 
 

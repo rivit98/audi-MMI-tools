@@ -20,12 +20,13 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
   ```sh
   make sd SD_APPS=audi_stream_receiver   # MMI side only (the default run has it last)
-  make test                 # C unit tests: protocol, pictures, JPEG, UTF-8, wrap, drawing
+  make test                 # unit tests: protocol, pictures, JPEG, UTF-8, wrap, drawing
   make apk                  # android/out/audi_streaming.apk (= make -C android)
   make apk-test             # Kotlin unit tests
   make apk-install          # adb install -r, adb runs in the container
-  make aoa-host             # desk test: the PC plays the MMI; the newest picture lands in
-                            # build/aoa-host/latest.jpg, an H.264 stream in stream.h264
+  make aoa-host             # desk test: the PC plays the MMI, shows the stream in an 800x480
+                            # window; the newest picture lands in build/aoa-host/latest.jpg,
+                            # an H.264 stream in stream.h264
   ```
 
   The phone app builds in its own image (`mmi-android`), the desk test in
@@ -55,11 +56,13 @@ is at each end. The MMI sends `VIDEO_CAPS` with them: a landscape box
 512 KB max per picture, and the formats it takes (bit 0 JPEG, bit 2 H.264;
 bit 1 was PNG, retired, not to be reused). A phone streams only to an MMI that sent it. A picture is
 `VIDEO_START` (id, w, h, format, size, the phone's downscale + encode ms)
-plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACK` (id,
-shown/bad/dropped, decode ms). `VIDEO_STOP` (or the link going down) brings
-back the status screen. `VIDEO_DETAILS` (`show u8`) switches the status bar
+plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACKS` (how
+many more pictures are shown / bad / dropped). The phone counts what it has
+in flight down by their sum, in no particular order: it keeps no ids. If
+nothing comes back for 3 s with pictures in flight, it starts counting from
+zero. `VIDEO_STOP` (or the link going down) brings back the status screen. `VIDEO_DETAILS` (`show u8`) switches the status bar
 over a landscape picture; the phone sends it on every connection, and the
-MMI starts with it off. `0x02`/`0x03` are retired (below).
+MMI starts with it off. `0x02`/`0x03`/`0x08` are retired (below).
 
 **Pictures, phone side** (`CaptureService`, a MediaProjection foreground
 service). The phone mirrors its screen into a virtual display at **k
@@ -77,9 +80,9 @@ manifest), and it only ever clears the link it set itself: when it was
 recreated, the old activity's late `onClosed` cleared the new shared link,
 and the capture service waited for an MMI that was connected all along.
 
-**Pictures, MMI side.** It reassembles the picture (`vasm.c`), decodes it
-on the main thread (`video.c`, stb_image), draws it and acks it. A picture
-stays in flight until its ack (or 3 s). With two in flight the next
+**Pictures, MMI side.** It reassembles the picture (`vasm.h`), decodes it
+on the main thread (`video.cpp`, stb_image), draws it and acks it at once. A picture
+stays in flight until its ack. With two in flight the next
 picture is already waiting when the current one is shown; only the newest
 waiting one is kept, so a slow MMI lowers the rate instead of queueing.
 The picture keeps the phone's shape, never rotated or stretched:
@@ -107,7 +110,7 @@ watchdog), then gives the screen back.
 ## Logs: perf and CPU
 
 Every log line is fsynced to the card, so the threads that move pictures
-only put records into a RAM ring (`perf.c`), and a low-priority thread
+only put records into a RAM ring (`perf.cpp`), and a low-priority thread
 writes:
 
 - `perf: window` every 10 s of streaming and `perf: stream` when it stops:
@@ -165,9 +168,11 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 
 - **Protocol** (`proto.h`): `VIDEO_CAPS` sets bit 2 (H.264) and appends the
   limits (720×576, 25 fps, frames up to 256 KB). The phone sends
-  `H264_CONFIG` (0x0B: fps, the largest frame, SPS, PPS), then its frames
-  as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each,
-  acked at once). The MMI answers `H264_STATUS` (0x0C): `PLAYING`, `SYNC`
+  `H264_CONFIG` (0x0B: fps, the largest frame, SPS, PPS, VCAP 0's field
+  mode), then its frames
+  as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each).
+  `VIDEO_ACKS` counts them as they enter the stream, every 5 frames or
+  200 ms (`ack_batch.h`), well under the phone's 12 in flight. The MMI answers `H264_STATUS` (0x0C): `PLAYING`, `SYNC`
   (send an IDR), `REFUSED` (fall back to pictures), `CONFIG` (send the
   config again).
 - **`hwvideo.cpp`** checks the config (Baseline, level ≤ 3.0, ≤ 720×576,
@@ -213,8 +218,12 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   SPS/PPS before its IDRs than in its codec config, those become the
   config. The phone app's status line shows rate, frame sizes and drops.
 - **Desk test** (`make aoa-host`): the PC plays the MMI, checks every frame
-  as the MMI would and saves the stream to `build/aoa-host/stream.h264`
-  (`ffplay` it).
+  as the MMI would, shows the stream in an 800x480 window laid out like the
+  MMI's screen and saves it to `build/aoa-host/stream.h264` (`ffplay` it). The
+  window's bottom strip (key D) and the timestamped log tell a freeze (picture
+  stays, strip red, "no frames for") from a stop (status panel, "stream ended:
+  VIDEO_STOP"). Acks go out at once, so this shows when the phone stops sending,
+  not the MMI's timing.
 - **Latency:** the phone app's *Latency clock* switch shows a big
   seconds.milliseconds clock. Stream with it on screen and take one photo
   of the phone and the MMI together: the difference is the delay.
@@ -227,10 +236,10 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 - **Tests:** on the build host, `make test` (header, padding, push / fill
   / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
   protocol and H.264 helpers); the same MMI code with a clip instead of
-  the phone runs in hello9 (`src/hello9/README.md`). `hwvideo.cpp` makes
-  this a C++ app (`docs/cpp-apps.md`); its `.c` files are still C.
+  the phone runs in hello9 (`src/hello9/README.md`). This is a C++ app
+  (`docs/cpp-apps.md`).
 
-## Retired frame types: `0x02`, `0x03`
+## Retired frame types: `0x02`, `0x03`, `0x08`
 
 The phone app could once send typed text: `TEXT` (`0x02`, `seq u16` +
 UTF-8), answered by `ACK` (`0x03`). It was removed on both sides
@@ -238,6 +247,12 @@ UTF-8), answered by `ACK` (`0x03`). It was removed on both sides
 the link is for the phone's screen. The numbers are **retired, not
 free**: an old phone app that still sends `TEXT` gets `rx unknown frame
 type 0x02` in the log and nothing else. Don't reuse them.
+
+`VIDEO_ACK` (`0x08`: `id u16`, `status u8`, `decode_ms u16`) acknowledged one
+picture per message. `VIDEO_ACKS` (`0x0D`) replaced it, without the decode time, which
+only the phone's status line showed (the MMI's own screen and log still have it).
+The APK and the SD card must be from the same build: an older phone app waits 3 s
+per window for acks that it does not understand, so it crawls.
 
 ## Results on the car
 

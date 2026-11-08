@@ -44,12 +44,8 @@
         android:visibility="gone" />
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="8dp"
-        android:paddingEnd="16dp">
+        style="@style/OptionRow"
+        android:paddingStart="8dp">
 
         <Button
             android:id="@+id/stream"
@@ -65,26 +61,28 @@
             android:layout_weight="1"
             android:paddingStart="8dp"
             android:textSize="13sp" />
+
+        <ImageButton
+            android:id="@+id/info_stream"
+            style="@style/InfoButton" />
     </LinearLayout>
 
-    <Switch
-        android:id="@+id/details"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:enabled="false"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="8dp"
-        android:text="@string/details" />
+    <LinearLayout style="@style/OptionRow">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp">
+        <Switch
+            android:id="@+id/details"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:enabled="false"
+            android:text="@string/details" />
+
+        <ImageButton
+            android:id="@+id/info_details"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/OptionRow">
 
         <TextView
             android:id="@+id/fps_label"
@@ -98,16 +96,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/info_fps"
+            style="@style/InfoButton" />
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp">
+    <LinearLayout style="@style/OptionRow">
 
         <TextView
             android:layout_width="wrap_content"
@@ -122,16 +117,13 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:entries="@array/formats" />
+
+        <ImageButton
+            android:id="@+id/info_format"
+            style="@style/InfoButton" />
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp">
+    <LinearLayout style="@style/OptionRow">
 
         <TextView
             android:layout_width="wrap_content"
@@ -146,34 +138,92 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:entries="@array/bit_rates" />
+
+        <ImageButton
+            android:id="@+id/info_bit_rate"
+            style="@style/InfoButton" />
     </LinearLayout>
 
-    <Switch
-        android:id="@+id/sharp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp"
-        android:text="@string/sharp" />
+    <LinearLayout style="@style/OptionRow">
 
-    <Switch
-        android:id="@+id/clock_switch"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="8dp"
-        android:text="@string/latency_clock" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minEms="5"
+            android:text="@string/vcap_mode"
+            android:textSize="14sp" />
 
-    <CheckBox
-        android:id="@+id/keep_screen_on"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="16dp"
-        android:text="@string/keep_screen_on" />
+        <Spinner
+            android:id="@+id/vcap_mode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:entries="@array/vcap_modes" />
+
+        <ImageButton
+            android:id="@+id/info_vcap_mode"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/OptionRow">
+
+        <Switch
+            android:id="@+id/sharp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/sharp" />
+
+        <ImageButton
+            android:id="@+id/info_sharp"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/OptionRow">
+
+        <Switch
+            android:id="@+id/clock_switch"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/latency_clock" />
+
+        <ImageButton
+            android:id="@+id/info_clock"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout
+        style="@style/OptionRow"
+        android:paddingStart="12dp">
+
+        <CheckBox
+            android:id="@+id/hide_nav_bar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/hide_nav_bar" />
+
+        <ImageButton
+            android:id="@+id/info_hide_nav_bar"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout
+        style="@style/OptionRow"
+        android:paddingStart="12dp">
+
+        <CheckBox
+            android:id="@+id/keep_screen_on"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/keep_screen_on" />
+
+        <ImageButton
+            android:id="@+id/info_keep_screen_on"
+            style="@style/InfoButton" />
+    </LinearLayout>
 
     <TextView
         android:layout_width="match_parent"

@@ -8,14 +8,16 @@
 #                        rendered on the car by pngondemand
 #   make sd SD_APPS="hello hello3"
 #                        the same with only those apps (in that order)
-#   make test            host-side unit tests (tests/*.c) in the SDK container
+#   make test            host-side unit tests (tests/) in the SDK container
 #   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
 #   make apk-test        its Kotlin unit tests
 #   make apk-install     adb install it (adb in the container, phone on USB)
 #   make aoa-host        desk test: this PC plays the MMI for the phone app
 #                        (the newest streamed picture: build/aoa-host/latest.jpg;
-#                        H.264: build/aoa-host/stream.h264)
+#                        H.264: build/aoa-host/stream.h264) and shows it in an
+#                        800x480 window like the MMI's screen
+#   make aoa-host-test   tools/aoa_host.py's and the window's tests
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
 #   make clips           hello6's and hello9's test videos (build/clips/, ffmpeg
@@ -135,7 +137,7 @@ SD_APPS ?= $(TESTS)
 PRE_S   := 5
 POST_S  := 8
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host clips gusa-scan
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test clips gusa-scan
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -187,12 +189,10 @@ LIBS_hello9 := -lgf
 # with __aligned__ at their natural alignment, which g++ reports for every
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
-# audi_stream_receiver: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
-# pictures are JPEGs, decoded on the CPU, or an
-# H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp), which
-# makes it a C++ app; its .c files are still compiled as C.
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.cpp \
-    src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
+# audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
+# phone's pictures are JPEGs, decoded on the CPU, or an
+# H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
 
@@ -323,8 +323,9 @@ test: $(TESTBIN) build/.media-image
 	@for t in $(TESTBIN); do $(RUN) ./$$t || exit 1; done
 	$(RUN) python3 -I tests/check_png.py build/test_png.d
 	$(MEDIA_RUN) python3 -I tests/check_live.py check build/test_live.d
-build/test_proto: tests/test_proto.c tests/check.h src/audi_stream_receiver/proto.c src/audi_stream_receiver/proto.h \
-                  src/audi_stream_receiver/vasm.c src/audi_stream_receiver/vasm.h
+# audi_stream_receiver's wire protocol, picture reassembly and ack batches (C++, below)
+build/test_proto: tests/test_proto.cpp tests/check.h src/audi_stream_receiver/proto.h \
+                  src/audi_stream_receiver/vasm.h src/audi_stream_receiver/ack_batch.h
 # audi_stream_receiver's JPEG decoding, on pictures stb_image_write encodes
 build/test_imgdec: tests/test_imgdec.c tests/check.h $(IMGDEC) src/common/stb_image_write.h
 TESTLIBS_test_imgdec := -lm
@@ -361,10 +362,11 @@ build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 li
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
 # audi_stream_receiver: which H264_CONFIGs restart the stream
 build/test_config_gate: tests/test_config_gate.cpp tests/check.h src/audi_stream_receiver/config_gate.h
+build/test_proto build/test_config_gate:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_live build/test_config_gate,$(TESTBIN)):
+$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_proto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
@@ -390,11 +392,22 @@ apk-install:
 
 # Desk test of the phone app without the car: tools/aoa_host.py plays the
 # MMI (AOA handshake + protocol) over the PC's USB. Stop adb first.
+# The window goes through the X11 socket: xhost lets the container's root in.
 aoa-host:
 	docker build -q -t mmi-aoa-host -f tools/Dockerfile.aoa-host tools
 	mkdir -p build/aoa-host
+	-xhost +si:localuser:root >/dev/null 2>&1
 	docker run --rm -it --privileged -v /dev/bus/usb:/dev/bus/usb \
+	    -e DISPLAY=$(DISPLAY) -v /tmp/.X11-unix:/tmp/.X11-unix \
+	    -v /etc/localtime:/etc/localtime:ro \
 	    -v $(CURDIR)/build/aoa-host:/out mmi-aoa-host --save /out
+
+aoa-host-test:
+	docker build -q -t mmi-aoa-host -f tools/Dockerfile.aoa-host tools
+	docker run --rm -e SDL_VIDEODRIVER=dummy -e PYTHONPATH=/tools -e PYTHONDONTWRITEBYTECODE=1 \
+	    -v $(CURDIR)/tools:/tools:ro -w /tools --entrypoint uv mmi-aoa-host run --no-project \
+	    --with pyusb==1.3.1 --with av==19.0.2 --with pygame==2.6.1 --with pytest==9.2.0 \
+	    pytest -q -p no:cacheprovider tests
 
 shell:
 	docker run --rm -it -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src $(IMAGE) bash

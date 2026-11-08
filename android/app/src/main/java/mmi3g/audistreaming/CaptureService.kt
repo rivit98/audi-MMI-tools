@@ -29,6 +29,8 @@ import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.os.SystemClock
 import android.view.Display
+import android.view.WindowInsets
+import android.view.WindowManager
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -48,7 +50,8 @@ import java.nio.ByteOrder
  * picture that fits the MMI's box for the current orientation
  * (VideoFit.fit / factor; k = 2 landscape, 4 portrait on a 2340x1080
  * phone), box-filtered down k:1 (Downscale) - one big bilinear step made
- * text blurry. A rotation resizes it.
+ * text blurry. A rotation resizes it. The navigation bar stays out of the
+ * pictures ([ScreenCrop]) unless [Streaming.hideNavBar] is off.
  *
  * Pictures are JPEG q90.
  * The pictures go to whatever link [Streaming.link] holds, so unplugging
@@ -57,11 +60,11 @@ import java.nio.ByteOrder
  *
  * H.264 (the MMI's DM642 decodes it, docs/phone-mirroring.md
  * 7.10-7.12): the hardware encoder ([HwEncoder], 720x432 for the MMI's
- * 720x576 limit, Android 10+) gets the virtual display at k times that,
- * box-filtered k:1 on the GPU ([GlScaler]: straight into
+ * 720x576 limit, Android 10+) gets the virtual display through [GlScaler],
+ * which leaves the navigation bar out and box-filters k:1 (straight into
  * the encoder, Android's one 3.25:1 bilinear step blurred text). The
- * "Sharp H.264" switch turns that off for comparison; a phone whose GL
- * setup fails gets the direct path. The bit rate is the drop-down's. The
+ * "Sharp H.264" switch makes k = 1 for comparison. A phone whose GL setup
+ * fails gets the direct path, navigation bar included. The bit rate is the drop-down's. The
  * encoder runs at the "Max fps" slider's rate (at most the MMI's 25) and
  * repeats the last frame when the screen is still; the MMI times its
  * stream at 25 fps and fills the rest with skip frames. Every frame goes
@@ -91,8 +94,11 @@ class CaptureService : Service() {
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
-    private var size: VideoFit.Size? = null
-    private var factor = 1
+    private var geom: ScreenCrop.Geometry? = null     // the pictures', not the scaler's
+    // the screen and what to leave out of it, read every SCREEN_CHECK_MS
+    private var screen = VideoFit.Size(0, 0)
+    private var insets = ScreenCrop.NONE
+    private var screenAt = 0L
     // capture -> picture: the capture's pixels, the downscaled ones, and
     // the picture as a bitmap
     private var src = IntArray(0)
@@ -135,6 +141,7 @@ class CaptureService : Service() {
     private val queue = ArrayDeque<ByteArray>()
     private var waitIdr = true
     private var configLink: AccessoryLink? = null     // the link the config went to
+    private var configVcapMode = VcapMode.KEEP        // the capture mode it asked for
     private var refusedLink: AccessoryLink? = null    // REFUSED: JPEG on this one
     private var h264Failed = ""                       // the phone can't: why
     private var h264ScalerFailed = ""                 // GL scaler failed once: direct from then on
@@ -329,15 +336,16 @@ class CaptureService : Service() {
         val wantFps = Streaming.maxFps.coerceIn(MIN_FPS, caps.h264Fps)
         val now = SystemClock.elapsedRealtime()
         val e = enc
-        // a new rate on the slider, bit rate or scaling: a new encoder once
-        // it has settled
-        if (e != null && (e.fps != wantFps || e.bitRate != Streaming.bitRate ||
-                (scaler != null) != (Streaming.sharp && h264ScalerFailed.isEmpty()))) {
+        // a new rate on the slider or bit rate: a new encoder once it has
+        // settled
+        if (e != null && (e.fps != wantFps || e.bitRate != Streaming.bitRate)) {
             if (fpsChangeAt == 0L) fpsChangeAt = now
             if (now - fpsChangeAt >= FPS_SETTLE_MS) stopEncoder()
         } else {
             fpsChangeAt = 0L
         }
+        // a new capture mode: the same encoder, the MMI restarts its stream
+        if (configLink === link && configVcapMode != Streaming.vcapMode) sendConfig(link, "capture mode")
         scaler?.let {
             if (it.failed) {
                 h264ScalerFailed = it.error
@@ -357,6 +365,7 @@ class CaptureService : Service() {
         if (link !== configLink && sps != null) sendConfig(link, "new connection")
         if (link.h264.configWanted.getAndSet(false)) sendConfig(link, "the MMI asked")
         if (link.h264.sync.getAndSet(false)) encoder.requestSync()
+        followScreen()
         pump(link)
 
         if (now - h264.windowAt >= 1000) {
@@ -390,21 +399,20 @@ class CaptureService : Service() {
         // its next resize
         reader?.close()
         reader = null
-        size = null
-        // the display at k x the picture, box-filtered k:1 on the GPU
-        // (GlScaler); without it, Android's one bilinear step blurs text
+        geom = null
+        // the display through the GPU (GlScaler): navigation bar left out,
+        // box-filtered k:1; without it, Android's one bilinear step blurs text
         var input = e.surface
         var vw = w
         var vh = h
-        if (Streaming.sharp && h264ScalerFailed.isEmpty()) {
-            val screen = screenSize()
-            val k = GlBox.factor(screen.w, screen.h, w, h)
-            val sc = GlScaler(e.surface!!, w, h, k)
+        if (h264ScalerFailed.isEmpty()) {
+            val g = h264Geometry(w, h)
+            val sc = GlScaler(e.surface!!, w, h, g)
             if (sc.start()) {
                 scaler = sc
                 input = sc.inputSurface
-                vw = sc.srcW
-                vh = sc.srcH
+                vw = g.capW
+                vh = g.capH
             } else {
                 h264ScalerFailed = sc.error
                 AppLog.w("GL scaler failed (${sc.error}): the display draws into the encoder directly")
@@ -432,6 +440,28 @@ class CaptureService : Service() {
         return true
     }
 
+    /** What the encoder's w x h gets of the screen as it is now. */
+    private fun h264Geometry(w: Int, h: Int): ScreenCrop.Geometry {
+        readScreen()
+        val cw = insets.contentW(screen.w)
+        val ch = insets.contentH(screen.h)
+        val pic = VideoFit.fit(cw, ch, w, h)
+        val k = if (Streaming.sharp) GlBox.factor(cw, ch, w, h) else 1
+        return ScreenCrop.geometry(screen.w, screen.h, insets, pic.w, pic.h, k)
+    }
+
+    /** A rotation, or the Sharp or navigation switch: the scaler and display
+     * follow, with the same encoder, so the MMI doesn't restart. */
+    private fun followScreen() {
+        val sc = scaler ?: return
+        val g = h264Geometry(sc.w, sc.h)
+        if (g == sc.geometry) return
+        // a failure shows as sc.failed on the next tick: direct from then on
+        if (!sc.update(g)) return
+        display?.resize(g.capW, g.capH, resources.displayMetrics.densityDpi)
+        AppLog.i("H.264 capture now $g")
+    }
+
     private fun stopEncoder() {
         val e = enc ?: return
         display?.surface = null
@@ -450,13 +480,15 @@ class CaptureService : Service() {
         val s = sps ?: return
         val p = pps ?: return
         val caps = link.videoCaps ?: return
-        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p))
+        val mode = Streaming.vcapMode
+        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.ordinal))
         configLink = link
+        configVcapMode = mode
         // the MMI (re)starts its stream at the next IDR
         queue.clear()
         waitIdr = true
         enc?.requestSync()
-        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B")
+        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B, capture mode $mode")
     }
 
     // encoder callback (capture thread)
@@ -549,9 +581,12 @@ class CaptureService : Service() {
             }
             return false
         }
-        val screen = screenSize()
-        val want = VideoFit.fit(screen.w, screen.h, caps)
-        if (want != size) resize(want, VideoFit.factor(screen.w, screen.h, want))
+        readScreen()
+        val cw = insets.contentW(screen.w)
+        val ch = insets.contentH(screen.h)
+        val want = VideoFit.fit(cw, ch, caps)
+        val g = ScreenCrop.geometry(screen.w, screen.h, insets, want.w, want.h, VideoFit.factor(cw, ch, want))
+        if (g != geom) resize(g)
         val r = reader ?: return false
         // Not while the MMI has its fill: an image taken now could not be
         // sent, and a static screen makes no new one to replace it.
@@ -585,14 +620,14 @@ class CaptureService : Service() {
         nextId = if (nextId == 0xffff) 1 else nextId + 1
         lastLink = link
         lastSent = true
-        Streaming.status = "${toSend.w}x${toSend.h} (x$factor) JPEG " +
+        Streaming.status = "${toSend.w}x${toSend.h} (x${geom?.k}) JPEG " +
             "${toSend.data.size / 1024} KB, phone ${toSend.phoneMs} ms" + if (note.isNotEmpty()) "; $note" else ""
         return true
     }
 
-    /** The image, box-filtered down [factor]:1, into [frame]. */
+    /** The image's kept part, box-filtered down k:1, into [frame]. */
     private fun grab(image: Image) {
-        val s = size ?: return
+        val g = geom ?: return
         val plane = image.planes[0]
         val stride = plane.rowStride / plane.pixelStride
         val ints = plane.buffer.order(ByteOrder.nativeOrder()).asIntBuffer()
@@ -600,10 +635,10 @@ class CaptureService : Service() {
         val n = minOf(ints.remaining(), stride * image.height)
         if (src.size < stride * image.height) src = IntArray(stride * image.height)
         ints.get(src, 0, n)
-        Downscale.box(src, stride, factor, s.w, s.h, px)
+        Downscale.box(src, stride, g.k, g.picW, g.picH, px, g.cropY * stride + g.cropX)
         val buf = pxBuf!!
         buf.clear()
-        buf.asIntBuffer().put(px, 0, s.w * s.h)
+        buf.asIntBuffer().put(px, 0, g.picW * g.picH)
         frame!!.copyPixelsFromBuffer(buf)
     }
 
@@ -615,22 +650,40 @@ class CaptureService : Service() {
         return Picture(f.width, f.height, out.toByteArray(), (SystemClock.elapsedRealtime() - t0).toInt())
     }
 
-    private fun screenSize(): VideoFit.Size {
+    /** [screen] and [insets] up to date; the capture thread calls this far
+     * more often than a screen rotates, and the insets are a binder call. */
+    private fun readScreen() {
+        val now = SystemClock.elapsedRealtime()
+        if (screen.w != 0 && now - screenAt < SCREEN_CHECK_MS) return
+        screenAt = now
         val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         dm.getDisplay(Display.DEFAULT_DISPLAY).getRealMetrics(metrics)
-        return VideoFit.Size(metrics.widthPixels, metrics.heightPixels)
+        screen = VideoFit.Size(metrics.widthPixels, metrics.heightPixels)
+        val i = navBarInsets(screen)
+        if (i != insets) AppLog.i("screen ${screen.w}x${screen.h}: leaving out $i")
+        insets = i
+    }
+
+    /** The navigation bar's edge, whether or not the app in front hides the
+     * bar: that can't be seen from here. API 30+. */
+    private fun navBarInsets(s: VideoFit.Size): ScreenCrop.Insets {
+        if (!Streaming.hideNavBar || Build.VERSION.SDK_INT < 30) return ScreenCrop.NONE
+        val metrics = getSystemService(WindowManager::class.java).currentWindowMetrics
+        // mid-rotation these can still be the old rotation's
+        if (metrics.bounds.width() != s.w || metrics.bounds.height() != s.h) return ScreenCrop.NONE
+        val bar = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
+        return ScreenCrop.sane(ScreenCrop.Insets(bar.left, bar.top, bar.right, bar.bottom), s.w, s.h)
     }
 
     /** First call creates the virtual display; later ones (rotation, other
-     * MMI caps) resize it - Android 14 allows one per projection. The
-     * capture is k times the picture s. */
-    private fun resize(s: VideoFit.Size, k: Int) {
+     * MMI caps) resize it - Android 14 allows one per projection. */
+    private fun resize(g: ScreenCrop.Geometry) {
         val p = projection ?: return
         val dpi = resources.displayMetrics.densityDpi
-        val cw = s.w * k
-        val ch = s.h * k
+        val cw = g.capW
+        val ch = g.capH
         val old = reader
         val r = ImageReader.newInstance(cw, ch, PixelFormat.RGBA_8888, 2)
         val d = display
@@ -643,13 +696,12 @@ class CaptureService : Service() {
         }
         reader = r
         old?.close()
-        px = IntArray(s.w * s.h)
-        pxBuf = ByteBuffer.allocateDirect(s.w * s.h * 4).order(ByteOrder.nativeOrder())
+        px = IntArray(g.picW * g.picH)
+        pxBuf = ByteBuffer.allocateDirect(g.picW * g.picH * 4).order(ByteOrder.nativeOrder())
         frame?.recycle()
-        frame = Bitmap.createBitmap(s.w, s.h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
-        AppLog.i("capture ${cw}x${ch} -> ${s.w}x${s.h} (${if (s.w < s.h) "portrait" else "landscape"}, x$k)")
-        size = s
-        factor = k
+        frame = Bitmap.createBitmap(g.picW, g.picH, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
+        AppLog.i("capture $g (${if (g.picW < g.picH) "portrait" else "landscape"})")
+        geom = g
     }
 
     private fun notification(): Notification {
@@ -690,6 +742,7 @@ class CaptureService : Service() {
         const val QUALITY = 90            // 60 rings around text
         private const val H264_TICK_MS = 5L
         private const val FPS_SETTLE_MS = 700L
+        private const val SCREEN_CHECK_MS = 200L
         // H.264 bit rates of the drop-down (res/values/strings.xml bit_rates);
         // 2.5 Mbit/s is ~12 KB a frame at 25 fps
         val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000, 8_000_000)
@@ -722,9 +775,13 @@ object Streaming {
     @Volatile var format = Format.H264
     /** H.264 bits a second, set by the activity (its drop-down). */
     @Volatile var bitRate = CaptureService.DEFAULT_BIT_RATE
-    /** H.264 through the GL scaler (sharp text) or straight from the
-     * display (the old way, for comparison), set by the activity. */
+    /** The MMI's capture field mode for H.264, set by the activity (its drop-down). */
+    @Volatile var vcapMode = VcapMode.KEEP
+    /** H.264 box-filtered k:1 (sharp text) or k = 1 (Android's one scaling
+     * step, for comparison), set by the activity. */
     @Volatile var sharp = true
+    /** Leave the navigation bar out of the picture, set by the activity. */
+    @Volatile var hideNavBar = true
     /** Hold the screen on while streaming, set by the activity (its checkbox). */
     @Volatile var keepScreenOn = false
 }
@@ -735,4 +792,15 @@ enum class Format {
     /** The phone's hardware encoder, decoded by the MMI's DM642. */
     H264,
     JPEG,
+}
+
+/** The MMI's capture field mode, in the order of the drop-down
+ * (res/values/strings.xml vcap_modes). The ordinal goes in H264_CONFIG (proto.h
+ * kVcap*). A saved choice that is no longer here reads as KEEP. */
+enum class VcapMode {
+    /** Whatever the MMI has at the time: the HMI's setting, if it made one. */
+    KEEP,
+    BOB,
+    WEAVE,
+    ODD_ONLY,
 }

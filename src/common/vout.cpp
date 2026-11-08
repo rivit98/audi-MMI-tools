@@ -30,9 +30,11 @@ constexpr int kVp = 1, kSource = 1;
 constexpr unsigned kSetSource = 0x80080501u;
 constexpr unsigned kUpdate = 0x80040507u;
 constexpr unsigned kEnable = 0x8008050bu;
+constexpr unsigned kSetMode = 0x8008050cu;   // value 0 BOB, 1 WEAVE, 2 ODD ONLY
 
 int vc_fd = -1;
 bool lm_is_open = false;
+Mode mode_now = Mode::Keep;             // what this process last asked for
 
 int vc_set(unsigned dcmd, int value)
 {
@@ -46,14 +48,21 @@ int vc_update()
 	return devctl(vc_fd, (int)kUpdate, &zero, sizeof(zero), nullptr);
 }
 
-int capture(bool on)
+bool vc_open()
 {
 	if (vc_fd < 0)
 		vc_fd = open("/dev/videoctrl", O_RDWR);
 	if (vc_fd < 0) {
 		log_msg("  /dev/videoctrl: %s", std::strerror(errno));
-		return -1;
+		return false;
 	}
+	return true;
+}
+
+int capture(bool on)
+{
+	if (!vc_open())
+		return -1;
 	int rc_src = vc_set(kSetSource, on ? kSource : 0);
 	int rc_en = vc_set(kEnable, on ? 1 : 0);
 	int rc_up = vc_update();
@@ -64,7 +73,31 @@ int capture(bool on)
 
 } // namespace
 
-int show()
+const char *mode_name(Mode m)
+{
+	switch (m) {
+	case Mode::Bob: return "BOB";
+	case Mode::Weave: return "WEAVE";
+	case Mode::OddOnly: return "ODD ONLY";
+	default: return "unchanged";
+	}
+}
+
+int set_mode(Mode m)
+{
+	if (m == mode_now)
+		return 0;
+	if (!vc_open())
+		return -1;
+	Mode to = m == Mode::Keep ? Mode::Weave : m;
+	int rc_mode = vc_set(kSetMode, to == Mode::Bob ? 0 : to == Mode::Weave ? 1 : 2);
+	int rc_up = vc_update();
+	log_msg("  videoctrl VP %d: mode %s rc=%d, update rc=%d", kVp, mode_name(to), rc_mode, rc_up);
+	mode_now = m;
+	return rc_mode ? rc_mode : rc_up;
+}
+
+int show(Mode mode)
 {
 	int rc = lm_open();
 	if (rc != 0) {
@@ -84,11 +117,14 @@ int show()
 	if (rc != 0)
 		return rc;
 	usleep(500 * 1000);                     // the layer manager binds the VCAP
-	return capture(true);
+	int rc_mode = set_mode(mode);
+	rc = capture(true);
+	return rc ? rc : rc_mode;
 }
 
 void hide(bool restore_vcap)
 {
+	set_mode(Mode::Keep);
 	if (restore_vcap)
 		capture(false);
 	else

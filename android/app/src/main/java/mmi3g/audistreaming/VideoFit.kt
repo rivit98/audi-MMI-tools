@@ -14,6 +14,11 @@ object VideoFit {
 
     fun fit(screenW: Int, screenH: Int, caps: Proto.VideoCaps): Size {
         val (bw, bh) = if (portrait(screenW, screenH)) caps.portW to caps.portH else caps.landW to caps.landH
+        return fit(screenW, screenH, bw, bh)
+    }
+
+    /** The screen scaled to fit a bw x bh box, even sizes. */
+    fun fit(screenW: Int, screenH: Int, bw: Int, bh: Int): Size {
         val scale = minOf(bw.toDouble() / screenW, bh.toDouble() / screenH)
         // + a hair: 1920 * (800 / 1920.0) must not come out as 799
         val w = ((screenW * scale + 1e-6).toInt() and 1.inv()).coerceIn(2, bw and 1.inv())

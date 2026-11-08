@@ -22,6 +22,7 @@
 #include "live_stream.h"
 #include "player.h"
 #include "stream_server.h"
+#include "vout.h"
 
 #include <cstdint>
 #include <functional>
@@ -34,8 +35,10 @@ struct HwOptions {
 	unsigned video_after_ms = 1000;                  // play -> picture on
 	bool show_video = true;
 	// the picture is on already (a restart: the last stream was stopped
-	// with keep_video), so /dev/videoctrl isn't touched again
+	// with keep_video), so /dev/videoctrl isn't touched again, other than
+	// for a new vcap_mode
 	bool video_on_already = false;
+	vout::Mode vcap_mode = vout::Mode::Keep;
 };
 
 class HwStream {

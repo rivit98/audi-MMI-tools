@@ -310,7 +310,7 @@ Rules the platform forces:
   device libraries depend on it.
 - **SD writes are slow:** ~12 ms per fsync'ed line, ~140 KB/s. Keep
   `log_msg` out of per-frame paths. Put records in a RAM ring and let a
-  low-priority thread write them (`src/audi_stream_receiver/perf.c`).
+  low-priority thread write them (`src/audi_stream_receiver/perf.cpp`).
 - `/tmp` takes files (binaries, WAVs that io-media plays), but `mkdir
   /tmp` and `rm -rf /tmp/…` report errors. The shell has no `sync` or
   `touch` (`: > file`).
@@ -580,7 +580,7 @@ read out of the binaries ([usb-stack.md](usb-stack.md)):
 5. EP0 transfers are synchronous; bulk completes asynchronously.
 6. Buffers must come from `usbd_alloc()` (the library DMA-maps them).
 
-**Android Open Accessory works** (`src/audi_stream_receiver/aoa.c`): connect
+**Android Open Accessory works** (`src/audi_stream_receiver/aoa.cpp`): connect
 with a wildcard filter, on insertion send `GET_PROTOCOL` (51),
 `SEND_STRING` (52) ×6, `START` (53). The phone re-enumerates as
 `18d1:2d00/2d01` with one bulk IN/OUT pair. No root and no USB debugging
@@ -591,9 +591,9 @@ after ~18 s. Both are handled by retrying.
 
 **Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, at most 2048 B. `HELLO`/`HELLO_REPLY`,
-`VIDEO_CAPS`, `VIDEO_START` + `VIDEO_DATA` chunks, `VIDEO_ACK`,
-`VIDEO_STOP`, `VIDEO_DETAILS`. Types `0x02`/`0x03` are retired: don't reuse
-them.
+`VIDEO_CAPS`, `VIDEO_START` + `VIDEO_DATA` chunks, `VIDEO_ACKS`,
+`VIDEO_STOP`, `VIDEO_DETAILS`. Types `0x02`/`0x03`/`0x08` are retired: don't
+reuse them.
 
 **Screen streaming, measured:** JPEG pictures, two in flight,
 decoded on the MMI with stb_image. ~3 fps at 80–160 ms latency, 0 bad

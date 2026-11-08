@@ -56,11 +56,11 @@ class ProtoTest {
     @Test
     fun mergedAndSplitFrames() {
         val bytes = Proto.encode(Proto.HELLO, "mmi".toByteArray()) +
-            Proto.encode(Proto.VIDEO_ACK, byteArrayOf(7, 0)) +
+            Proto.encode(Proto.VIDEO_ACKS, byteArrayOf(7, 0)) +
             Proto.encode(Proto.HELLO_REPLY, ByteArray(0))
         for (chunk in listOf(1, 2, 5, bytes.size)) {
             val got = decodeAll(Proto.Decoder(), bytes, chunk)
-            assertEquals(listOf(Proto.HELLO, Proto.VIDEO_ACK, Proto.HELLO_REPLY), got.map { it.type })
+            assertEquals(listOf(Proto.HELLO, Proto.VIDEO_ACKS, Proto.HELLO_REPLY), got.map { it.type })
             assertEquals("mmi", String(got[0].payload))
             assertEquals(7, Proto.u16(got[1].payload, 0))
             assertEquals(0, got[2].payload.size)
@@ -73,9 +73,9 @@ class ProtoTest {
         val bad = byteArrayOf(Proto.VIDEO_DATA.toByte(), (big and 0xff).toByte(), (big shr 8).toByte()) +
             ByteArray(big) { 0x55 }
         val dec = Proto.Decoder()
-        val got = decodeAll(dec, bad + Proto.encode(Proto.VIDEO_ACK, byteArrayOf(9, 0)), 700)
+        val got = decodeAll(dec, bad + Proto.encode(Proto.VIDEO_ACKS, byteArrayOf(9, 0)), 700)
         assertEquals(1, dec.oversized)
-        assertEquals(listOf(Proto.VIDEO_ACK), got.map { it.type })
+        assertEquals(listOf(Proto.VIDEO_ACKS), got.map { it.type })
         assertEquals(9, Proto.u16(got[0].payload, 0))
     }
 
@@ -110,7 +110,7 @@ class ProtoTest {
 
     @Test
     fun capsAndAckParse() {
-        // src/audi_stream_receiver/video.c video_caps(): 800x452, 400x480, 512 KB, JPEG
+        // src/audi_stream_receiver/video.cpp caps(): 800x452, 400x480, 512 KB, JPEG
         val caps = Proto.videoCapsOrNull(byteArrayOf(
             0x20, 0x03, 0xc4.toByte(), 0x01, 0x90.toByte(), 0x01, 0xe0.toByte(), 0x01,
             0, 0, 8, 0, 1))!!
@@ -118,9 +118,12 @@ class ProtoTest {
         assert(caps.jpeg)
         assert(!caps.takes(Proto.FMT_H264))
         assertNull(Proto.videoCapsOrNull(ByteArray(12)))
-        assertEquals(Proto.VideoAck(0x0102, Proto.VIDEO_SHOWN, 300),
-            Proto.videoAckOrNull(byteArrayOf(2, 1, 0, 0x2c, 1)))
-        assertNull(Proto.videoAckOrNull(ByteArray(4)))
+        // proto.h VIDEO_ACKS: shown u16, bad u16, dropped u16
+        val acks = Proto.videoAcksOrNull(byteArrayOf(2, 1, 3, 0, 5, 4))!!
+        assertEquals(Proto.VideoAcks(0x0102, 3, 0x0405), acks)
+        assertEquals(0x0102 + 3 + 0x0405, acks.total)
+        assertNull(Proto.videoAcksOrNull(ByteArray(5)))
+        assertEquals(0x0D, Proto.VIDEO_ACKS)
     }
 
     @Test
@@ -164,9 +167,12 @@ class ProtoTest {
 
     @Test
     fun h264ConfigMatchesTheCLayout() {
-        // proto.h H264_CONFIG: fps u8, frame_bytes u32, sps_len u16, sps, pps_len u16, pps
-        val f = Proto.h264Config(25, 0x10000, byteArrayOf(0x67, 0x42), byteArrayOf(0x68))
-        assertArrayEquals(byteArrayOf(0x0B, 12, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68), f)
+        // proto.h H264_CONFIG: fps u8, frame_bytes u32, sps_len u16, sps, pps_len u16, pps, vcap_mode u8
+        val f = Proto.h264Config(25, 0x10000, byteArrayOf(0x67, 0x42), byteArrayOf(0x68), VcapMode.ODD_ONLY.ordinal)
+        assertArrayEquals(byteArrayOf(0x0B, 13, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68, 3), f)
+        // proto.h kVcap*
+        assertEquals(listOf(0, 1, 2, 3),
+            listOf(VcapMode.KEEP, VcapMode.BOB, VcapMode.WEAVE, VcapMode.ODD_ONLY).map { it.ordinal })
         assertEquals(Proto.H264_SYNC, Proto.h264StatusOrNull(byteArrayOf(1)))
         assertNull(Proto.h264StatusOrNull(ByteArray(0)))
     }

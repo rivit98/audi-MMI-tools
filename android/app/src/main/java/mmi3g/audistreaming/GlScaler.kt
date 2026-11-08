@@ -21,10 +21,11 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Between the virtual display and the H.264 encoder: the screen is
- * captured at k times the picture into [inputSurface] (a SurfaceTexture),
- * and every new capture frame is box-filtered k:1 ([GlBox]) into the
- * encoder's input surface, with the capture's timestamp, on its own GL
- * thread. The encoder sees an ordinary producer: its rate limit and
+ * captured into [inputSurface] (a SurfaceTexture), and the kept part of every
+ * new capture frame ([ScreenCrop]) is box-filtered k:1 ([GlBox]) into the
+ * middle of the encoder's input surface, black around it, with the capture's
+ * timestamp, on its own GL thread. [update] changes all that without touching
+ * the encoder, so the MMI doesn't restart. The encoder sees an ordinary producer: its rate limit and
  * repeat-previous-frame work as before.
  *
  * [start] and [release] block until the GL thread has done its part, so
@@ -34,10 +35,11 @@ class GlScaler(
     private val target: Surface,
     val w: Int,
     val h: Int,
-    val k: Int,
+    start: ScreenCrop.Geometry,
 ) {
-    val srcW = w * k
-    val srcH = h * k
+    @Volatile var geometry = start
+        private set
+    val k: Int get() = geometry.k
     var inputSurface: Surface? = null
         private set
     @Volatile var frames = 0
@@ -53,6 +55,7 @@ class GlScaler(
     private var texture: SurfaceTexture? = null
     private var tex = 0
     private var program = 0
+    private var quadTex = floats(*GlBox.quadTex(start))
     private var aPos = 0
     private var aTex = 0
     private var uTexMatrix = 0
@@ -90,9 +93,29 @@ class GlScaler(
             ok = false
         }
         if (!ok) quit()
-        else Log.i(TAG, "GL scaler: ${srcW}x$srcH -> ${w}x$h (x$k, ${GlBox.taps(k).size} taps, " +
-            "${if (GlBox.linear(k)) "bilinear" else "nearest"})")
+        else Log.i(TAG, "GL scaler: $geometry -> ${w}x$h")
         return ok
+    }
+
+    /** Before the virtual display goes to g's size: the next frames are
+     * expected at it. False (and [failed]) if the GL thread couldn't. */
+    fun update(g: ScreenCrop.Geometry): Boolean {
+        val hd = handler ?: return false
+        val done = CountDownLatch(1)
+        hd.post {
+            try {
+                if (g.k != geometry.k) useFactor(g.k)
+                texture?.setDefaultBufferSize(g.capW, g.capH)
+                quadTex = floats(*GlBox.quadTex(g))
+                geometry = g
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "GL scaler update", e)
+                error = e.message ?: e.toString()
+                dead = true
+            }
+            done.countDown()
+        }
+        return done.await(2, TimeUnit.SECONDS) && !dead
     }
 
     fun release() {
@@ -136,29 +159,36 @@ class GlScaler(
         if (surface == EGL14.EGL_NO_SURFACE) fail("eglCreateWindowSurface")
         if (!EGL14.eglMakeCurrent(display, surface, surface, context)) fail("eglMakeCurrent")
 
-        program = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(k))
-        aPos = GLES20.glGetAttribLocation(program, "aPos")
-        aTex = GLES20.glGetAttribLocation(program, "aTex")
-        uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix")
-        uStepX = GLES20.glGetUniformLocation(program, "uStepX")
-        uStepY = GLES20.glGetUniformLocation(program, "uStepY")
-
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
         tex = ids[0]
-        val filter = if (GlBox.linear(k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST
+        useFactor(geometry.k)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, filter)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, filter)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         checkGl("texture")
 
         val st = SurfaceTexture(tex)
-        st.setDefaultBufferSize(srcW, srcH)
+        st.setDefaultBufferSize(geometry.capW, geometry.capH)
         st.setOnFrameAvailableListener({ draw() }, hd)
         texture = st
         inputSurface = Surface(st)
+    }
+
+    /** The shader and the texture's filter depend on k. */
+    private fun useFactor(k: Int) {
+        val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(k))
+        if (program != 0) GLES20.glDeleteProgram(program)
+        program = p
+        aPos = GLES20.glGetAttribLocation(p, "aPos")
+        aTex = GLES20.glGetAttribLocation(p, "aTex")
+        uTexMatrix = GLES20.glGetUniformLocation(p, "uTexMatrix")
+        uStepX = GLES20.glGetUniformLocation(p, "uStepX")
+        uStepY = GLES20.glGetUniformLocation(p, "uStepY")
+        val filter = if (GlBox.linear(k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, filter)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, filter)
     }
 
     private fun draw() {
@@ -167,18 +197,22 @@ class GlScaler(
         try {
             st.updateTexImage()
             st.getTransformMatrix(matrix)
-            GLES20.glViewport(0, 0, w, h)
+            // the encoder's buffers keep old content: black around the picture
+            val g = geometry
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glViewport((w - g.picW) / 2, (h - g.picH) / 2, g.picW, g.picH)
             GLES20.glUseProgram(program)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
             GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, matrix, 0)
-            val s = GlBox.steps(matrix, srcW, srcH)
+            val s = GlBox.steps(matrix, g.capW, g.capH)
             GLES20.glUniform2f(uStepX, s[0], s[1])
             GLES20.glUniform2f(uStepY, s[2], s[3])
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, QUAD_POS)
             GLES20.glEnableVertexAttribArray(aTex)
-            GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, QUAD_TEX)
+            GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, quadTex)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             EGLExt.eglPresentationTimeANDROID(display, surface, st.timestamp)
             if (!EGL14.eglSwapBuffers(display, surface)) fail("eglSwapBuffers")
@@ -267,9 +301,8 @@ class GlScaler(
                 position(0)
             }
 
-        // full-screen quad, triangle strip; texture coordinates 0..1 before
-        // the SurfaceTexture's transform
+        // full-viewport quad, triangle strip; its texture coordinates are
+        // GlBox.quadTex
         private val QUAD_POS = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
-        private val QUAD_TEX = floats(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
     }
 }

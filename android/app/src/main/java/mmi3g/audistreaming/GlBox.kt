@@ -12,10 +12,11 @@ package mmi3g.audistreaming
  * Downscale.box does for the JPEG pictures.
  */
 object GlBox {
-    /** The largest k <= MAX_FACTOR with k times the mirrored screen still
-     * within the screen (1 if even 2 is not). The mirror letterboxes the
-     * screen into the w x h picture, so that is the content k multiplies:
-     * 2340x1080 into 720x432 is 720x332, k = 3; portrait 199x432, k = 4. */
+    /** The largest k <= MAX_FACTOR with k times the picture's content still
+     * within the screen (1 if even 2 is not). screenW x screenH is the part
+     * of the screen that is kept (ScreenCrop); it is fitted into the w x h
+     * picture, so that is the content k multiplies: 2340x1080 into 720x432
+     * is 720x332, k = 3; portrait 199x432, k = 4. */
     fun factor(screenW: Int, screenH: Int, w: Int, h: Int): Int {
         if (screenW <= 0 || screenH <= 0 || w <= 0 || h <= 0) return 1
         val s = minOf(w.toDouble() / screenW, h.toDouble() / screenH)
@@ -78,6 +79,17 @@ void main() {
         val dx = 1f / srcW
         val dy = 1f / srcH
         return floatArrayOf(m[0] * dx, m[1] * dx, m[4] * dy, m[5] * dy)
+    }
+
+    /** Texture coordinates of [ScreenCrop.Geometry]'s kept part for the
+     * full-viewport triangle strip: bottom left, bottom right, top left, top
+     * right, before the SurfaceTexture's transform (y up from the bottom). */
+    fun quadTex(g: ScreenCrop.Geometry): FloatArray {
+        val u0 = g.cropX.toFloat() / g.capW
+        val u1 = (g.cropX + g.picW * g.k).toFloat() / g.capW
+        val v0 = 1f - (g.cropY + g.picH * g.k).toFloat() / g.capH
+        val v1 = 1f - g.cropY.toFloat() / g.capH
+        return floatArrayOf(u0, v0, u1, v0, u0, v1, u1, v1)
     }
 
     // GLSL ES 1.0 wants a decimal point in a float literal

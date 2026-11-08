@@ -1,6 +1,8 @@
-import usb.core
+import os
 
 import aoa_host
+import pytest
+import usb.core
 from aoa_host import Handshakes
 
 
@@ -36,6 +38,16 @@ def test_bus_devices_differ_when_a_phone_reenumerates(tmp_path):
     before = aoa_host.bus_devices(tmp_path)
     (tmp_path / "3-2" / "devnum").write_text("17\n")
     assert aoa_host.bus_devices(tmp_path) != before
+
+
+def test_a_changed_bus_restarts_the_process(monkeypatch):
+    execs = []
+    monkeypatch.setattr(aoa_host, "BUS_AT_START", {("3", "16")})
+    monkeypatch.setattr(aoa_host, "bus_devices", lambda: {("3", "17")})
+    monkeypatch.setattr(aoa_host.os, "execv", lambda path, argv: execs.append((path, argv)))
+    monkeypatch.setattr(aoa_host.sys, "argv", ["aoa_host.py", "--no-display"])
+    aoa_host.restart_if_bus_changed()
+    assert execs == [(aoa_host.sys.executable, [aoa_host.sys.executable, "aoa_host.py", "--no-display"])]
 
 
 def test_first_handshake_waits_after_the_device_appears():
@@ -75,3 +87,57 @@ def test_refused_protocol_query_is_reported():
 
 def test_failure_during_the_strings_is_reported_not_raised():
     assert "Pipe error" in aoa_host.try_switch(FakeDevice(fail_at_request=aoa_host.AOA_SEND_STRING))
+
+
+def test_screen_messages_cross_the_pipe_in_order():
+    read_end, write_end = os.pipe()
+    link = aoa_host.ScreenLink(write_end)
+    link.send("h264", b"\0\1\2")
+    link.send("link", state="connected", detail="x")
+    os.close(write_end)
+    assert list(aoa_host.read_messages(read_end)) == [
+        ({"kind": "h264"}, b"\0\1\2"),
+        ({"kind": "link", "state": "connected", "detail": "x"}, b""),
+    ]
+
+
+def test_the_usb_process_stops_when_the_window_is_gone():
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    with pytest.raises(SystemExit):
+        aoa_host.ScreenLink(write_end).send("h264", b"x")
+    os.close(write_end)
+
+
+def test_a_pause_is_logged_once_and_when_it_ends(capsys):
+    gaps = aoa_host.FrameGaps(gap_s=1)
+    gaps.frame(10)
+    gaps.idle(10.5)
+    assert capsys.readouterr().out == ""
+    gaps.idle(11)
+    gaps.idle(12)
+    assert capsys.readouterr().out.count("no frames for") == 1
+    gaps.frame(13)
+    assert "frames back after a pause of 3.0 s" in capsys.readouterr().out
+
+
+def test_stream_end_says_why_and_how_long_since_the_last_frame(capsys):
+    gaps = aoa_host.FrameGaps()
+    gaps.frame(10)
+    gaps.ended("VIDEO_STOP from the phone", 10.25)
+    out = capsys.readouterr().out
+    assert "VIDEO_STOP from the phone" in out
+    assert "last frame 0.2 s before" in out
+    gaps.idle(100)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("status, counts", [
+    (aoa_host.VIDEO_SHOWN, (1, 0, 0)),
+    (aoa_host.VIDEO_BAD, (0, 1, 0)),
+    (aoa_host.VIDEO_DROPPED, (0, 0, 1)),
+])
+def test_an_ack_counts_one_picture(status, counts):
+    # proto.h VIDEO_ACKS: shown u16, bad u16, dropped u16
+    shown, bad, dropped = counts
+    assert aoa_host.ack_frame(status) == bytes([0x0D, 6, 0, shown, 0, bad, 0, dropped, 0])

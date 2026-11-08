@@ -1,6 +1,7 @@
 package mmi3g.audistreaming
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -42,7 +43,8 @@ import android.widget.TextView
  * published in [Streaming.link]. "Format" picks H.264 (default) or JPEG
  * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
  * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
- * comparison) apply to H.264 only, also remembered. "Latency clock" shows a big running
+ * comparison) and "Capture mode" (the MMI's field mode, sent in H264_CONFIG)
+ * apply to H.264 only, also remembered. "Latency clock" shows a big running
  * clock (seconds.milliseconds, redrawn every display frame) that the MMI
  * mirrors: one photo of both screens gives the delay. "Details on the MMI" puts the MMI's status
  * bar (state, fps, timings) over a landscape picture; off, the picture has
@@ -50,7 +52,7 @@ import android.widget.TextView
  * switch is remembered and sent again on every connection (the MMI starts
  * with it off). "Keep screen on" (remembered) has CaptureService hold the
  * screen on while it streams, so a timeout can't lock the phone and end the
- * stream. Back only moves the app to the background,
+ * stream. Every option has an info button that explains it (setUpInfo). Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
  *
  * Turning the phone must not recreate the activity (configChanges in the
@@ -170,12 +172,33 @@ class MainActivity : Activity(), AccessoryLink.Listener {
                 override fun onNothingSelected(parent: AdapterView<*>) {}
             }
         }
+        Streaming.vcapMode = VcapMode.entries.firstOrNull {
+            it.name == prefs.getString(PREF_VCAP_MODE, null)
+        } ?: VcapMode.KEEP
+        findViewById<Spinner>(R.id.vcap_mode).apply {
+            setSelection(Streaming.vcapMode.ordinal)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
+                    Streaming.vcapMode = VcapMode.entries[pos]
+                    getPreferences(MODE_PRIVATE).edit().putString(PREF_VCAP_MODE, Streaming.vcapMode.name).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>) {}
+            }
+        }
         Streaming.sharp = prefs.getBoolean(PREF_SHARP, true)
         findViewById<CompoundButton>(R.id.sharp).apply {
             isChecked = Streaming.sharp
             setOnCheckedChangeListener { _, on ->
                 Streaming.sharp = on
                 getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_SHARP, on).apply()
+            }
+        }
+        Streaming.hideNavBar = prefs.getBoolean(PREF_HIDE_NAV_BAR, true)
+        findViewById<CompoundButton>(R.id.hide_nav_bar).apply {
+            isChecked = Streaming.hideNavBar
+            setOnCheckedChangeListener { _, on ->
+                Streaming.hideNavBar = on
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_HIDE_NAV_BAR, on).apply()
             }
         }
         Streaming.keepScreenOn = prefs.getBoolean(PREF_KEEP_SCREEN_ON, false)
@@ -199,6 +222,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
                 override fun onStopTrackingTouch(bar: SeekBar) {}
             })
         }
+        setUpInfo()
 
         val filter = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED)
@@ -291,6 +315,22 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         }
     }
 
+    /** The (i) buttons stay usable while their option is disabled. */
+    private fun setUpInfo() {
+        for ((button, title, text) in INFO) {
+            findViewById<View>(button).apply {
+                contentDescription = getString(R.string.info_about, getString(title))
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle(title)
+                        .setMessage(text)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            }
+        }
+    }
+
     private fun showFps() {
         fpsLabel.text = getString(R.string.max_fps, Streaming.maxFps)
     }
@@ -313,8 +353,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
                 }
                 "Video: ${Streaming.status}; %.1f fps (max ${Streaming.maxFps}); ".format(rate) +
                     "sent ${v.sent}, shown ${v.shown}, " +
-                    "bad ${v.bad}, dropped ${v.dropped}; MMI decode ${v.decodeMs} ms, " +
-                    "round trip ${v.roundTripMs} ms"
+                    "bad ${v.bad}, dropped ${v.dropped}"
             }
             Streaming.running -> "Video: ${Streaming.status}"
             l == null -> "Video: not connected"
@@ -393,7 +432,21 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_FPS = "max_fps"
         private const val PREF_FORMAT = "format"
         private const val PREF_BIT_RATE = "bit_rate"
+        private const val PREF_VCAP_MODE = "vcap_mode"
         private const val PREF_SHARP = "sharp_h264"
         private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
+        private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
+        private val INFO = listOf(
+            Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
+            Triple(R.id.info_details, R.string.info_details_title, R.string.info_details),
+            Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
+            Triple(R.id.info_format, R.string.info_format_title, R.string.info_format),
+            Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),
+            Triple(R.id.info_vcap_mode, R.string.info_vcap_mode_title, R.string.info_vcap_mode),
+            Triple(R.id.info_sharp, R.string.info_sharp_title, R.string.info_sharp),
+            Triple(R.id.info_clock, R.string.info_clock_title, R.string.info_clock),
+            Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
+            Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
+        )
     }
 }

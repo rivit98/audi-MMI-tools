@@ -7,15 +7,25 @@
 
 namespace vout {
 
-// Register + show the video displayable (cid 41, flags 0x101) and enable
-// capture. Returns 0 if every step said ok (dev-videoctrl answers EOK even
-// to payloads it ignores; its slog lines confirm).
-int show();
+// VCAP 0's field mode (dev-videoctrl: BOB, WEAVE, ODD ONLY). Keep leaves it
+// as it is.
+enum class Mode { Keep, Bob, Weave, OddOnly };
+const char *mode_name(Mode m);
+
+// Set the mode, if it isn't that already. Keep after another mode goes back
+// to WEAVE, the HMI's value for the rear camera: the HMI trusts its cache and
+// may not send it again (docs/rear-camera.md).
+int set_mode(Mode m);
+
+// Register + show the video displayable (cid 41, flags 0x101), set the mode
+// and enable capture. Returns 0 if every step said ok (dev-videoctrl answers
+// EOK even to payloads it ignores; its slog lines confirm).
+int show(Mode mode = Mode::Keep);
 // Capture off, VCAP 0 back to input 0 (the ADV7180 camera input, as at
-// boot), displayable gone. restore_vcap false: only the displayable goes,
-// /dev/videoctrl is left as it is - for when something else (the HMI's
-// rear camera, docs/rear-camera.md §9) may own VCAP 0 by now: writing
-// ENABLE 0 then would hide the camera.
+// boot), mode as in set_mode(Keep), displayable gone. restore_vcap false:
+// source and capture are left as they are - for when something else (the
+// HMI's rear camera, docs/rear-camera.md §9) may own VCAP 0 by now: writing
+// ENABLE 0 then would hide the camera. The mode still goes back.
 void hide(bool restore_vcap = true);
 // Close /dev/videoctrl (end of the run).
 void close_all();
