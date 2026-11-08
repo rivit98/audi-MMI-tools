@@ -9,6 +9,7 @@
     <string name="format">Format</string>
     <string name="latency_clock">Latency clock</string>
     <string name="keep_screen_on">Keep screen on while streaming</string>
+    <string name="version">Version %1$s UTC</string>
     <string name="bit_rate">H.264 rate</string>
     <string name="sharp">Sharp H.264 (GPU box downscale)</string>
     <!-- in the order of CaptureService.BIT_RATES -->

@@ -425,7 +425,9 @@ class CaptureService : Service() {
         configLink = null
         queue.clear()
         waitIdr = true
-        frameBytes = START_FRAME_BYTES.coerceAtMost(caps.h264MaxFrame)
+        // the size the frames needed stays: from 64 KB again, the next big
+        // IDR would cost one more restart on the MMI
+        frameBytes = frameBytes.coerceAtMost(caps.h264MaxFrame)
         AppLog.i("H.264 on: ${e.description}, display ${vw}x$vh${scaler?.let { " -> GL x${it.k}" } ?: " direct"}")
         return true
     }

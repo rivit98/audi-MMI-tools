@@ -207,7 +207,8 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   when the MMI asks (`I_FRAME_INTERVAL` 10 s); frames are never dropped
   on their own (the ones after would be garbage): a frame bigger than the
   config's `frame_bytes` (64 KB at first) raises it (a new config, the MMI
-  restarts its stream, ~1-2 s black), and a queue of over 25 unacked
+  restarts its stream, ~1-2 s black; the size stays for the rest of the
+  streaming session, also when the encoder restarts), and a queue of over 25 unacked
   frames is thrown away up to the next IDR. If the encoder puts other
   SPS/PPS before its IDRs than in its codec config, those become the
   config. The phone app's status line shows rate, frame sizes and drops.

@@ -32,6 +32,7 @@ import os
 import struct
 import sys
 import time
+from pathlib import Path
 
 import usb.core
 import usb.util
@@ -42,6 +43,9 @@ STRINGS = [MANUFACTURER, MODEL, "desk aoa_host.py", "1", "https://github.com/dsp
 HELLO_TEXT = b"audi_stream_receiver-desk/1"
 
 AOA_VID, AOA_PIDS = 0x18D1, range(0x2D00, 0x2D06)
+AOA_GET_PROTOCOL, AOA_SEND_STRING, AOA_START = 51, 52, 53
+HANDSHAKE_FIRST_S, HANDSHAKE_RETRY_S, HANDSHAKE_TRIES = 4, 5, 5
+SYS_USB_DEVICES = "/sys/bus/usb/devices"
 HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired
 VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_ACK, VIDEO_STOP, VIDEO_DETAILS = 5, 6, 7, 8, 9, 10
 H264_CONFIG, H264_STATUS = 11, 12
@@ -98,36 +102,86 @@ def find_accessory():
     return usb.core.find(custom_match=lambda d: d.idVendor == AOA_VID and d.idProduct in AOA_PIDS)
 
 
-def try_switch(dev) -> bool:
-    """AOA handshake on one device; True if START was sent."""
+class Handshakes:
+    """When to try AOA on each device, like aoa.c: a phone just enumerated may not answer yet."""
+
+    def __init__(self, first_s: float = HANDSHAKE_FIRST_S, retry_s: float = HANDSHAKE_RETRY_S,
+                 tries: int = HANDSHAKE_TRIES) -> None:
+        """Nothing seen yet."""
+        self.first_s, self.retry_s, self.max_tries = first_s, retry_s, tries
+        self.next_at: dict = {}
+        self.count: dict = {}
+
+    def due(self, key, now: float) -> bool:
+        """True if the device at key should be tried now; the first call starts its wait."""
+        next_at = self.next_at.setdefault(key, now + self.first_s)
+        return now >= next_at and self.count.get(key, 0) < self.max_tries
+
+    def tried(self, key, now: float) -> int:
+        """Record a try; returns how many so far."""
+        self.count[key] = self.count.get(key, 0) + 1
+        self.next_at[key] = now + self.retry_s
+        return self.count[key]
+
+
+def try_switch(dev) -> str | None:
+    """AOA handshake on one device; None if START was sent, else why not."""
     try:
-        ver = dev.ctrl_transfer(0xC0, 51, 0, 0, 2, timeout=1000)
-    except usb.core.USBError:
-        return False
-    version = ver[0] | ver[1] << 8 if len(ver) == 2 else 0
-    if version < 1:
-        return False
-    print(f"{dev.idVendor:04x}:{dev.idProduct:04x} speaks AOA v{version}, switching")
-    for i, s in enumerate(STRINGS):
-        dev.ctrl_transfer(0x40, 52, 0, i, s.encode() + b"\0", timeout=1000)
-    dev.ctrl_transfer(0x40, 53, 0, 0, None, timeout=1000)
-    return True
+        ver = dev.ctrl_transfer(0xC0, AOA_GET_PROTOCOL, 0, 0, 2, timeout=1000)
+        version = ver[0] | ver[1] << 8 if len(ver) == 2 else 0
+        if version < 1:
+            return f"AOA version {version}"
+        print(f"{dev.idVendor:04x}:{dev.idProduct:04x} speaks AOA v{version}, switching")
+        for i, s in enumerate(STRINGS):
+            dev.ctrl_transfer(0x40, AOA_SEND_STRING, 0, i, s.encode() + b"\0", timeout=1000)
+        dev.ctrl_transfer(0x40, AOA_START, 0, 0, None, timeout=1000)
+    except usb.core.USBError as e:
+        return str(e)
+    return None
+
+
+def bus_devices(root=SYS_USB_DEVICES) -> set[tuple[str, str]]:
+    """The (bus, address) of every USB device, from sysfs."""
+    found = set()
+    for d in Path(root).glob("*"):
+        try:
+            found.add(((d / "busnum").read_text().strip(), (d / "devnum").read_text().strip()))
+        except OSError:  # an interface, or a device just gone
+            pass
+    return found
+
+
+# Read before libusb starts. In a container libusb keeps the device list it
+# found at startup, so when the bus differs from this the process starts over.
+BUS_AT_START = bus_devices()
+
+
+def restart_if_bus_changed() -> None:
+    """Replace this process with a new one if USB devices came or went since it started."""
+    if bus_devices() != BUS_AT_START:
+        print("USB devices changed: restarting to see them", flush=True)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def wait_for_accessory():
     """Switch any Android device to accessory mode and return it."""
-    tried = set()
+    handshakes = Handshakes()
     while True:
+        restart_if_bus_changed()
         acc = find_accessory()
         if acc is not None:
             return acc
         for dev in usb.core.find(find_all=True):
-            key = (dev.bus, dev.address)
-            if dev.bDeviceClass == 9 or key in tried:
+            key, now = (dev.bus, dev.address), time.monotonic()
+            if dev.bDeviceClass == 9 or not handshakes.due(key, now):
                 continue
-            tried.add(key)
-            if try_switch(dev):
+            attempt = handshakes.tried(key, now)
+            why = try_switch(dev)
+            if why is None:
                 break
+            if attempt in (1, HANDSHAKE_TRIES):  # first and last: other USB devices refuse too
+                print(f"{dev.idVendor:04x}:{dev.idProduct:04x}: no AOA ({why}), "
+                      f"try {attempt} of {HANDSHAKE_TRIES}")
         time.sleep(1)
 
 

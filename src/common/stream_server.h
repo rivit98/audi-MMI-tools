@@ -59,6 +59,8 @@ public:
 	void stop();
 	bool running() const { return impl_ != nullptr; }
 
+	// Live while serving; after stop(), what it ended with, until the next
+	// start().
 	StreamStats stats();
 	// Notes from the server thread (the first reads in detail, unblocks,
 	// errors) since the last call. The server never writes the log itself:
@@ -70,6 +72,7 @@ public:
 
 private:
 	Impl *impl_ = nullptr;
+	StreamStats last_;
 	std::thread thread_;
 };
 

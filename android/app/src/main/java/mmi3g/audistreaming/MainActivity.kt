@@ -124,6 +124,8 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         AppLog.init(this)
         AppLog.i("activity created")
         setContentView(R.layout.activity_main)
+        findViewById<TextView>(R.id.version).text =
+            getString(R.string.version, packageManager.getPackageInfo(packageName, 0).versionName)
         usb = getSystemService(Context.USB_SERVICE) as UsbManager
         statusView = findViewById(R.id.status)
         detailView = findViewById(R.id.detail)

@@ -386,6 +386,7 @@ std::string StreamServer::start(const char *path, live::Stream *stream)
 		delete d;
 		return e;
 	}
+	last_ = StreamStats();
 	impl_ = d;
 	thread_ = std::thread([d] { d->run(); });
 	return "";
@@ -406,6 +407,7 @@ void StreamServer::stop()
 	resmgr_detach(impl_->dpp, impl_->id, _RESMGR_DETACH_ALL);
 	dispatch_context_free(impl_->ctp);
 	dispatch_destroy(impl_->dpp);
+	last_ = impl_->st;
 	delete impl_;
 	impl_ = nullptr;
 }
@@ -413,7 +415,7 @@ void StreamServer::stop()
 StreamStats StreamServer::stats()
 {
 	if (impl_ == nullptr)
-		return StreamStats();
+		return last_;
 	std::lock_guard<std::mutex> lock(impl_->mu);
 	return impl_->st;
 }

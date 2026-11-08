@@ -986,15 +986,16 @@ phone.
 - **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
   160 KB, against ~45 % for JPEG).
 
-**Restarts are wasteful, but only cost a short break in the picture.** Each
-rotation or frame-size change sends a new `H264_CONFIG`, and the graph
-restarts:
+**Restarts cost a short break in the picture.** An `H264_CONFIG` with other
+contents restarts the graph. Keeping them rare **[built, not yet on the car]**:
 
-- IDRs go over 64 KB, so the phone grows the frame size to 128–160 KB. After
-  a rotation it starts again from 64 KB, so the next big IDR causes one more
-  restart.
-- Identical configs queued during a restart cause more restarts: 18 of 30
-  streams in one session ended with 0 frames in, up to 6 in a row.
+- IDRs go over 64 KB, so the phone grows the frame size to 128–160 KB. The
+  size stays when its encoder restarts, so a later big IDR causes no restart.
+- One config means one restart (`config_gate.h`). Copies of the config being
+  set up are ignored, frames that come during a restart are dropped instead of
+  each asking for the config, and setup then asks for an IDR. With a restart
+  per copy, 18 of 30 streams in one session ended with 0 frames in, up to 6 in
+  a row.
 - A restart racing the player sometimes gives `player: ERROR event:
   Input/output error` (2 in 30 streams, 1 in 10) or `bad event size 1000`,
   and the next restart recovers.

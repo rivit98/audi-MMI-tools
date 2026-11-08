@@ -19,12 +19,14 @@ android {
         targetSdk = 35
         // A new, higher versionCode on every build (minutes since 2026-01-01
         // UTC), so the phone's installer offers "Update" over the installed
-        // APK instead of a same-version "Install". versionName is the build
-        // time, shown in the phone's app info.
+        // APK instead of a same-version "Install". versionName is semantic
+        // versioning with the build time (UTC) as build metadata, shown at the
+        // bottom of the app and in the phone's app info. Bump semver by hand.
+        val semver = "0.1.0"
         val built = ZonedDateTime.now(ZoneOffset.UTC)
         val epoch = ZonedDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)
         versionCode = Duration.between(epoch, built).toMinutes().toInt()
-        versionName = built.format(DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm"))
+        versionName = semver + "+" + built.format(DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm"))
     }
 
     // A fixed debug key in android/keystore/, so rebuilding (or `make clean`)

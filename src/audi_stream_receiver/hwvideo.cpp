@@ -3,6 +3,7 @@
 // code hello9 runs on the car with a clip instead of the phone.
 #include "hwvideo.h"
 
+#include "config_gate.h"
 #include "hw_stream.h"
 #include "live_stream.h"
 #include "vout.h"
@@ -42,7 +43,7 @@ struct Window {
 
 std::mutex mu;                          // everything below, but `hw` use by the hw thread
 std::unique_ptr<HwStream> hw;           // set / taken under mu; polled by the hw thread
-std::vector<uint8_t> config_now;        // the payload hw was started from
+ConfigGate gate;                        // the newest config: running, being set up or pending
 std::vector<uint8_t> config_next;       // a new one for the hw thread
 bool config_pending = false;
 bool stop_pending = false;
@@ -120,6 +121,14 @@ void release_held_video(bool restore_vcap)
 	video_held = false;
 }
 
+// hw thread: the config taken didn't give a stream, and no other is waiting.
+void forget_config()
+{
+	std::lock_guard<std::mutex> lock(mu);
+	if (!config_pending)
+		gate.forget();
+}
+
 // hw thread: end the stream (if any) and log what it did.
 void teardown(const char *why, End how = End::Stop)
 {
@@ -127,8 +136,9 @@ void teardown(const char *why, End how = End::Stop)
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		h.swap(hw);                      // no more frames into it
-		config_now.clear();
 	}
+	if (how == End::Error)
+		forget_config();
 	if (!h) {
 		if (how != End::Restart)
 			release_held_video(how == End::Stop);
@@ -162,6 +172,7 @@ void setup(const std::vector<uint8_t> &payload)
 	struct proto_h264_config c;
 	if (proto_h264_config_parse(payload.data(), (unsigned)payload.size(), &c) != 0) {
 		log_msg("h264: H264_CONFIG malformed (%zu bytes): refused", payload.size());
+		forget_config();
 		release_held_video(true);
 		active = false;
 		status(PROTO_H264_REFUSED);
@@ -195,6 +206,7 @@ void setup(const std::vector<uint8_t> &payload)
 	        sps.width, sps.height, (unsigned)sps.profile, (unsigned)sps.level, sps.poc_type,
 	        err.empty() ? "" : ": refused, ", err.c_str());
 	if (!err.empty()) {
+		forget_config();
 		release_held_video(true);
 		active = false;
 		status(PROTO_H264_REFUSED);
@@ -207,6 +219,7 @@ void setup(const std::vector<uint8_t> &payload)
 	video_held = false;                  // h owns the picture now
 	if (!err.empty()) {
 		log_msg("h264: %s: refused", err.c_str());
+		forget_config();
 		h->stop();
 		active = false;
 		status(PROTO_H264_REFUSED);
@@ -215,7 +228,6 @@ void setup(const std::vector<uint8_t> &payload)
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		hw.swap(h);
-		config_now = payload;
 		refused_logged = 0;
 		queue_status(PROTO_H264_PLAYING);
 		last_sync_ms = 0;
@@ -278,7 +290,7 @@ void *run(void *)
 				config_pending = false;
 			}
 			if (restart_pending && !have_next) {
-				next = config_now;
+				next = gate.current();
 				do_restart = !next.empty();
 			}
 			restart_pending = false;
@@ -378,11 +390,13 @@ void hwvideo_config(const uint8_t *payload, unsigned n)
 	std::vector<uint8_t> p(payload, payload + n);
 	{
 		std::lock_guard<std::mutex> lock(mu);
-		if (!hw || p != config_now) {
+		if (gate.offer(p)) {
 			config_next.swap(p);
 			config_pending = true;
 			return;
 		}
+		if (!hw || config_pending)
+			return;                  // on its way: setup() says PLAYING
 		queue_status(PROTO_H264_PLAYING);
 	}
 	log_msg("h264: H264_CONFIG again, the same: nothing to do");
@@ -399,10 +413,17 @@ int hwvideo_frame(const uint8_t *data, unsigned size)
 		if (!hw) {
 			refused_total++;
 			if (refused_logged++ < kLogRefusals)
-				note = "before any H264_CONFIG";
-			queue_status(PROTO_H264_CONFIG_WANTED);
-			wake = true;
-			ack = PROTO_VIDEO_BAD;
+				note = gate.taken() ? "the stream is starting" : "before any H264_CONFIG";
+			if (gate.taken()) {
+				// setup() asks for an IDR when it is done
+				ack = PROTO_VIDEO_DROPPED;
+			} else {
+				if (gate.ask(log_ms())) {
+					queue_status(PROTO_H264_CONFIG_WANTED);
+					wake = true;
+				}
+				ack = PROTO_VIDEO_BAD;
+			}
 		} else {
 			std::string why;
 			live::Push p = hw->push(data, size, &why);
@@ -416,8 +437,10 @@ int hwvideo_frame(const uint8_t *data, unsigned size)
 					queue_status(PROTO_H264_SYNC);
 					wake = true;
 				} else if (p == live::Push::ConfigChanged) {
-					queue_status(PROTO_H264_CONFIG_WANTED);
-					wake = true;
+					if (gate.ask(log_ms())) {
+						queue_status(PROTO_H264_CONFIG_WANTED);
+						wake = true;
+					}
 				} else if (p == live::Push::Full) {
 					restart_pending = true;
 				}
@@ -434,11 +457,12 @@ int hwvideo_frame(const uint8_t *data, unsigned size)
 void hwvideo_stop(const char *why)
 {
 	std::lock_guard<std::mutex> lock(mu);
-	if (!hw && !config_pending)
+	if (!hw && !gate.taken())
 		return;
 	stop_pending = true;
 	stop_why = why;
 	config_pending = false;
+	gate.forget();
 }
 
 int hwvideo_status_pop(uint8_t *code)

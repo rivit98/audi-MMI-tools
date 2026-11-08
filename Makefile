@@ -312,7 +312,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live
+           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -359,7 +359,12 @@ build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 li
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_live,$(TESTBIN)):
+# audi_stream_receiver: which H264_CONFIGs restart the stream
+build/test_config_gate: tests/test_config_gate.cpp tests/check.h src/audi_stream_receiver/config_gate.h
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
+	    -o $@ $(filter %.cpp,$^)
+$(filter-out build/test_hello8 build/test_live build/test_config_gate,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
