@@ -82,14 +82,14 @@ class ProtoTest {
     @Test
     fun pictureIsStartPlusDataChunks() {
         val jpeg = ByteArray(5000) { (it * 7).toByte() }
-        val got = decodeAll(Proto.Decoder(), Proto.picture(0x0203, 640, 360, Proto.FMT_PNG, jpeg, 77), 333)
+        val got = decodeAll(Proto.Decoder(), Proto.picture(0x0203, 640, 360, Proto.FMT_JPEG, jpeg, 77), 333)
         assertEquals(Proto.VIDEO_START, got[0].type)
         val s = got[0].payload
         assertEquals(13, s.size)                         // 11 + phoneMs
         assertEquals(0x0203, Proto.u16(s, 0))
         assertEquals(640, Proto.u16(s, 2))
         assertEquals(360, Proto.u16(s, 4))
-        assertEquals(Proto.FMT_PNG, s[6].toInt())
+        assertEquals(Proto.FMT_JPEG, s[6].toInt())
         assertEquals(5000, Proto.u32(s, 7))
         assertEquals(77, Proto.u16(s, 11))
         val data = got.drop(1)
@@ -116,8 +116,7 @@ class ProtoTest {
             0, 0, 8, 0, 1))!!
         assertEquals(Proto.VideoCaps(800, 452, 400, 480, 512 * 1024, 1), caps)
         assert(caps.jpeg)
-        assert(!caps.png)                                // MMI app without PNG
-        assert(caps.copy(formats = 3).png)
+        assert(!caps.takes(Proto.FMT_H264))
         assertNull(Proto.videoCapsOrNull(ByteArray(12)))
         assertEquals(Proto.VideoAck(0x0102, Proto.VIDEO_SHOWN, 300),
             Proto.videoAckOrNull(byteArrayOf(2, 1, 0, 0x2c, 1)))

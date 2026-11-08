@@ -224,6 +224,8 @@ static void test_vasm_refusals(void)
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	n = start(p, 3, 640, 360, 9, 10);                 /* unknown format */
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
+	n = start(p, 3, 640, 360, 2, 10);                 /* PNG, retired */
+	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	n = start(p, 3, 640, 360, 0, 10);
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_BAD);
 	n = start(p, 4, 0, 360, PROTO_FMT_JPEG, 10);
@@ -241,9 +243,9 @@ static void test_vasm_refusals(void)
 	vasm_free(&a);
 }
 
-/* PNG, and phone_ms: absent in an 11-byte START (old phone app), read from
- * a 13-byte one, extra bytes after it ignored. */
-static void test_vasm_png_phone_ms(void)
+/* phone_ms: absent in an 11-byte START (old phone app), read from a 13-byte
+ * one, extra bytes after it ignored. */
+static void test_vasm_phone_ms(void)
 {
 	struct vasm a;
 	struct vpic pic;
@@ -252,12 +254,12 @@ static void test_vasm_png_phone_ms(void)
 	unsigned n;
 
 	vasm_init(&a, 100);
-	n = start(p, 20, 800, 368, PROTO_FMT_PNG, 2);
+	n = start(p, 20, 800, 368, PROTO_FMT_JPEG, 2);
 	CHECK_EQ(vasm_start(&a, p, n, &dropped, &bad), VASM_OK);
 	n = data(p, 20, "ok", 2);
 	CHECK_EQ(vasm_data(&a, p, n, &bad), VASM_DONE);
 	vasm_take(&a, &pic);
-	CHECK_EQ(pic.format, PROTO_FMT_PNG);
+	CHECK_EQ(pic.format, PROTO_FMT_JPEG);
 	CHECK_EQ(pic.phone_ms, 0);
 	free(pic.data);
 
@@ -348,7 +350,7 @@ int main(void)
 	test_vasm_whole_picture();
 	test_vasm_refusals();
 	test_vasm_cut_short();
-	test_vasm_png_phone_ms();
+	test_vasm_phone_ms();
 	test_encode();
 	test_whole_frames();
 	test_byte_by_byte();

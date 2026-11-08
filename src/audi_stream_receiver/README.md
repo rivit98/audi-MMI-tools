@@ -1,9 +1,9 @@
 # audi_stream_receiver
 
 The phone's screen on the MMI, over USB. An Android phone app
-(`android/`, the Audi streaming APK) captures its screen and sends it as JPEG
-or PNG pictures, a few a second, over Android Open Accessory (AOA). This app
-receives them, decodes them on the CPU and shows them full screen.
+(`android/`, the Audi streaming APK) captures its screen and sends it over Android Open Accessory (AOA): as
+[hardware H.264](#hardware-h264) by default, or as JPEG pictures, a few a
+second. This app receives it, decodes JPEG on the CPU and shows it full screen.
 
 ```
 phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen + audi_stream_receiver.log
@@ -20,7 +20,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
   ```sh
   make sd SD_APPS=audi_stream_receiver   # MMI side only (the default run has it last)
-  make test                 # C unit tests: protocol, pictures, JPEG/PNG, UTF-8, wrap, drawing
+  make test                 # C unit tests: protocol, pictures, JPEG, UTF-8, wrap, drawing
   make apk                  # android/out/audi_streaming.apk (= make -C android)
   make apk-test             # Kotlin unit tests
   make apk-install          # adb install -r, adb runs in the container
@@ -52,8 +52,8 @@ no root or USB debugging needed. Android starts the phone app because its
 `type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say who
 is at each end. The MMI sends `VIDEO_CAPS` with them: a landscape box
 (800×480, the whole screen), a portrait box (400×480, the left half),
-512 KB max per picture, and the formats it takes (bit 0 JPEG, bit 1 PNG,
-bit 2 H.264). A phone streams only to an MMI that sent it. A picture is
+512 KB max per picture, and the formats it takes (bit 0 JPEG, bit 2 H.264;
+bit 1 was PNG, retired, not to be reused). A phone streams only to an MMI that sent it. A picture is
 `VIDEO_START` (id, w, h, format, size, the phone's downscale + encode ms)
 plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACK` (id,
 shown/bad/dropped, decode ms). `VIDEO_STOP` (or the link going down) brings
@@ -68,8 +68,7 @@ k ≤ 4 that fits the screen; a 1080×2340 phone captures 1600×736 for
 800×368, 880×1920 for 220×480), resized when the phone turns. When fewer
 than two pictures are in flight and 1/*Max fps* (slider 1–15, default 5)
 has passed, it takes the newest image, averages each k×k block into one
-pixel (`Downscale.box`), compresses it as *Format* says (JPEG q90, or PNG;
-a PNG over 512 KB goes as JPEG) and sends it. A static screen sends
+pixel (`Downscale.box`), compresses it as JPEG q90 and sends it. A static screen sends
 nothing; after a replug the new link gets the last picture again. The k×
 capture is there because Android's own one-step bilinear scale skips most
 of a thin text stroke past 2:1 (blurred text, see [Results](#results-on-the-car)).
@@ -114,10 +113,10 @@ writes:
 - `perf: window` every 10 s of streaming and `perf: stream` when it stops:
   pictures shown, fps, dropped, bad; avg/max ms of `rx` (USB), `wait`,
   `decode`, `render`, `copy` (into the VFB), `flip` and `latency`
-  (`VIDEO_START` in to on screen); per format the count, KB, MMI decode
+  (`VIDEO_START` in to on screen); the JPEG count, KB, MMI decode
   and phone time; VFB KB per picture, main loop busy %, process CPU %.
 - `audi_stream_perf.csv`, one line per picture with the same fields in µs
-  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,fmt,phone_ms`),
+  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms`),
   128 lines per fsync.
 
 The first three pictures of a stream are also logged one by one. With a
@@ -148,18 +147,18 @@ screen footer shows the last second.
    phone's screen appears on the MMI: landscape on the whole screen,
    portrait on the left half with the status panel beside it. The
    phone's *Details on the MMI* switch adds a slim status bar over a
-   landscape picture. *Format* on the phone picks JPEG (fast) or PNG
-   (sharp text, bigger).
+   landscape picture. *Format* on the phone picks H.264 (the
+   default) or JPEG.
 4. Use the phone as usual. Back, Home, other apps, turning the phone,
    unplugging and replugging all keep the stream going. Stop it in the
    app or from its notification. Pull the SD card to end the MMI side.
 
 ## Hardware H.264
 
-Besides JPEG / PNG pictures decoded on the CPU, the app takes an **H.264
+Besides JPEG pictures decoded on the CPU, the app takes an **H.264
 stream** and has the unit's DM642 decode it: no CPU decoding, ~25 fps,
 0.4–0.65 s added by io-media ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
-On the phone: *Format* → **H.264** (Android 10+). The phone encodes its
+On the phone: *Format* **H.264**, the default (Android 10+). The phone encodes its
 screen in hardware at 720×432 (the MMI's 720×576 limit, the screen's 5:3
 shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 25 fps and fills the rest with skip frames.
@@ -178,7 +177,7 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   `/dev/audi_stream/live.mp4`, the io-media graph once the first IDR is
   in, the picture 1 s later. Gaps are filled with skip frames. A new
   config restarts the stream; the same config again changes nothing. The
-  stream ends on `VIDEO_STOP`, a JPEG / PNG picture, unplugging, or when
+  stream ends on `VIDEO_STOP`, a JPEG picture, unplugging, or when
   its declared frames run out (the 4 GB limit: ~1.6 h at 28 KB frames,
   ~45 min at 64 KB; then it starts again and asks for an IDR). The last
   8 MB of frames are kept for io-media (16-128 frames).
@@ -254,7 +253,7 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
 - In some boots EP0 requests to the same phone failed with
   `DEV_NOANSWER` (docs/usb-stack.md).
 
-**JPEG / PNG pictures.** Work, turning the phone included (landscape
+**JPEG pictures.** Work, turning the phone included (landscape
 800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped;
 *Details* on/off works.
 
@@ -264,7 +263,7 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
 | present (render + copy + flip) | ~200 ms whatever the size | render 23 + copy 18–19 + flip 3 ms |
 | rate | ~2 fps | 2–4 fps per 10 s window (avg ~3), set by the phone |
 
-- Decode: landscape 800×368 JPEG 55–65 ms, PNG ~46 ms; portrait 220×480
+- Decode: landscape 800×368 JPEG 55–65 ms; portrait 220×480
   JPEG ~22 ms. A landscape picture costs the MMI ~100 ms in total, so it
   could do ~10 fps; the phone (*Max fps*, a static screen, its capture and
   compress) sets the rate. Gaps between pictures 92–668 ms.

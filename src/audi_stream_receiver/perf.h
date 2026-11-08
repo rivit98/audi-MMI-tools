@@ -8,7 +8,7 @@
  *
  *   audi_stream_receiver.log   one "perf:" summary line per PERF_WINDOW_MS with
  *                     pictures (rate, avg/max of every stage, size, decode
- *                     and phone time per format, VFB bytes, main-loop
+ *                     and phone time, VFB bytes, main-loop
  *                     busy, process CPU), and a "perf: stream" line for
  *                     the whole stream when it stops
  *   audi_stream_perf.csv   one line per picture (columns in perf.c), written
@@ -28,7 +28,6 @@
 struct perf_pic {
 	unsigned t_ms;        /* log_ms() when shown / dropped / refused */
 	unsigned id, bytes, w, h;
-	unsigned format;      /* PROTO_FMT_* */
 	unsigned phone_ms;    /* the phone's scale + encode (VIDEO_START), 0 = not sent */
 	int      status;      /* PROTO_VIDEO_SHOWN / _BAD / _DROPPED */
 	unsigned rx_us;       /* VIDEO_START in -> last VIDEO_DATA in (USB) */

@@ -12,8 +12,7 @@ receiver. Ctrl-C to stop.
 
 Video: announces the MMI's boxes (VIDEO_CAPS, 800x480 screen, as
 src/audi_stream_receiver/video.c), reassembles the phone's pictures, acks each as
-shown and, with --save DIR, keeps the newest one as DIR/latest.jpg or
-DIR/latest.png (the phone app's format setting).
+shown and, with --save DIR, keeps the newest one as DIR/latest.jpg.
 
 H.264 (the phone app's "H.264" format): announces the MMI's limits
 (720x576, 25 fps, frames up to 256 KB), takes H264_CONFIG, checks every
@@ -50,12 +49,12 @@ H264_PLAYING, H264_SYNC, H264_REFUSED, H264_CONFIG_WANTED = 0, 1, 2, 3
 VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
 SCREEN_W, SCREEN_H, MAX_BYTES = 800, 480, 512 * 1024
-FMT_JPEG, FMT_PNG, FMT_H264 = 1, 2, 3
+FMT_JPEG, FMT_H264 = 1, 3
 H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME = 720, 576, 25, 256 * 1024  # = hwvideo.h
 CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES,
-                   1 << (FMT_JPEG - 1) | 1 << (FMT_PNG - 1) | 1 << (FMT_H264 - 1),
+                   1 << (FMT_JPEG - 1) | 1 << (FMT_H264 - 1),
                    H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME)
-EXT = {FMT_JPEG: "jpg", FMT_PNG: "png"}
+EXT = {FMT_JPEG: "jpg"}
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 
 
@@ -271,7 +270,7 @@ class H264:
 
 
 class Pictures:
-    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one JPEG / PNG / H.264 frame."""
+    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one JPEG / H.264 frame."""
 
     def __init__(self) -> None:
         """Nothing received yet."""

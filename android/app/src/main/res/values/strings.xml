@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Audi streaming</string>
-    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Format: JPEG is small and fast, PNG keeps text sharp but is bigger and slower, H.264 is smooth video decoded by the MMI\'s video chip (Android 10+, about half a second behind). Latency clock: a big running clock here; a photo of the phone and the MMI together shows how far the MMI is behind. Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
+    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen, up to Max fps pictures a second (the MMI may manage fewer). Format: H.264 is smooth video decoded by the MMI\'s video chip (Android 10+, about half a second behind); JPEG is a few pictures a second decoded by the MMI\'s CPU. Latency clock: a big running clock here; a photo of the phone and the MMI together shows how far the MMI is behind. Switch to any app, turn the phone, unplug and replug: the streaming carries on until you stop it here or from its notification.</string>
     <string name="stream_start">Stream screen</string>
     <string name="stream_stop">Stop stream</string>
     <string name="max_fps">Max %1$d fps</string>
@@ -19,8 +19,7 @@
     </string-array>
     <!-- in the order of enum Format (CaptureService.kt) -->
     <string-array name="formats">
-        <item>JPEG (fast)</item>
-        <item>PNG (sharp, slower)</item>
         <item>H.264 (smooth video, MMI video chip)</item>
+        <item>JPEG (a few pictures a second)</item>
     </string-array>
 </resources>

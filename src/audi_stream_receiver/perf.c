@@ -20,7 +20,7 @@
 #define CSV_LINE_MAX 176
 
 #define CSV_HEADER "t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us," \
-                   "copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,fmt,phone_ms\n"
+                   "copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms\n"
 
 /* --- shared (lock) ------------------------------------------------------ */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -42,7 +42,7 @@ struct stat1 {
 	unsigned max;
 };
 
-/* the pictures of one format (JPEG, PNG) */
+/* the JPEG pictures */
 struct fmt1 {
 	unsigned n;
 	unsigned long long bytes;
@@ -53,7 +53,7 @@ struct agg {
 	unsigned start_ms, shown, bad, dropped, full;
 	unsigned long long vfb_bytes, vfb_rows;
 	struct stat1 rx, wait, decode, render, copy, flip, latency;
-	struct fmt1 fmt[2];                  /* [0] JPEG, [1] PNG */
+	struct fmt1 fmt;
 	unsigned long long idle_us;
 	long long cpu_us0;
 };
@@ -104,7 +104,7 @@ static void agg_add(struct agg *a, const struct perf_pic *p)
 		a->dropped++;
 		return;
 	}
-	f = &a->fmt[p->format == PROTO_FMT_PNG];
+	f = &a->fmt;
 	f->n++;
 	f->bytes += p->bytes;
 	st_add(&f->decode, p->decode_us);
@@ -126,7 +126,6 @@ static void agg_log(const char *what, const struct agg *a, unsigned now)
 {
 	char rx[24], wait[24], dec[24], ren[24], cpy[24], flp[24], lat[24], cpu[16];
 	char fmts[160], d[24], ph[24];
-	int i, len = 0;
 	unsigned span = now - a->start_ms, n = a->shown;
 	unsigned busy = span ? 100 - (unsigned)(a->idle_us / 10 / span) : 0;
 	long long c = cpu_us();
@@ -140,19 +139,16 @@ static void agg_log(const char *what, const struct agg *a, unsigned now)
 	st_fmt(cpy, sizeof(cpy), &a->copy, n);
 	st_fmt(flp, sizeof(flp), &a->flip, n);
 	st_fmt(lat, sizeof(lat), &a->latency, n);
-	for (i = 0; i < 2; i++) {
-		const struct fmt1 *f = &a->fmt[i];
+	if (a->fmt.n) {
+		const struct fmt1 *f = &a->fmt;
 
-		if (f->n == 0 || len >= (int)sizeof(fmts))
-			continue;
 		st_fmt(d, sizeof(d), &f->decode, f->n);
 		st_fmt(ph, sizeof(ph), &f->phone, f->n);
-		len += snprintf(fmts + len, sizeof(fmts) - len, "%s%s %u x %u KB, decode %s, phone %s",
-		                len ? "; " : "", proto_fmt_name(i ? PROTO_FMT_PNG : PROTO_FMT_JPEG),
-		                f->n, (unsigned)(f->bytes / f->n / 1024), d, ph);
-	}
-	if (len == 0)
+		snprintf(fmts, sizeof(fmts), "JPEG %u x %u KB, decode %s, phone %s",
+		         f->n, (unsigned)(f->bytes / f->n / 1024), d, ph);
+	} else {
 		snprintf(fmts, sizeof(fmts), "no pictures");
+	}
 	if (c >= 0 && a->cpu_us0 >= 0)
 		snprintf(cpu, sizeof(cpu), "%u%%", (unsigned)((c - a->cpu_us0) / 10 / span));
 	else
@@ -190,11 +186,11 @@ static void csv_add(const struct perf_pic *p)
 	if (csv_len + CSV_LINE_MAX > sizeof(csv_buf))
 		csv_write(log_ms());
 	n = snprintf(csv_buf + csv_len, CSV_LINE_MAX,
-	             "%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%s,%u\n",
+	             "%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u\n",
 	             p->t_ms, p->id, p->status, p->w, p->h, p->bytes, p->rx_us,
 	             p->wait_us, p->decode_us, p->render_us, p->copy_us, p->flip_us,
 	             p->vfb_bytes, p->vfb_rows, p->vfb_full, p->latency_us,
-	             p->format == PROTO_FMT_PNG ? "png" : "jpeg", p->phone_ms);
+	             p->phone_ms);
 	if (n > 0 && n < CSV_LINE_MAX) {
 		csv_len += (unsigned)n;
 		csv_lines++;

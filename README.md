@@ -39,7 +39,7 @@ what it showed on the car). Shared code is in [src/common/](src/common/).
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP | works |
-| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): JPEG/PNG or hardware H.264; phone app in [android/](android/) | works |
+| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/) | works |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens | tool |
 
 Which apps a card gets by default, their timeouts and arguments:

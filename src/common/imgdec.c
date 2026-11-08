@@ -1,10 +1,10 @@
 /*
- * imgdec.c - JPEG and PNG input through stb_image (see imgdec.h).
+ * imgdec.c - JPEG input through stb_image (see imgdec.h).
  *
  * stb_image.h is vendored unchanged (v2.30, from Debian's libstb-dev
  * 0.0~git20250907.fede005+ds-1, nothings/stb commit fede005; public domain
- * / MIT, the licence is at its end). Only its JPEG and PNG decoders (with
- * the inflate PNG needs) are compiled in: no stdio, no HDR/linear float
+ * / MIT, the licence is at its end). Only its JPEG decoder is compiled in:
+ * no stdio, no HDR/linear float
  * paths (so no libm), no SIMD (SH4; on the host test the same scalar code
  * runs), and no thread-local error string - QNX 6.3.2 has no TLS.
  */
@@ -15,7 +15,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
 #define STBI_ONLY_JPEG
-#define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR

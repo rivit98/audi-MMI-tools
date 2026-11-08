@@ -195,7 +195,7 @@ docs/                   this guide and the deep dives
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
 | `GL` | `gfx`, `hud`, `img` | gf + EGL bring-up, FPS counter, BMP/PNG writer |
 | `IMG` | `img` | PNG/BMP writer (stb_image_write) |
-| `IMGDEC` | `imgdec` | JPEG + PNG decoder (stb_image) |
+| `IMGDEC` | `imgdec` | JPEG decoder (stb_image) |
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat` | own + whole-unit CPU load lines |
@@ -398,7 +398,7 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
   (type by extension: png/bmp/jpg/gif). These capture the HMI and CPU-drawn
   VFBs, **never GL output**. `v-level` / `s-level` also exist; meaning
   unknown.
-- Pictures: `imgdec.c` (stb_image) decodes JPEG/PNG to ARGB, `img.c`
+- Pictures: `imgdec.c` (stb_image) decodes JPEG to ARGB, `img.c`
   (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
   `pngondemand` renders a small text-layout language to PNG
   ([src/pngondemand/README.md](../src/pngondemand/README.md)).
@@ -595,9 +595,9 @@ after ~18 s. Both are handled by retrying.
 `VIDEO_STOP`, `VIDEO_DETAILS`. Types `0x02`/`0x03` are retired: don't reuse
 them.
 
-**Screen streaming, measured:** JPEG/PNG pictures, two in flight,
+**Screen streaming, measured:** JPEG pictures, two in flight,
 decoded on the MMI with stb_image. ~3 fps at 80–160 ms latency, 0 bad
-pictures in 230. JPEG 800×368 decodes in ~61 ms, PNG in ~46 ms.
+pictures in 230. JPEG 800×368 decodes in ~61 ms.
 About 100 ms of MMI work per picture puts its ceiling near 10 fps; the
 phone sets the rate. **Hardware H.264**: 25 fps, ~0.6 s lag, MMI
 CPU ~24 % ([src/audi_stream_receiver/README.md](../src/audi_stream_receiver/README.md)). Streaming stops when the phone locks (Android revokes
@@ -628,7 +628,7 @@ phone-app bugs and MMI bugs can be told apart without the car.
 | GL texture upload | ~50 MB/s (800×480 RGBA: 31 ms) |
 | Fill per 60 Hz frame | ~2 full-screen blended layers |
 | Lit triangles | < 0.2 M/s; ~1000 per frame at 60 fps |
-| JPEG / PNG decode, 800×368 | 61 / 46 ms |
+| JPEG decode, 800×368 | 61 ms |
 | RGB565 → BGRA, 800×480 | 12 ms |
 | LZ4 decompress, UI / photo frame | 9 / 29 ms |
 | SD log line with fsync | ~12 ms |

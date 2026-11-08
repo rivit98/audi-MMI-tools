@@ -7,7 +7,7 @@
  *
  *   usbd thread   hwvideo_config() (H264_CONFIG), hwvideo_frame() (a
  *                 complete frame), hwvideo_stop() (VIDEO_STOP, link down,
- *                 a JPEG / PNG picture: the phone went back to pictures)
+ *                 a JPEG picture: the phone went back to pictures)
  *   manager       hwvideo_status_pop() -> H264_STATUS frames
  *   main loop     hwvideo_active(): while 1 the screen belongs to the
  *                 video; close the CPU-drawn screen, open it again after

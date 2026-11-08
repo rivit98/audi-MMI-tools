@@ -13,13 +13,13 @@
  *                            an old phone app's TEXT is logged and ignored.
  *   HELLO_REPLY 0x04  both   "who I am", answer to HELLO (never answered)
  *
- * Video (a few fps of screen mirroring, one JPEG or PNG per picture):
+ * Video (a few fps of screen mirroring, one JPEG per picture):
  *
  *   VIDEO_CAPS  0x05  MMI    land_w u16, land_h u16, port_w u16, port_h u16,
  *                            max_bytes u32, formats u8 (bit n-1 = format n:
- *                            bit 0 JPEG, bit 1 PNG, bit 2 H.264 - an MMI
- *                            app without PNG sets JPEG only, one without
- *                            H.264 no bit 2). The boxes a
+ *                            bit 0 JPEG, bit 2 H.264 - an MMI app without
+ *                            H.264 no bit 2; bit 1 was PNG, retired, not
+ *                            to be reused). The boxes a
  *                            landscape / portrait picture has to fit in.
  *                            With H.264 (22 bytes) followed by the
  *                            H.264 limits: h264_max_w u16, h264_max_h u16,
@@ -78,7 +78,7 @@
  *                                     was dropped and the ones after it
  *                                     can't be decoded)
  *                            REFUSED  config unusable (log says why): send
- *                                     JPEG / PNG pictures instead
+ *                                     JPEG pictures instead
  *                            CONFIG   send H264_CONFIG again (in-band SPS
  *                                     / PPS differ, or the stream ended)
  *
@@ -103,7 +103,6 @@
 #define PROTO_H264_STATUS  0x0C
 
 #define PROTO_FMT_JPEG     1
-#define PROTO_FMT_PNG      2
 #define PROTO_FMT_H264     3
 
 /* H264_STATUS code */
@@ -160,7 +159,7 @@ unsigned proto_encode(uint8_t *out, unsigned cap, uint8_t type,
 
 static inline const char *proto_fmt_name(unsigned format)
 {
-	return format == PROTO_FMT_PNG ? "PNG" : format == PROTO_FMT_H264 ? "H.264" : "JPEG";
+	return format == PROTO_FMT_H264 ? "H.264" : "JPEG";
 }
 
 static inline uint16_t proto_get_u16(const uint8_t *p)

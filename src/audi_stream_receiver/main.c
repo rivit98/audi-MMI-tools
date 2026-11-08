@@ -1,7 +1,7 @@
 /*
  * audi_stream_receiver - receive the phone's screen from an Android phone
- * over USB (Android Open Accessory) and show it on the MMI screen: as JPEG /
- * PNG pictures, a few a second, decoded here; or as an
+ * over USB (Android Open Accessory) and show it on the MMI screen: as JPEG
+ * pictures, a few a second, decoded here; or as an
  * H.264 stream decoded by the unit's DM642 (hwvideo.h). (It has no text
  * messages; README.md says why.)
  *

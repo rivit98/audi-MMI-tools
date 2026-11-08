@@ -14,7 +14,7 @@
 #   make apk-test        its Kotlin unit tests
 #   make apk-install     adb install it (adb in the container, phone on USB)
 #   make aoa-host        desk test: this PC plays the MMI for the phone app
-#                        (the newest streamed picture: build/aoa-host/latest.jpg / .png;
+#                        (the newest streamed picture: build/aoa-host/latest.jpg;
 #                        H.264: build/aoa-host/stream.h264)
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
@@ -57,7 +57,7 @@ CXXFLAGS := $(CFLAGS)
 #   SCREEN  screen.c: a CPU-drawn layer-manager screen (VFB), + TEXT
 #   GL      gfx.c (gf + EGL), hud.c (FPS counter), img.c (BMP/PNG)
 #   PROC    proc.c: start the unit's own tools from a threaded app
-#   IMGDEC  imgdec.c: JPEG + PNG decoding (stb_image)
+#   IMGDEC  imgdec.c: JPEG decoding (stb_image)
 #   CPUMON  cpumon.c: own + unit CPU load, a "cpu:" log line per window (cpustat.c)
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
 #   LIVE    C++ (CXX_APPS only): a live H.264 stream through the unit's
@@ -188,7 +188,7 @@ LIBS_hello9 := -lgf
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
 # audi_stream_receiver: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
-# pictures are JPEGs or PNGs, decoded on the CPU, or an
+# pictures are JPEGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp), which
 # makes it a C++ app; its .c files are still compiled as C.
 build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.cpp \
@@ -325,7 +325,7 @@ test: $(TESTBIN) build/.media-image
 	$(MEDIA_RUN) python3 -I tests/check_live.py check build/test_live.d
 build/test_proto: tests/test_proto.c tests/check.h src/audi_stream_receiver/proto.c src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.c src/audi_stream_receiver/vasm.h
-# audi_stream_receiver's JPEG / PNG decoding, on pictures stb_image_write encodes
+# audi_stream_receiver's JPEG decoding, on pictures stb_image_write encodes
 build/test_imgdec: tests/test_imgdec.c tests/check.h $(IMGDEC) src/common/stb_image_write.h
 TESTLIBS_test_imgdec := -lm
 build/test_cpustat: tests/test_cpustat.c tests/check.h $(call common,cpustat)

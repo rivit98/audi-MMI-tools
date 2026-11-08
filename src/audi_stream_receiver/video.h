@@ -27,7 +27,7 @@
 #include "vasm.h"
 
 #define VIDEO_TOPBAR_H   28            /* status bar over a landscape picture */
-#define VIDEO_MAX_BYTES  (512u * 1024) /* one JPEG / PNG */
+#define VIDEO_MAX_BYTES  (512u * 1024) /* one JPEG */
 
 struct video_view {
 	struct canvas frame;     /* the picture on screen, opaque ARGB */

@@ -1,6 +1,6 @@
 /* test_imgdec.c - picture decoding (src/common/imgdec.c): pictures encoded
- * by stb_image_write's JPEG and PNG writers decode to the right size and
- * colours; PNG exactly, RGB or RGBA. */
+ * by stb_image_write's JPEG writer decode to the right size and colours;
+ * its PNG is refused. */
 #include <stdlib.h>
 
 #include "check.h"
@@ -110,37 +110,16 @@ static void test_portrait(void)
 	free(px);
 }
 
-static int exact(uint32_t px, const unsigned char *rgb)
+/* PNG is not taken */
+static void test_png_refused(void)
 {
-	return px == (0xFF000000u | (uint32_t)rgb[0] << 16 | (uint32_t)rgb[1] << 8 | rgb[2]);
-}
+	uint32_t *px = (uint32_t *)1;
+	int w, h;
 
-static void test_png(void)
-{
-	uint32_t *px;
-	int w, h, comp;
-
-	for (comp = 3; comp <= 4; comp++) {
-		encode_png(800, 368, comp);              /* a phone in landscape */
-		CHECK(imgdec_info(png.buf, png.n, &w, &h));
-		CHECK_EQ(w, 800);
-		CHECK_EQ(h, 368);
-		CHECK_EQ(imgdec_argb(png.buf, png.n, 800, 480, &px, &w, &h), 0);
-		CHECK_EQ(w, 800);
-		CHECK_EQ(h, 368);
-		CHECK(exact(px[0], quad[0]));            /* lossless, opaque */
-		CHECK(exact(px[399], quad[0]));
-		CHECK(exact(px[400], quad[1]));
-		CHECK(exact(px[183 * 800 + 799], quad[1]));
-		CHECK(exact(px[184 * 800], quad[2]));
-		CHECK(exact(px[367 * 800 + 799], quad[3]));
-		free(px);
-		CHECK_EQ(imgdec_argb(png.buf, png.n, 799, 480, &px, &w, &h), -1);
-		CHECK(px == NULL);
-		CHECK_EQ(imgdec_argb(png.buf, png.n / 2, 800, 480, &px, &w, &h) == 0 ||
-		         px == NULL, 1);                 /* truncated: no crash */
-		free(px);
-	}
+	encode_png(64, 48, 3);
+	CHECK(!imgdec_info(png.buf, png.n, &w, &h));
+	CHECK_EQ(imgdec_argb(png.buf, png.n, 800, 480, &px, &w, &h), -1);
+	CHECK(px == NULL);
 }
 
 static void test_refusals(void)
@@ -163,7 +142,7 @@ int main(void)
 {
 	test_decode();
 	test_portrait();
-	test_png();
+	test_png_refused();
 	test_refusals();
 	CHECK_DONE();
 }

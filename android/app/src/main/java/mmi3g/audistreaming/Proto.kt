@@ -9,10 +9,10 @@ package mmi3g.audistreaming
  *   HELLO 0x01 (both, "who I am", answered by HELLO_REPLY), HELLO_REPLY
  *   0x04 (both). 0x02 / 0x03 were TEXT / ACK, retired.
  *
- *   Video, one JPEG or PNG per picture (all integers LE):
+ *   Video, one JPEG per picture (all integers LE):
  *   VIDEO_CAPS 0x05 (MMI: landW u16, landH u16, portW u16, portH u16,
- *   maxBytes u32, formats u8: bit n-1 = format n, PNG only from MMI apps
- *   that take it), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
+ *   maxBytes u32, formats u8: bit n-1 = format n; format 2 was PNG,
+ *   retired), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
  *   format u8, size u32, phoneMs u16 = scale + encode time, for the MMI's
  *   perf log; older MMI apps ignore it), VIDEO_DATA 0x07 (phone: id u16 + bytes),
  *   VIDEO_ACK 0x08 (MMI: id u16, status u8, decodeMs u16), VIDEO_STOP 0x09
@@ -41,7 +41,6 @@ object Proto {
     const val H264_STATUS = 0x0C
 
     const val FMT_JPEG = 1
-    const val FMT_PNG = 2
     const val FMT_H264 = 3
 
     // H264_STATUS code
@@ -76,7 +75,6 @@ object Proto {
                          val h264MaxW: Int = 0, val h264MaxH: Int = 0, val h264Fps: Int = 0,
                          val h264MaxFrame: Int = 0) {
         val jpeg: Boolean get() = takes(FMT_JPEG)
-        val png: Boolean get() = takes(FMT_PNG)
         val h264: Boolean get() = takes(FMT_H264) && h264MaxW > 0 && h264MaxH > 0 && h264Fps > 0
         fun takes(format: Int): Boolean = formats and (1 shl (format - 1)) != 0
     }

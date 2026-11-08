@@ -21,7 +21,7 @@ not covered here.
 
 | # | Option | Feasibility | Effort | Main risk |
 |---|---|---|---|---|
-| 0 | JPEG / PNG pictures over AOA, CPU-decoded (`audi_stream_receiver` + the Android app; src/audi_stream_receiver/README.md) | **Works on the car**: 2–4 fps with the MMI ~30 % busy (~10 fps ceiling) | done | Text blurs if the phone downscales in one bilinear step; fixed by k× capture + box average. PNG decode cost on the SH4 is in the receiver README |
+| 0 | JPEG pictures over AOA, CPU-decoded (`audi_stream_receiver` + the Android app; src/audi_stream_receiver/README.md) | **Works on the car**: 2–4 fps with the MMI ~30 % busy (~10 fps ceiling) | done | Text blurs if the phone downscales in one bilinear step; fixed by k× capture + box average |
 | 1 | Raw pixels (dirty tiles + LZ4) over AOA, drawn with GL | **High** | ~1–2 weeks | Throughput: VFB writes from the CPU are slow (~10 MB/s); GL upload ~50 MB/s, one upload in flight |
 | 1b | Same, but DXT1 tiles uploaded as compressed textures | **High** | +3–5 days on top of 1 | Text quality (block artifacts) |
 | 2a | Hardware H.264 (DM642 DSP), stream fed to `io-media-nvidia` | **Works on the car**: a live stream from our own resource manager (§7.10) and the phone's H.264 over AOA (§7.13) | built | Every frame must fit one frame size S and the rate must stay steady; ~0.5 s latency from io-media |
@@ -33,7 +33,7 @@ not covered here.
 **Where things stand:**
 
 - **Option 0** is a deliberately simple stopgap built into
-  `audi_stream_receiver`. It sends the phone's screen as JPEG or PNG
+  `audi_stream_receiver`. It sends the phone's screen as JPEG
   pictures, one in flight, with portrait shown pillarboxed on the left
   (which departs from the landscape-only assumption above). It also
   measures real AOA receive and per-picture costs on the car (`video:`

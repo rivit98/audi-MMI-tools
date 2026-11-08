@@ -39,7 +39,7 @@ import android.widget.TextView
  * "Stream screen" asks for screen capture and starts CaptureService, which
  * sends the screen to the MMI (at most "Max fps" pictures a second, 5 by
  * default; the MMI's acks slow it down further) through the link
- * published in [Streaming.link]. "Format" picks JPEG, PNG or H.264
+ * published in [Streaming.link]. "Format" picks H.264 (default) or JPEG
  * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
  * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
  * comparison) apply to H.264 only, also remembered. "Latency clock" shows a big running
@@ -140,7 +140,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         showFps()
         Streaming.format = Format.entries.firstOrNull {
             it.name == getPreferences(MODE_PRIVATE).getString(PREF_FORMAT, null)
-        } ?: Format.JPEG
+        } ?: Format.H264
         findViewById<Spinner>(R.id.format).apply {
             setSelection(Streaming.format.ordinal)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {

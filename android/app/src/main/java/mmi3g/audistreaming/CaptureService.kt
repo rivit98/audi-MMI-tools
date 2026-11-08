@@ -31,7 +31,7 @@ import java.nio.ByteOrder
 
 /**
  * Screen streaming to the MMI: the phone's screen (MediaProjection) as
- * JPEG or PNG pictures ([Streaming.format]), at most [Streaming.maxFps] a
+ * JPEG pictures or H.264 ([Streaming.format]), pictures at most [Streaming.maxFps] a
  * second and never more than
  * AccessoryLink.MAX_IN_FLIGHT in flight. The next picture goes as soon as
  * one in flight is acked and 1/maxFps has passed since the last was sent,
@@ -46,10 +46,7 @@ import java.nio.ByteOrder
  * phone), box-filtered down k:1 (Downscale) - one big bilinear step made
  * text blurry. A rotation resizes it.
  *
- * Formats: JPEG (q90) or PNG (lossless; one too big for the MMI goes as
- * JPEG). PNG needs an MMI app that takes it (VIDEO_CAPS); an older one
- * gets JPEG. (A third, "PNG when still" - JPEG while the screen moved, the
- * same picture as PNG once it stopped - does not exist.)
+ * Pictures are JPEG q90.
  * The pictures go to whatever link [Streaming.link] holds, so unplugging
  * and replugging the phone carries on streaming. Only a screen that
  * changes produces pictures; a new link gets the last one again.
@@ -113,7 +110,7 @@ class CaptureService : Service() {
         var windowAt = 0L; var windowBytes = 0L; var kbps = 0
     }
 
-    private class Picture(val w: Int, val h: Int, val format: Int, val data: ByteArray, val phoneMs: Int)
+    private class Picture(val w: Int, val h: Int, val data: ByteArray, val phoneMs: Int)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -448,31 +445,22 @@ class CaptureService : Service() {
         // sent, and a static screen makes no new one to replace it.
         if (!link.readyForPicture()) return false
 
-        val mode = Streaming.format
-        val png = caps.png
-        var note = when {
-            mode == Format.H264 -> "H.264 off: " + when {
+        val note = if (Streaming.format == Format.H264) {
+            "H.264 off: " + when {
                 Build.VERSION.SDK_INT < 29 -> "needs Android 10"
                 h264Failed.isNotEmpty() -> h264Failed
                 link === refusedLink -> "the MMI refused it"
                 else -> "the MMI app has none (older audi_stream_receiver?)"
             } + ", JPEG instead"
-            mode == Format.PNG && !png -> "MMI takes no PNG (old audi_stream_receiver?)"
-            else -> ""
-        }
+        } else ""
         val pic = r.acquireLatestImage()?.use { image ->
             val t0 = SystemClock.elapsedRealtime()
             grab(image)
-            if (mode == Format.PNG && png) {
-                encode(Proto.FMT_PNG, t0).takeIf { it.data.size <= caps.maxBytes }
-                    ?: encode(Proto.FMT_JPEG, t0).also { note = "PNG too big, sent JPEG" }
-            } else {
-                encode(Proto.FMT_JPEG, t0)
-            }
+            encode(t0)
         }
         // A static screen makes no new images: a new link (replug) gets the
         // last picture again, otherwise the MMI keeps the one it shows.
-        val toSend = pic ?: last?.takeIf { (link !== lastLink || !lastSent) && caps.takes(it.format) }
+        val toSend = pic ?: last?.takeIf { link !== lastLink || !lastSent }
             ?: return false
         last = toSend
         lastSent = false
@@ -481,11 +469,11 @@ class CaptureService : Service() {
             lastSent = true                  // never fits: don't retry it
             return false
         }
-        if (!link.sendPicture(nextId, toSend.w, toSend.h, toSend.format, toSend.data, toSend.phoneMs)) return false
+        if (!link.sendPicture(nextId, toSend.w, toSend.h, Proto.FMT_JPEG, toSend.data, toSend.phoneMs)) return false
         nextId = if (nextId == 0xffff) 1 else nextId + 1
         lastLink = link
         lastSent = true
-        Streaming.status = "${toSend.w}x${toSend.h} (x$factor) ${if (toSend.format == Proto.FMT_PNG) "PNG" else "JPEG"} " +
+        Streaming.status = "${toSend.w}x${toSend.h} (x$factor) JPEG " +
             "${toSend.data.size / 1024} KB, phone ${toSend.phoneMs} ms" + if (note.isNotEmpty()) "; $note" else ""
         return true
     }
@@ -507,16 +495,12 @@ class CaptureService : Service() {
         frame!!.copyPixelsFromBuffer(buf)
     }
 
-    /** [frame] as format; phoneMs counts from t0 (capture taken). */
-    private fun encode(format: Int, t0: Long): Picture {
+    /** [frame] as JPEG; phoneMs counts from t0 (capture taken). */
+    private fun encode(t0: Long): Picture {
         val f = frame!!
-        val out = ByteArrayOutputStream(if (format == Proto.FMT_PNG) 256 * 1024 else 64 * 1024)
-        if (format == Proto.FMT_PNG) {
-            f.compress(Bitmap.CompressFormat.PNG, 100, out)
-        } else {
-            f.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-        }
-        return Picture(f.width, f.height, format, out.toByteArray(), (SystemClock.elapsedRealtime() - t0).toInt())
+        val out = ByteArrayOutputStream(64 * 1024)
+        f.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
+        return Picture(f.width, f.height, out.toByteArray(), (SystemClock.elapsedRealtime() - t0).toInt())
     }
 
     private fun screenSize(): VideoFit.Size {
@@ -550,7 +534,6 @@ class CaptureService : Service() {
         px = IntArray(s.w * s.h)
         pxBuf = ByteBuffer.allocateDirect(s.w * s.h * 4).order(ByteOrder.nativeOrder())
         frame?.recycle()
-        // opaque: PNG goes out as RGB, not RGBA
         frame = Bitmap.createBitmap(s.w, s.h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
         Log.i(TAG, "capture ${cw}x${ch} -> ${s.w}x${s.h} (${if (s.w < s.h) "portrait" else "landscape"}, x$k)")
         size = s
@@ -624,7 +607,7 @@ object Streaming {
     /** Pictures a second at most, set by the activity (its slider). */
     @Volatile var maxFps = CaptureService.DEFAULT_FPS
     /** Picture format, set by the activity (its drop-down). */
-    @Volatile var format = Format.JPEG
+    @Volatile var format = Format.H264
     /** H.264 bits a second, set by the activity (its drop-down). */
     @Volatile var bitRate = CaptureService.DEFAULT_BIT_RATE
     /** H.264 through the GL scaler (sharp text) or straight from the
@@ -633,11 +616,9 @@ object Streaming {
 }
 
 /** The format drop-down, in its order (res/values/strings.xml formats). A
- * saved choice that is no longer here (the removed PNG_STILL) reads
- * as JPEG. */
+ * saved choice that is no longer here reads as H.264. */
 enum class Format {
-    JPEG,
-    PNG,
     /** The phone's hardware encoder, decoded by the MMI's DM642. */
     H264,
+    JPEG,
 }

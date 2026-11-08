@@ -50,7 +50,6 @@ static void perf_lost(const struct vpic *pic, int status)
 	r.bytes = pic->size;
 	r.w = pic->w;
 	r.h = pic->h;
-	r.format = pic->format;
 	r.phone_ms = pic->phone_ms;
 	r.status = status;
 	r.rx_us = pic->rx_done_us - pic->rx_start_us;
@@ -86,8 +85,7 @@ void video_caps(uint8_t *out)
 	proto_put_u16(out + 4, (unsigned)port_w);
 	proto_put_u16(out + 6, (unsigned)port_h);
 	proto_put_u32(out + 8, VIDEO_MAX_BYTES);
-	out[12] = 1u << (PROTO_FMT_JPEG - 1) | 1u << (PROTO_FMT_PNG - 1) |
-	          1u << (PROTO_FMT_H264 - 1);
+	out[12] = 1u << (PROTO_FMT_JPEG - 1) | 1u << (PROTO_FMT_H264 - 1);
 	proto_put_u16(out + 13, HWVIDEO_MAX_W);
 	proto_put_u16(out + 15, HWVIDEO_MAX_H);
 	out[17] = HWVIDEO_FPS;
@@ -274,7 +272,6 @@ int video_poll(void)
 	rec.bytes = pic.size;
 	rec.w = (unsigned)w;
 	rec.h = (unsigned)h;
-	rec.format = pic.format;
 	rec.phone_ms = pic.phone_ms;
 	rec.rx_us = pic.rx_done_us - pic.rx_start_us;
 	rec.wait_us = t0 - pic.rx_done_us;
