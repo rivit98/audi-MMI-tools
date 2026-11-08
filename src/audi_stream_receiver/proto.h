@@ -9,7 +9,7 @@
  *   HELLO       0x01  both   "who I am" (UTF-8). Sent by each side when its
  *                            session starts; the peer answers HELLO_REPLY.
  *   (0x02, 0x03)             retired: TEXT / ACK, text messages from the
- *                            phone, dropped on 2026-10-25. Not to be reused;
+ *                            phone, dropped. Not to be reused;
  *                            an old phone app's TEXT is logged and ignored.
  *   HELLO_REPLY 0x04  both   "who I am", answer to HELLO (never answered)
  *
@@ -18,10 +18,10 @@
  *   VIDEO_CAPS  0x05  MMI    land_w u16, land_h u16, port_w u16, port_h u16,
  *                            max_bytes u32, formats u8 (bit n-1 = format n:
  *                            bit 0 JPEG, bit 1 PNG, bit 2 H.264 - an MMI
- *                            app from before 2026-10-30 sets JPEG only,
- *                            before 2026-11-04 no H.264). The boxes a
+ *                            app without PNG sets JPEG only, one without
+ *                            H.264 no bit 2). The boxes a
  *                            landscape / portrait picture has to fit in.
- *                            Since 2026-11-04 (22 bytes) followed by the
+ *                            With H.264 (22 bytes) followed by the
  *                            H.264 limits: h264_max_w u16, h264_max_h u16,
  *                            h264_fps u8, h264_max_frame u32 (the largest
  *                            frame_bytes H264_CONFIG may ask for).
@@ -29,8 +29,8 @@
  *                            streams only to an MMI that sent it.
  *   VIDEO_START 0x06  phone  id u16, w u16, h u16, format u8 (PROTO_FMT_*),
  *                            size u32 [, phone_ms u16]: a picture of size
- *                            bytes follows ... phone_ms (since 2026-10-30,
- *                            for the perf log only) is what the phone spent
+ *                            bytes follows ... phone_ms (for the perf log
+ *                            only) is what the phone spent
  *                            on it: scaling + encoding. Longer payloads are
  *                            fine, the rest is ignored.
  *   VIDEO_DATA  0x07  phone  id u16 + the next bytes of it, in order
@@ -46,7 +46,7 @@
  *                            the user flips it. Portrait always has its
  *                            status panel beside the picture.
  *
- * Hardware H.264 (since 2026-11-04; docs/phone-mirroring.md 7.10): the
+ * Hardware H.264 (docs/phone-mirroring.md 7.10): the
  * unit's DM642 decodes, io-media plays, nothing is drawn by the CPU.
  *
  *   H264_CONFIG 0x0B  phone  fps u8, frame_bytes u32, sps_len u16, sps,
@@ -117,7 +117,7 @@
 #define PROTO_VIDEO_BAD      1   /* not decodable, or bigger than its box */
 #define PROTO_VIDEO_DROPPED  2   /* superseded or cut short before shown */
 
-#define PROTO_VIDEO_CAPS_LEN  22  /* 13 before 2026-11-04 */
+#define PROTO_VIDEO_CAPS_LEN  22  /* 13 without the H.264 limits */
 #define PROTO_H264_CONFIG_MIN 11  /* fps, frame_bytes, two lengths, 1-byte SPS/PPS */
 #define PROTO_VIDEO_START_LEN 11  /* the least; 13 with phone_ms */
 #define PROTO_VIDEO_ACK_LEN   5

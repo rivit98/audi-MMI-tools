@@ -6,11 +6,10 @@ package mmi3g.audistreaming
  * Without it the virtual display draws straight into the encoder at
  * 720x432, and Android scales the 2340x1080 screen down 3.25:1 in one
  * bilinear step: each output pixel looks at 2x2 of the ~3x3 screen pixels
- * it covers, so thin text strokes are hit or missed (the blurry H.264 of
- * 2026-11-05). With it the virtual display runs at k times the picture,
+ * it covers, so thin text strokes are hit or missed (blurry H.264 text). With it the virtual display runs at k times the picture,
  * Android's step is about 1:1 (2340 -> 2160 for k = 3), and every output
  * pixel is the average of the k x k capture pixels under it - what
- * Downscale.box does for the JPEG/PNG pictures since 2026-10-30.
+ * Downscale.box does for the JPEG/PNG pictures.
  */
 object GlBox {
     /** The largest k <= MAX_FACTOR with k times the mirrored screen still

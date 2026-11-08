@@ -3,7 +3,7 @@
  * (keys.c) and shown live, so any control can be identified by using it.
  *
  * Extracted from hello5's stage 2, which decoded the knobs and two buttons
- * against a fixed sequence on 2026-10-21 (docs/platform-notes.md section
+ * against a fixed sequence (docs/platform-notes.md section
  * 8). hello7 has no sequence: turn and press anything. The screen shows a
  * counter per known control (the last one used in yellow) and the latest
  * messages with their first 16 bytes. A bit no known control explains

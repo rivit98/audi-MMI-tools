@@ -818,9 +818,9 @@ static unsigned due_in(unsigned ms)
 }
 
 /* Attempt the AOA handshake on a (non-accessory) device whose time has come.
- * The 12.10 run: the phone answered GET_PROTOCOL (v2) and two strings, then
- * SEND_STRING 2 came back "device did not answer" and the phone was given up
- * on for good. So a device that has shown it speaks AOA gets more tries. */
+ * A phone can answer GET_PROTOCOL (v2) and two strings, then fail
+ * SEND_STRING 2 with "device did not answer"; giving it up for good loses
+ * it. So a device that has shown it speaks AOA gets more tries. */
 static void handshake_due(void)
 {
 	struct dev_entry *d;
@@ -951,9 +951,9 @@ static void on_insert(usbd_device_instance_t *in)
 	 * that calls usbd_reset_device on any failure but a STALL
 	 * (0x080539c0), then usbd_select_config (SET_CONFIGURATION), then
 	 * the bus event thread waits its -c delay (default 2000 ms, srv-starter
-	 * passes none) before it starts the MTP driver. On 12.10 our handshake
-	 * ran inside that window (+0.2 s in v1, +1.3 s in v2): GET_PROTOCOL
-	 * answered, then DEV_NOANSWER on the next request and on everything
+	 * passes none) before it starts the MTP driver. A handshake that
+	 * runs inside that window (+0.2 s, +1.3 s) fails: GET_PROTOCOL
+	 * is answered, then DEV_NOANSWER on the next request and on everything
 	 * after it - a reset device - and io-usb reported the phone removed
 	 * 3-5 s later. The handshake now waits HANDSHAKE_FIRST_MS. If the
 	 * phone is reset anyway, its re-insertion starts over with a new entry. */
@@ -968,7 +968,7 @@ static void on_insert(usbd_device_instance_t *in)
  * background (sloginfo + SD write take about a second). The run ends by
  * pulling the card, so run.sh never gets to save audi_stream_receiver's slog; these
  * snapshots are what shows io-usb's and the media launcher's side of a
- * failed handshake (12.10: DEV_NOANSWER on SEND_STRING, cause unknown). */
+ * failed handshake (DEV_NOANSWER on SEND_STRING, cause unknown). */
 static const char *slog_sd;
 
 static void slog_snapshot(const char *why)

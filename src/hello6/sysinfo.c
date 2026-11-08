@@ -6,7 +6,7 @@
  *
  * Not ShowDisplayables: it is not a query. `ShowDisplayables <display>
  * [cid...]` SETS the shown list, so `ShowDisplayables 0` blanked the whole
- * screen for the rest of the phase (12.10 v2 run, phone video).
+ * screen for the rest of the phase (phone video).
  *
  * Everything runs through `ksh -c` with a timeout, so a tool that hangs or
  * wants a terminal costs at most that timeout.

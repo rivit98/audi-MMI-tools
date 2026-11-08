@@ -88,30 +88,28 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # binaries the MMI runs; lmprobe proved the layer-manager / VFB sequence,
 # and its d-shot is byte-identical between runs (docs/platform-notes.md).
 # Run either with `make sd SD_APPS="lmprobe ..."`.
-# hello2 and hello3 joined them after the 2026-10-11 run: both passed, and
-# what they measured is written up in docs/gpu-results.md.
+# hello2 and hello3 joined them: both pass, and what they measured is
+# written up in docs/gpu-results.md.
 #
-# hello4 joined them after the 2026-10-21 run: probes, all three scenes and
-# the stress steps up to 12 tori passed (16 froze the unit on 2026-10-19;
-# docs/gpu-results.md sections 8-9). Stress steps 16 and up stay commented
-# out (src/hello4/main.c) in case it is run again.
+# hello4 joined them: probes, all three scenes and the stress steps up to
+# 12 tori pass; 16 tori freeze the unit (docs/gpu-results.md sections 8-9).
+# Stress steps 16 and up stay commented out (src/hello4/main.c).
 #
-# hello8, the C++ test (src/hello8/checks.cpp): 18 of 18 passed on
-# 2026-10-30, and "atomics stress" settled the last question (gUSA atomics
-# lose updates under QNX, SH-4A LL/SC ones don't; docs/cpp-apps.md). The
-# SDK has built everything with LL/SC since; 2026-11-03 confirmed that
-# build on the car (18 of 18, LL/SC 0 lost), so hello8 left the default run.
+# hello8, the C++ test (src/hello8/checks.cpp): 18 of 18 pass, and
+# "atomics stress" settled the last question (gUSA atomics lose updates
+# under QNX, SH-4A LL/SC ones don't; docs/cpp-apps.md). The SDK builds
+# everything with LL/SC (18 of 18, LL/SC 0 lost), so hello8 is not in the
+# default run.
 #
 # hello7 is a tool, not a test: a live knob and button tester, run when
-# needed (`make sd SD_APPS="hello7 ..."`). It left the default run after
-# 2026-10-25: the MMI reacts to every button as well, and MENU or BACK
-# brings its own screens up over hello7's for the rest of the run.
+# needed (`make sd SD_APPS="hello7 ..."`). It is not in the default run:
+# the MMI reacts to every button as well, and MENU or BACK brings its own
+# screens up over hello7's for the rest of the run.
 #
-# hello6 left the default run for good after 2026-11-03: its ten clips
-# gave the same answer four runs in a row (21.10-03.11), and its main
-# result, hardware H.264 on screen through VCAP 0 input 1, is rechecked
-# by hello9's c5 control on every hello9 run. What it leaves open needs
-# RE or new tests, not another hello6 run (src/hello6/README.md).
+# hello6 is not in the default run: its ten clips give the same answer
+# every time, and its main result, hardware H.264 on screen through VCAP 0
+# input 1, is rechecked by hello9's c5 control on every hello9 run. What
+# it leaves open needs RE or new tests (src/hello6/README.md).
 #
 # hello9 needs the driver watching for about 3.5 minutes and puts ~70 MB of
 # test videos on the card. audi_stream_receiver runs until the SD card is pulled, so
@@ -121,9 +119,10 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello8 hello9 audi_stream_receiver
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-# hello8 back for one run (2026-11-05): the SDK's std::mutex now calls
-# pthread_mutex_init/destroy (its new "sync reuse" check; hello9 died of
-# the old way). Drop it again once it passes on the car.
+# hello8 is in the default run for its "sync reuse" check: the SDK's
+# std::mutex calls pthread_mutex_init/destroy (hello9 died of the old way,
+# a mutex reused at the same address failing its first lock). Drop it
+# once that passes on the car.
 TESTS   := hello8 hello5 hello9 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
@@ -173,7 +172,7 @@ build/hello8-gusa.o: src/hello8/gusa.cpp src/hello8/checks.h
 	@$(RUN) sh4-linux-gnu-objdump -d $@ | grep -q movli.l && \
 	    { echo "$@: LL/SC in the gUSA loop (GUSA_FLAGS lost ,strict?)"; rm -f $@; exit 1; } || true
 # hello9: C++. The streaming tests (docs/phone-mirroring.md 7.8-7.10):
-# since 2026-11-04 a raw clip pushed frame by frame through LIVE's
+# a raw clip pushed frame by frame through LIVE's
 # HwStream, the code audi_stream_receiver uses for the phone's frames
 # (stream_server.cpp's headers need src/common/qnx/sys/pm.h). schedule.cpp
 # is plain C++, also tested on the build host (tests/test_live.cpp).
@@ -184,7 +183,7 @@ LIBS_hello9 := -lgf
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
 # audi_stream_receiver: USB (libusbdi) + CPU-drawn screen, no GL. The phone's
-# pictures are JPEGs or PNGs, decoded on the CPU, or (since 2026-11-04) an
+# pictures are JPEGs or PNGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp), which
 # makes it a C++ app; its .c files are still compiled as C.
 build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.c src/audi_stream_receiver/*.cpp \
@@ -276,7 +275,7 @@ SD_FILES  := $(call per_app,FILES)
 sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/var
 	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
-	cp sd/apps.conf sd/screens.sh sd/README.md $(SD_FILES) build/sd/
+	cp sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
 	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
@@ -340,7 +339,7 @@ build/test_layout: tests/test_layout.c tests/check.h src/pngondemand/layout.c \
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
 # hello5's ping train and WAV header
 build/test_pulse:  tests/test_pulse.c tests/check.h src/hello5/pulse.c src/hello5/pulse.h
-# hello7's ch8 decoding, on the messages logged on 2026-10-21
+# hello7's ch8 decoding, on messages logged from the car
 build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/keys.h
 # hello8's checks with the host's own libstdc++ (C++, so its own rule)
 build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp src/hello8/gusa.cpp \

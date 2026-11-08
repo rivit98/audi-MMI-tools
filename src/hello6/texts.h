@@ -30,7 +30,7 @@
 
 /* media/mkclips.sh makes these (same names, CLIP_S seconds each: long
  * enough for both capture-unit attempts, which take ~20 s per clip).
- * 30 s until 30.10; the picture was always seen within 4 s. */
+ * The picture is always seen within 4 s. */
 #define CLIP_S  22
 
 struct clip {
@@ -38,8 +38,8 @@ struct clip {
 	int grow;
 };
 
-/* Clips 1-10 gave the same result on 21.10, 25.10 and 30.10. The RE of
- * 2026-11-02 (docs/phone-mirroring.md 7.8) explains 4 (io-media refuses
+/* Clips 1-10 give the same result every run. The RE (docs/phone-mirroring.md
+ * 7.8) explains 4 (io-media refuses
  * width > 720) and 7/9 (mp4_parser ignores moof). The streaming tests that
  * followed (constant-sample-size MP4, a live stream) are hello9's. */
 static const struct clip clips[] = {

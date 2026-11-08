@@ -45,14 +45,14 @@
  *   group 4 = m4  DSPOUT_TDM2_20_SAD
  *   group 5 = m7  DSPOUT_TDM3_20
  *
- * What the earlier runs showed (radio playing each time):
- *   13.10  all six io-audio devices took every chime in real time ("hb_fpga:
- *          Play buffer underrun strmN" as each ran dry): nothing heard.
- *   19.10  m0 TDM1_51_SAD: "Mixer entry for DSPOUT_TDM1_51_SAD: Already in
- *          use" - the MME's own player holds it (it is the MME's
- *          "defaultoutput"). m3 TDM1_20 and m5 TDM2_20 played every chime to
- *          INPUT_EOF; nothing heard, but TDM1_20 cut the radio while it
- *          played. tones1, navi, ent3 as on 13.10.
+ * What the survey showed (radio playing each time):
+ *   io-audio devices  all six take every chime in real time ("hb_fpga:
+ *          Play buffer underrun strmN" as each runs dry): nothing heard.
+ *   m0 TDM1_51_SAD  "Mixer entry for DSPOUT_TDM1_51_SAD: Already in use" -
+ *          the MME's own player holds it (it is the MME's "defaultoutput").
+ *   m3 TDM1_20, m5 TDM2_20  play every chime to INPUT_EOF; nothing heard,
+ *          but TDM1_20 cuts the radio while it plays. tones1, navi, ent3
+ *          behave like the other io-audio devices.
  * The sound leaves the MMI over MOST to the external amplifier. TDM1 is
  * the main entertainment stream: the radio (DSPIN_TDM1_20, routed by
  * MMI3GApplication's mixer graph) goes out on DSPOUT_TDM1_51_SAD, 5.1 with
@@ -63,50 +63,37 @@
  * streams (TDM2/TDM3, the io-audio devices) reach the amplifier on channels
  * it only mixes in when MMI3GApplication's audio management switches that
  * source on (CAmpLC: announcement, navi, beep ...) [inferred].
- * So this run tries the TDM1 variants the amplifier may still decode (2.0
+ * So the survey tries the TDM1 variants the amplifier may still decode (2.0
  * with the header, 5.1 without) and the "_SAD" forms of TDM2/TDM3, plus
- * TDM3 2.0, the one plain mixer output not yet tried. A group that cuts the
- * radio uses the radio's stream; one whose chime is heard is the way in.
- *   19.10 v2  all five (m2,m1,m6,m4,m7) attached and played every chime to
- *          INPUT_EOF. The listener thinks one chime was heard near the start
- *          (group 1, m2 TDM1 2.0 SAD, or group 2, m1 TDM1 5.1), and turned
- *          the volume knob ~1.3 s after group 1's chime. Groups 3-5 were not
- *          heard. The 600 ms chime was too short to place, so the chime is
- *          now 2.5 s long (sdk/mkbeep.py); same outputs, same order.
- *   21.10  same five outputs, 2.5 s chime, radio on: group 1 (m2 TDM1 2.0
- *          SAD) was HEARD. Group 2 (m1 TDM1 5.1) muted the car audio while
- *          it played, its chimes not heard. Groups 3-5 silent. io-media saw
- *          no difference between them (INPUT_EOF, exit after ~2.5 s each).
- *          That answered the survey, so g is no longer in the default
- *          steps: m, n, v and t ask what the TDM1 2.0 SAD output does
- *          next to the radio, the volume knob and the music, and whether
- *          our own client can drive it.
- *   25.10  steps m, n, v, t (the phone video's sound, 880 Hz band, is the
- *          better witness here than the listener, who heard only step m):
- *          m  all 6 pings recorded, ~15 dB over the cabin noise.
- *          n  all 12 pings recorded at step m's level: our own io-media
- *             client plays. Volume 30 for pings 4-6 was ~3 dB down at most
- *             and pings 7-9 did not come back up: not conclusive, so it
- *             is 0 now. Each queued file added ~350 ms of silence (pings
- *             10-12 2.35 s apart): no gapless queueing. hello5 then
- *             replayed the last file on FINISHED (fixed: one FINISHED per
- *             queue, not per file).
- *          v  ping 1 recorded; the knob was turned at once and counted 148
- *             clicks down, 37 up; pings 2-10 not recorded. So the pings
- *             follow the car volume, or the volume ended at 0.
- *          t  nothing recorded, probably because v left the volume down.
- *             So v now runs last (default "mntv").
- *   28.10  m: the radio is muted for the whole train, back ~0.2 s after.
- *          n: volume 0 changes nothing. The run ended in t's countdown.
- *   30.10  all four answered. m, n: radio muted, pings heard; pings 4-6
- *          as loud as the rest. t: Bluetooth music muted for the whole
- *          train, audible the moment it ended. v: the pings follow the
- *          volume knob (~21 dB down, then ~12 dB up again).
+ * TDM3 2.0, the one plain mixer output not otherwise tried. A group that
+ * cuts the radio uses the radio's stream; one whose chime is heard is the
+ * way in. With a 2.5 s chime (600 ms is too short to place):
+ *   group 1 (m2 TDM1 2.0 SAD)  HEARD.
+ *   group 2 (m1 TDM1 5.1)      mutes the car audio while it plays; its
+ *          chimes are not heard.
+ *   groups 3-5 (m6, m4, m7)    silent.
+ *   All five attach and play every chime to INPUT_EOF (exit after ~2.5 s
+ *   each); io-media sees no difference between them.
+ * That answers the survey, so g is not in the default steps: m, n, v and t
+ * ask what the TDM1 2.0 SAD output does next to the radio, the volume knob
+ * and the music, and whether our own client can drive it. The phone video's
+ * sound (880 Hz band) is a better witness for them than the listener:
+ *   m  the radio is muted for the whole train, back ~0.2 s after; all 6
+ *      pings are recorded, ~15 dB over the cabin noise.
+ *   n  our own io-media client plays (all 12 pings at m's level). Volume 0
+ *      for pings 4-6 changes nothing (30 is ~3 dB down at most). Each
+ *      queued file adds ~350 ms of silence: no gapless queueing. io-media
+ *      sends one FINISHED per queue, not per file.
+ *   v  the pings follow the volume knob (~21 dB down, then ~12 dB up
+ *      again). With the knob far down the later pings are not recorded and
+ *      t is silent, so v runs last (default "mntv").
+ *   t  Bluetooth music is muted for the whole train, audible the moment it
+ *      ends.
  *
  * For an io-audio device each chime also measures whether the hardware
  * consumed it: after the write, snd_pcm_plugin_prepare() is polled until it
- * stops returning EBUSY (on 12.10 v2 EBUSY lasted as long as the clip
- * played). About the clip's length means the device played it in real time,
+ * stops returning EBUSY (EBUSY lasts as long as the clip
+ * plays). About the clip's length means the device played it in real time,
  * audible or not. Polling, not drain, so a device that never plays cannot
  * block the test. Each group runs on its own thread: if a write blocks for
  * good, the group is written off after its deadline and the test goes on.
@@ -169,7 +156,7 @@
 #define MIXER_CAP_MS    5000    /* stop a testapp-file chime after this */
 #define MIXER_BUDGET_MS 6000    /* per chime for a mixer group's deadline */
 #define PLAY_POLL_MS    50      /* testapp-file exit / log check */
-#define STEP_MIXER      2       /* mixers[2] TDM1 2.0 SAD, heard on 21.10 */
+#define STEP_MIXER      2       /* mixers[2] TDM1 2.0 SAD, the audible output */
 #define STEP_SLACK_MS   4000    /* testapp-file's cap: the train plus this */
 #define STEP_DONE_MS    4000    /* the "step done" screen */
 #define STEP_REDRAW_MS  250     /* the PLAYING screen, at most this often */
@@ -433,7 +420,7 @@ static void output_label(const struct output *o, char *buf, size_t size)
 }
 
 /* Per chime, for the group deadline. A testapp-file run lasts the clip plus
- * ~100 ms of graph set-up (19.10 v2: 640-700 ms for the old 600 ms clip). */
+ * ~100 ms of graph set-up (640-700 ms for a 600 ms clip). */
 static unsigned chime_budget(int mixer)
 {
 	return mixer >= 0 ? MIXER_BUDGET_MS : CHIME_BUDGET_MS;
@@ -864,8 +851,8 @@ static int play_testapp(const struct step *s, const char *log_file, struct play 
 
 /* ---- step n: the train through our own io-media client (common/iom.c) ---- */
 
-#define NATIVE_LOW_VOLUME 0     /* for pings 4-6: 30 was not clearly
-                                   quieter on 2026-10-25, 0 is decisive */
+#define NATIVE_LOW_VOLUME 0     /* for pings 4-6: 30 is not clearly
+                                   quieter, 0 is decisive */
 #define NATIVE_TIME_MS    500   /* TIME event period */
 
 static uint64_t rd64(const unsigned char *p)
@@ -939,8 +926,8 @@ static void native_event(struct native *n, uint32_t type,
 		return;
 	case IOM_EV_FINISHED:
 		/* One FINISHED for the whole queue: inputs attached on INPUT_EOF
-		 * play on in the same session. (On 2026-10-25 hello5 expected one
-		 * per track and played again on it, which replayed the last
+		 * play on in the same session. (A client that expects one
+		 * per track and plays again on it replays the last
 		 * track until the cap.) */
 		n->finished = 1;
 		log_msg("step n: +%u ms FINISHED%s", t,
@@ -1178,8 +1165,8 @@ static void on_key(const unsigned char *buf, int n, void *arg)
 		snprintf(hex + i * 3, 4, "%02x ", buf[i]);
 	hex[i * 3] = '\0';
 	if (n >= 8) {
-		/* the value is the detents since the last message (21.10: one
-		 * message said 2) */
+		/* the value is the detents since the last message (one
+		 * message can say 2) */
 		vol_up_clicks += buf[4];
 		vol_down_clicks += buf[5];
 	}

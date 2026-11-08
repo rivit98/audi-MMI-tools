@@ -1,5 +1,5 @@
-// stream_server.cpp - see stream_server.h. Moved from hello9 (where it
-// served a file on a timed schedule) on 2026-11-04.
+// stream_server.cpp - see stream_server.h. Moved from hello9, where it
+// served a file on a timed schedule.
 //
 // Resource manager calls as in QNX 6.3's libc (all exported by the unit's
 // libc.so.2). <sys/iomsg.h> needs <sys/pm.h>, which the sysroot lacks:

@@ -28,7 +28,7 @@ import android.widget.TextView
 /**
  * Audi streaming: connects to the MMI (an Android Open Accessory host
  * running src/audi_stream_receiver) and streams the phone's screen to it.
- * (Typed text messages were dropped on 2026-10-25:
+ * (There are no typed text messages:
  * src/audi_stream_receiver/README.md.)
  *
  * Android starts this activity when the MMI switches the phone into
@@ -52,7 +52,7 @@ import android.widget.TextView
  * so the link (and the streaming) stays up while another app is used.
  *
  * Turning the phone must not recreate the activity (configChanges in the
- * manifest): on 2026-10-25 every rotation closed the link and opened a new
+ * manifest): otherwise every rotation closes the link and opened a new
  * one, and the old activity's late onClosed then cleared Streaming.link,
  * so the capture service waited for an MMI that was connected all along.
  * The link setter, too, only ever clears the link it set itself.

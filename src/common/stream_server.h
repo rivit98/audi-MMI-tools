@@ -1,6 +1,6 @@
 // stream_server.h - a QNX resource manager that serves a live H.264 stream
 // (live_stream.h, a CS-MP4 in memory) at a path io-media can open, e.g.
-// /dev/audi_stream/live.mp4. Played on the car on 04.11 (hello9 "live",
+// /dev/audi_stream/live.mp4. Plays on the car (hello9 "live",
 // docs/phone-mirroring.md 7.10).
 //
 // The header is there at once; frame k once it has been pushed. A read that

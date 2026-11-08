@@ -116,7 +116,7 @@ class ProtoTest {
             0, 0, 8, 0, 1))!!
         assertEquals(Proto.VideoCaps(800, 452, 400, 480, 512 * 1024, 1), caps)
         assert(caps.jpeg)
-        assert(!caps.png)                                // MMI app before 2026-10-30
+        assert(!caps.png)                                // MMI app without PNG
         assert(caps.copy(formats = 3).png)
         assertNull(Proto.videoCapsOrNull(ByteArray(12)))
         assertEquals(Proto.VideoAck(0x0102, Proto.VIDEO_SHOWN, 300),
@@ -150,7 +150,7 @@ class ProtoTest {
 
     @Test
     fun capsWithH264Limits() {
-        // proto.h VIDEO_CAPS since 2026-11-04: 13 bytes + 720, 576, 25, 256 KB
+        // proto.h VIDEO_CAPS with H.264: 13 bytes + 720, 576, 25, 256 KB
         val p = byteArrayOf(0x20, 3, 0xe0.toByte(), 1, 0x90.toByte(), 1, 0xe0.toByte(), 1,
             0, 0, 8, 0, 7, 0xd0.toByte(), 2, 0x40, 2, 25, 0, 0, 4, 0)
         val caps = Proto.videoCapsOrNull(p)!!

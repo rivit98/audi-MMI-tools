@@ -12,8 +12,8 @@
  *   portrait    the picture on the left, full height; the status panel in
  *   picture     the rest of the width, with the video stats as its body.
  *
- * (Text messages from the phone, shown here until 2026-10-25, are gone:
- * the phone's screen is what the app is for.)
+ * (There are no text messages from the phone: the phone's screen is what
+ * the app is for.)
  */
 #include <stdio.h>
 #include <string.h>

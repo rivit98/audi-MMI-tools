@@ -1,9 +1,9 @@
 /*
  * audi_stream_receiver - receive the phone's screen from an Android phone
  * over USB (Android Open Accessory) and show it on the MMI screen: as JPEG /
- * PNG pictures, a few a second, decoded here; or, since 2026-11-04, as an
- * H.264 stream decoded by the unit's DM642 (hwvideo.h). (It also took text
- * messages until 2026-10-25; README.md says why they went.)
+ * PNG pictures, a few a second, decoded here; or as an
+ * H.264 stream decoded by the unit's DM642 (hwvideo.h). (It has no text
+ * messages; README.md says why.)
  *
  *   phone app (android/)  --USB, AOA bulk-->  this  -->  screen + SD log
  *
@@ -26,8 +26,7 @@
  * usage: audi_stream_receiver <sd_path> [copy=changed|full]
  *   copy=changed  (default) write only the changed part of each row into
  *                 the VFB (screen_set_partial)
- *   copy=full     the whole screen every time, as before 2026-10-28 (to
- *                 compare)
+ *   copy=full     the whole screen every time (to compare)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,8 +45,8 @@
 #include "video.h"
 
 #define CPU_WINDOW_MS 10000
-/* "HIGH" in the cpu: line and on screen: own load over a window. 30.10:
- * ~27 % while streaming 3 fps; the unit has navigation etc. to run. */
+/* "HIGH" in the cpu: line and on screen: own load over a window: about
+ * 27 % while streaming 3 fps; the unit has navigation etc. to run. */
 #define CPU_WARN_PCT  50
 
 /* old -> new, replacing new. */
@@ -63,8 +62,8 @@ static void keep(const char *dir, const char *old_name, const char *new_name)
 	rename(from, to);
 }
 
-/* A card often goes through several runs before it is read. On 13.10 a
- * second run overwrote the log of the one that saw the phone and left that
+/* A card often goes through several runs before it is read. Without this a
+ * second run overwrites the log of the one that saw the phone and leaves that
  * run's slog snapshots behind, looking like this run's. */
 static void keep_previous_run(const char *sd_path)
 {

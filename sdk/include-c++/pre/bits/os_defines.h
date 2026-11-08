@@ -19,7 +19,7 @@
 // never destroyed leaves it behind, and a new statically initialised one
 // at the same address (the same stack slot, a reused heap block) then
 // fails its first lock with EINVAL (openqnx ker/nano_sync.c sync_lookup)
-// -> std::system_error. hello9 died of that on 2026-11-05 (the second
+// -> std::system_error. hello9 died of that (the second
 // HwStream in run_live). gthr-posix.h's own switches; the cost is one
 // kernel call per construction and destruction, and std::mutex is no
 // longer constexpr-constructible.

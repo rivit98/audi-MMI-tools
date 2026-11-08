@@ -38,8 +38,8 @@
  *   stop_mode over why_failed.
  *
  *   The enum values (start/stop modes, sample formats, why_failed codes)
- *   were first copied from ALSA 0.5 and were all wrong for QNX. The 12.10
- *   car run failed with why_failed=2 = BAD_START: start_mode 0 is invalid,
+ *   are not ALSA 0.5's, which are wrong for QNX: with them the car fails
+ *   with why_failed=2 = BAD_START, because start_mode 0 is invalid and
  *   QNX's SND_PCM_START_DATA is 1. The values below are read from the
  *   unit's io-audio (params check at 0x0804E780).                [CONFIRMED]
  *
@@ -165,7 +165,7 @@ typedef struct snd_pcm_channel_params {
  * (libasound 0xC378) checks mode @0x04 (1 or 2, filled in by the driver's
  * setup devctl 0x42D84138, sized 0x2D8 = 728 bytes) and memcpys the
  * plugin's 17-byte format block to @0x08.                     [CONFIRMED]
- * The 12.10 v2 run read it at @0x18 (the params offset) and logged
+ * Read at @0x18 (the params offset) it gives
  * "0 Hz, 0 ch". Padded past 0x2D8 so the library cannot write past it.
  */
 typedef struct snd_pcm_channel_setup {

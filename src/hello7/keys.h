@@ -1,6 +1,6 @@
 /*
  * keys.h - decode /dev/ipc/ch8 messages: which knob or button each one
- * reports (docs/platform-notes.md section 8, decoded on 2026-10-21).
+ * reports (docs/platform-notes.md section 8, decoded from the car's messages).
  *
  * A message is the state of the controls: knob bytes carry detents since
  * the last message (6/7 main knob right/left, 4/5 volume up/down), buttons

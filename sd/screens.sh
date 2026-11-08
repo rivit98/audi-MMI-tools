@@ -8,10 +8,9 @@
 #   screen_result <i> <app> <verdict>
 #                                 after the i-th app (0-based); uses RC,
 #                                 SECS and FAILS
-# They read APPS, PRE_S, POST_S and SDPATH (for apps.conf). Until
-# 2026-11-04 there was also a "Next" screen before every app, a final "all
-# done" screen, and the run order on every screen; the apps show their own
-# instructions, so they went.
+# They read APPS, PRE_S, POST_S and SDPATH (for apps.conf). There is no
+# "Next" screen before an app, no final "all done" screen and no run order
+# on the screens: the apps show their own instructions.
 
 # app_info <app>: ARGS, TIMEOUT, TITLE and TEXT from apps.conf
 app_info() {

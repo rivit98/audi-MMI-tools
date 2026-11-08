@@ -67,11 +67,10 @@ ff -f lavfi -i "$(vf 720 336 'c8 H.264 720x336 MPEG-PS')" "${SIL48[@]}" "${X264[
 
 # c9: constant-sample-size MP4 (media/csmp4.py), the layout a live stream
 # uses: moov first with one-entry tables, every frame padded to the same
-# size with a filler NAL (played on the car 04.11).
+# size with a filler NAL (plays on the car).
 # c11: the raw H.264 (Annex-B), as an encoder hands it out. hello9 pushes
 # it frame by frame through the MMI's own live stream code (common/
 # hw_stream.h), which builds the header and pads the frames itself.
-# (c10, the CS-MP4 hello9 served until 04.11, is gone.)
 # vbv caps the I-frames, so the padded size stays small.
 CS264=(-c:v libx264 -profile:v baseline -level:v 3.0 -pix_fmt yuv420p -preset veryfast
   -b:v 1500k -maxrate 1500k -bufsize 400k -g "$FPS" -keyint_min "$FPS" -sc_threshold 0

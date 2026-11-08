@@ -23,19 +23,19 @@
  *              circling: textures x lighting x fog together.
  *   4. stress  1, 2, 4, 8, 12 lit tori (1024 triangles each). Logs fps
  *              and triangles/s per step. 16 and up are commented out
- *              (opts_default): 16 froze the unit on 2026-10-19.
+ *              (opts_default): 16 freeze the unit.
  * Top left: frames in the previous second (green) and, in the stress
  * scene, the torus count (yellow). Bottom: progress bar of the current
  * scene (of the current step, in stress).
  *
- * The 2026-10-11 car run passed every probe and scenes 1-3, then froze
- * the whole unit (picture, knobs, radio volume; no watchdog fired) about
- * 5.5 s into the stress scene, while it was drawing 8 tori
- * (docs/gpu-results.md). So the scenes and the stress steps are
- * selectable, and the stress scene can log every frame (trace=), so the
- * last fsync'ed line on the card says which frame the unit died in.
- * 2026-10-19 (stress only): 8 tori for 60 s and 12 passed, the first
- * 16-tori frame froze the unit. The default plan now stops at 12.
+ * Every probe and scenes 1-3 pass. The stress scene over the nav map
+ * froze the whole unit (picture, knobs, radio volume; no watchdog fired)
+ * about 5.5 s in, while it was drawing 8 tori (docs/gpu-results.md). So
+ * the scenes and the stress steps are selectable, and the stress scene
+ * can log every frame (trace=), so the last fsync'ed line on the card
+ * says which frame the unit died in. Stress alone passes 8 tori for 60 s
+ * and 12; the first 16-tori frame freezes the unit. The default plan
+ * stops at 12.
  *
  * Stops early, with the normal teardown, on SIGTERM/SIGINT/SIGHUP, SD
  * card removal or the watchdog (src/common/quit.c). A freeze of the whole
@@ -701,7 +701,7 @@ static void run(struct gfx *g, const struct opts *o)
 
 static void opts_default(struct opts *o)
 {
-	/* The first 16-tori frame froze the whole unit on 2026-10-19
+	/* The first 16-tori frame freezes the whole unit
 	 * (docs/gpu-results.md section 8), and more tori only load the GPU
 	 * harder, so 16 and up are out. tori= can still ask for them. */
 	static const unsigned tori[] = {

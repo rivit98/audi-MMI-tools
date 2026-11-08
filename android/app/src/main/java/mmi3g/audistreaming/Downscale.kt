@@ -6,7 +6,7 @@ package mmi3g.audistreaming
  * (VideoFit.factor), so Android's own bilinear scaling only has a small
  * step left (under 2:1) and this one does the rest without dropping
  * pixels - one bilinear step of 3-5:1 skipped most of each thin text
- * stroke (blurred, broken fonts on the car, 2026-10-30).
+ * stroke (blurred, broken fonts on the car).
  *
  * Pixels are 4 bytes in any byte order (the ImageReader's RGBA read as
  * native ints); each byte is averaged on its own and the top byte (alpha

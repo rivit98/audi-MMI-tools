@@ -15,9 +15,9 @@
  * Times are CLOCK_MONOTONIC milliseconds (log_ms), so every measurement
  * runs long enough (>= ~200 ms) for that to be accurate.
  *
- * On 12.10 the whole unit froze somewhere between vfb_memcpy_out and the
+ * The whole unit can freeze somewhere between vfb_memcpy_out and the
  * end of the first RGB565 upload (the first glTexSubImage2D any of our apps
- * ever made). So every GL call that moves data now has a "gl:" step line
+ * makes). So every GL call that moves data now has a "gl:" step line
  * (fsync'ed) before it, and each format's first upload grows 64x64 ->
  * 256x256 -> 800x120 -> 800x480 with a glFinish after each: the last line
  * on the card names the call, size and format that hung.
@@ -221,7 +221,7 @@ void bench_cpu(void)
 	memset(a, 0x5a, PIX * 4);
 
 	/* The barrier keeps GCC from dropping copies into a buffer nobody reads:
-	 * without it the 12.10 run "measured" 860 GB/s. */
+	 * without it the loop "measures" 860 GB/s. */
 	t0 = log_ms();
 	for (reps = 0; reps < 1 || log_ms() - t0 < 300; reps++) {
 		memcpy(b, a, PIX * 4);
@@ -369,10 +369,10 @@ static void upload_case(const char *name, GLenum fmt, GLenum type, int bpp,
 		glFinish();
 		log_msg("gl:   ok in %u ms, glError 0x%04x", log_ms() - t0, glGetError());
 	}
-	/* glFinish after EVERY upload: 12.10 v2 froze the whole unit in this
-	 * loop when it let up to four 800x480 uploads queue up between
-	 * glFinish calls, right after the same uploads one at a time with a
-	 * glFinish each had passed (see docs/gpu-results.md). */
+	/* glFinish after EVERY upload: the whole unit freezes in this
+	 * loop when up to four 800x480 uploads queue up between
+	 * glFinish calls, while the same uploads one at a time with a
+	 * glFinish each pass (see docs/gpu-results.md). */
 	log_msg("gl: upload_%s: timed loop (glFinish after each)", name);
 	t0 = log_ms();
 	for (reps = 0; reps < 4 || log_ms() - t0 < 400; reps++) {

@@ -9,8 +9,8 @@
 #      exit code, run time and verdict appended there as "=== " lines.
 #      It is stopped (TERM, then KILL) if it runs longer than its timeout.
 #   2. its result screen for POST_S seconds
-# The verdicts are also in var/summary.txt. (Until 2026-11-04 every app
-# had a "Next" screen before it and the run ended on an "all done" screen.)
+# The verdicts are also in var/summary.txt. (There is no "Next" screen
+# before an app and no "all done" screen at the end.)
 #
 # The screens are rendered when they are needed: screens.sh prints the
 # layout, bin/pngondemand turns it into a PNG in /tmp, and bin/showScreen -t

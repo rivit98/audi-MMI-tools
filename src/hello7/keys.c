@@ -33,10 +33,10 @@ static int constant(int i)
 }
 
 /* Bytes 16-26 hold some state of the unit, not controls [inferred]: byte
- * 16 was 0x00 on 2026-10-21 and 0x03 in every message on 2026-10-25, byte
- * 26 0x11 all of 25.10, and bytes 23/25 changed with no control touched.
- * Decoding them as key bits made every message "unknown" (112 of them on
- * 25.10), so they are left to the raw log. */
+ * 16 is 0x00 in some sessions and 0x03 in every message of others, byte
+ * 26 can sit at 0x11 for a whole session, and bytes 23/25 change with no
+ * control touched. Decoding them as key bits makes every message
+ * "unknown", so they are left to the raw log. */
 static int is_state(int i)
 {
 	return i >= STATE_FIRST && i <= STATE_LAST;

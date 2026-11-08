@@ -49,15 +49,15 @@ import java.nio.ByteOrder
  * Formats: JPEG (q90) or PNG (lossless; one too big for the MMI goes as
  * JPEG). PNG needs an MMI app that takes it (VIDEO_CAPS); an older one
  * gets JPEG. (A third, "PNG when still" - JPEG while the screen moved, the
- * same picture as PNG once it stopped - was dropped on 2026-11-04.)
+ * same picture as PNG once it stopped - does not exist.)
  * The pictures go to whatever link [Streaming.link] holds, so unplugging
  * and replugging the phone carries on streaming. Only a screen that
  * changes produces pictures; a new link gets the last one again.
  *
- * H.264 (since 2026-11-04; the MMI's DM642 decodes it, docs/phone-mirroring.md
+ * H.264 (the MMI's DM642 decodes it, docs/phone-mirroring.md
  * 7.10-7.12): the hardware encoder ([HwEncoder], 720x432 for the MMI's
  * 720x576 limit, Android 10+) gets the virtual display at k times that,
- * box-filtered k:1 on the GPU ([GlScaler], since 2026-11-05: straight into
+ * box-filtered k:1 on the GPU ([GlScaler]: straight into
  * the encoder, Android's one 3.25:1 bilinear step blurred text). The
  * "Sharp H.264" switch turns that off for comparison; a phone whose GL
  * setup fails gets the direct path. The bit rate is the drop-down's. The
@@ -590,13 +590,13 @@ class CaptureService : Service() {
         private const val EXTRA_DATA = "data"
         const val DEFAULT_FPS = 5
         const val MIN_FPS = 1
-        const val MAX_FPS = 25            // 15 until 2026-11-04; H.264 runs at up to the MMI's 25
+        const val MAX_FPS = 25            // H.264 runs at up to the MMI's 25
         private const val POLL_MS = 20L   // waiting for an ack or a new image
-        const val QUALITY = 90            // 60 until 2026-10-30: ringing around text
+        const val QUALITY = 90            // 60 rings around text
         private const val H264_TICK_MS = 5L
         private const val FPS_SETTLE_MS = 700L
         // H.264 bit rates of the drop-down (res/values/strings.xml bit_rates);
-        // 2.5 Mbit/s until 2026-11-05: ~12 KB a frame at 25 fps
+        // 2.5 Mbit/s is ~12 KB a frame at 25 fps
         val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000, 8_000_000)
         const val DEFAULT_BIT_RATE = 4_000_000
         const val START_FRAME_BYTES = 64 * 1024
@@ -633,7 +633,7 @@ object Streaming {
 }
 
 /** The format drop-down, in its order (res/values/strings.xml formats). A
- * saved choice that is no longer here (PNG_STILL, until 2026-11-04) reads
+ * saved choice that is no longer here (the removed PNG_STILL) reads
  * as JPEG. */
 enum class Format {
     JPEG,

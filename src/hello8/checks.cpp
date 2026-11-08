@@ -1158,8 +1158,8 @@ void check_chrono(Result &r)
 	EXPECT(1h == 3600s && duration<double>(1500ms).count() == 1.5);
 
 	// C++20 calendar
-	EXPECT(weekday{sys_days{2026y / October / 22}} == Thursday);
-	EXPECT((sys_days{2026y / March / 1} - sys_days{2026y / February / 1}).count() == 28);
+	EXPECT(weekday{sys_days{2000y / January / 1}} == Saturday);
+	EXPECT((sys_days{2001y / March / 1} - sys_days{2001y / February / 1}).count() == 28);
 	note(r, fmt("sleep_for(100ms) %lld ms", (long long)slept));
 }
 
@@ -1344,8 +1344,8 @@ void check_sync(Result &r)
 // QNX keeps a kernel sync object per address from a mutex's first lock until
 // pthread_mutex_destroy. With libstdc++'s default (PTHREAD_MUTEX_INITIALIZER,
 // trivial destructor) the next mutex at that address - the same stack slot,
-// a reused heap block - failed its first lock with EINVAL: hello9's second
-// HwStream on 2026-11-05. The SDK now destroys (include-c++/pre/bits/
+// a reused heap block - fails its first lock with EINVAL: hello9's second
+// HwStream. The SDK now destroys (include-c++/pre/bits/
 // os_defines.h); here each kind is built, used from two threads, destroyed
 // and built again in the same buffer, a few rounds.
 
@@ -1509,8 +1509,8 @@ void check_atomics(Result &r)
 //          threads didn't interleave and the other two numbers say nothing.
 //   gUSA   __atomic_fetch_add in gusa.cpp, built with -matomic-model=soft-gusa,
 //          GCC's sh4 default. Lost updates here = QNX doesn't restart the
-//          sequence (2026-10-30: 9 % lost).
-//   LL/SC  the same in llcs.cpp, with the SDK's default since 2026-10-30,
+//          sequence (9 % lost).
+//   LL/SC  the same in llcs.cpp, with the SDK's default,
 //          hard-llcs: the fix. It must lose none.
 // The counter is 32-bit and wraps (the host's plain loop can exceed 2^32);
 // lost = done - counter, mod 2^32.

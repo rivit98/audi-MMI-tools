@@ -1,5 +1,5 @@
 /*
- * test_keys.c - src/hello7/keys.c on the ch8 messages logged on 2026-10-21
+ * test_keys.c - src/hello7/keys.c on ch8 messages logged on the car
  * (docs/platform-notes.md section 8), plus made-up unknown bits.
  */
 #include "check.h"
@@ -50,7 +50,7 @@ int main(void)
 	one(9, 0x10, K_UNKNOWN, 1, "unknown b9 0x10");
 	one(14, 0x03, K_UNKNOWN, 1, "unknown b14 0x02");  /* a constant changed */
 
-	/* 2026-10-25: state bytes 16 = 0x03, 26 = 0x11, 23/25 changing: no key */
+	/* state bytes 16 = 0x03, 26 = 0x11, 23/25 changing: no key */
 	msg(m, 6, 1);
 	m[16] = 0x03;
 	m[23] = 0x12;

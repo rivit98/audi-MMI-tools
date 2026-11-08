@@ -22,8 +22,8 @@
 #define C_BOX    0xffffffffu
 #define C_BOXTXT 0xff000000u
 
-/* MEDIA (step t) brings the MMI's Media screen up over ours, and it stayed
- * there for the rest of the 2026-11-03 run: show ours again this often. */
+/* MEDIA (step t) brings the MMI's Media screen up over ours, and it stays
+ * there for the rest of the run: show ours again this often. */
 #define UI_RESHOW_MS 1000
 
 /* one per group: blue, green, purple, brown, teal, red */

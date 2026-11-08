@@ -13,8 +13,8 @@
  *   g  GPU: CPU writes to the frame buffer, texture upload (RGBA, BGRA,
  *      RGB565, DXT1), visible upload+draw pipelines in fps (bench.c)
  *
- * The phases always run in this order, g last: on 12.10 the first full-frame
- * texture upload froze the whole unit, which cost the video phase.
+ * The phases always run in this order, g last: the first full-frame
+ * texture upload can freeze the whole unit, which costs the video phase.
  *
  * Text screens (cid 40) say what is happening and what to do. A summary
  * screen at the end shows the key numbers for 20 s.
@@ -28,8 +28,7 @@
  * puts next to hello6 on the card.
  *
  * Default: v only, every clip through both capture paths (~6 min). The
- * rest only costs the driver's time (and g froze the unit on 12.10 and
- * 13.10).
+ * rest only costs the driver's time (and g can freeze the unit).
  *
  * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default "v")
  */
@@ -49,7 +48,7 @@
 #include "texts.h"
 
 #define WATCHDOG_S   900     /* v alone ~6 min (10 clips x 30-38 s) */
-#define INTRO_MS     12000   /* 8 s until 13.10: too short */
+#define INTRO_MS     12000   /* 8 s is too short */
 #define PAGE_MS      12000   /* per results page */
 #define MAX_SUMMARY  48
 
@@ -221,8 +220,8 @@ int main(int argc, char *argv[])
 	if (strchr(phases, 'v') != NULL && quit_poll() == QUIT_NONE) {
 		video_tests();
 		/* io-media's own messages for the clips. run.sh saves the slog
-		 * after the app, but on 13.10 the GPU phase froze the unit
-		 * first and that copy was never made. */
+		 * after the app, but when the GPU phase freezes the unit
+		 * first that copy is never made. */
 		out_path(path, sizeof(path), "slog_video.txt");
 		log_msg("== system log after the video tests -> %s: %s", path,
 		        proc_status_str(proc_shell(path, 30, "sloginfo")));

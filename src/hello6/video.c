@@ -6,7 +6,7 @@
  * picture with its name and a frame counter burnt in) is played by the
  * unit's own io-media test client, testapp-file (graph type trackplayer).
  * Its default output, /dev/snd/pcmPreferredp, cannot be attached on this
- * unit (12.10 v2: iom_attach_output_to_graph iom_errno=0x10001 for every
+ * unit (iom_attach_output_to_graph iom_errno=0x10001 for every
  * clip and even with no URL), so it gets -o with the outputs the unit's
  * own MME uses (outputdevices table in efs-system's mme SQL): io-media
  * mixer inputs "mixer:DSPOUT_*?delay=130". They are tried in turn until
@@ -28,13 +28,13 @@
  * and io-media's / dev-videoctrl's own slog lines ("NEDL: Enabling Capture",
  * "VP2: vcap enabled", ...) end up in hello6/slog_video.txt (main.c).
  *
- * 13.10: every clip but the 800-wide, fragmented and MPEG-PS ones played to
- * its end (TIME events up to 8 s, INPUT_EOF) and both VCAPs stayed black.
- * 19.10: the query showed io-media did take clip 1 as video ("video ('MPG ',
- * 25Hz 720x576)", get_video_info 720x576), and every capture unit stayed
- * black again: capture was never enabled (vc_capture). 19.10 v2: clip 1
- * on screen through attempt 2 (VCAP 0 input 1), attempt 1 black. Now
- * every clip runs again, each through both attempts.
+ * Every clip but the 800-wide, fragmented and MPEG-PS ones plays to its
+ * end (TIME events up to 8 s, INPUT_EOF). The query shows io-media takes
+ * clip 1 as video ("video ('MPG ', 25Hz 720x576)", get_video_info
+ * 720x576). Without vc_capture both VCAPs stay black: nothing enables
+ * capture. With it, clip 1 is on screen through attempt 2 (VCAP 0
+ * input 1); attempt 1 (VCAP 1) stays black. Every clip runs through both
+ * attempts.
  *
  * The two "growing" clips are written to the card while they play, at
  * real-time rate after a 2 s head start: can io-media read a file that is
@@ -64,8 +64,7 @@
 #define LABEL_MS     6000
 #define START_MS     1000    /* player start-up before the first displayable */
 #define BIND_MS      500     /* layer manager binds the VCAP when it shows us */
-#define ATTEMPT_MS   7000    /* START_MS + query + 2 attempts < the clip;
-                                * 10 s until 30.10, knob turned 2.4-4 s in */
+#define ATTEMPT_MS   7000    /* START_MS + query + 2 attempts < the clip */
 #define QUERY_MS     2500    /* testapp-cmdline: run the script and quit */
 #define END_WAIT_MS  8000    /* for the player to finish by itself */
 #define HEAD_S       2       /* growing clips: seconds written before playing */
@@ -113,8 +112,7 @@ struct result {
  *   enabled".
  * The layer manager only attaches the VCAP and binds it to the video layer
  * (CVideoDisplayable::renderLayer); nobody enables capture unless the HMI
- * asks dev-videoctrl, which is why a video displayable alone stayed black on
- * 12.10 and 13.10. Note: a payload dev-videoctrl rejects is ignored and
+ * asks dev-videoctrl, which is why a video displayable alone stays black. Note: a payload dev-videoctrl rejects is ignored and
  * still answered with EOK; only the slog lines confirm. */
 #define VC_PATH            "/dev/videoctrl"
 #define VC_DCMD_SET_SOURCE 0x80080501u /* vp, input                     */

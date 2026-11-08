@@ -1,5 +1,5 @@
 // gusa.cpp - the gUSA half of hello8's "atomics stress" check (checks.cpp).
-// The SDK builds everything with SH-4A LL/SC atomics since 2026-10-30;
+// The SDK builds everything with SH-4A LL/SC atomics;
 // this one file is built with GCC's old sh4 default, -matomic-model=
 // soft-gusa,strict (Makefile; without strict, -m4a turns 32-bit atomics
 // into LL/SC anyway), so the check keeps showing what that model does on

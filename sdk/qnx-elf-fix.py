@@ -6,8 +6,8 @@ things the 2008-era QNX loader does not know:
 
   STB_GNU_UNIQUE  (binding 10) libstdc++.a defines some template statics
                   this way (std::string's _S_empty_rep_storage). ldqnx
-                  treats the symbol as undefined: on 2026-10-25 hello8 died
-                  at load with "unknown symbol: _ZNSs4_Rep20_S_empty_rep_
+                  treats the symbol as undefined: hello8 dies at load
+                  with "unknown symbol: _ZNSs4_Rep20_S_empty_rep_
                   storageE". In an executable "unique" means nothing more
                   than global, so it becomes STB_GLOBAL.
   ELFOSABI_GNU    ld marks the file GNU/Linux when it has UNIQUE symbols;

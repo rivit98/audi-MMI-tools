@@ -7,19 +7,19 @@ package mmi3g.audistreaming
  *   type u8 | len u16 LE | payload[len]      (len <= MAX_PAYLOAD)
  *
  *   HELLO 0x01 (both, "who I am", answered by HELLO_REPLY), HELLO_REPLY
- *   0x04 (both). 0x02 / 0x03 were TEXT / ACK, retired on 2026-10-25.
+ *   0x04 (both). 0x02 / 0x03 were TEXT / ACK, retired.
  *
  *   Video, one JPEG or PNG per picture (all integers LE):
  *   VIDEO_CAPS 0x05 (MMI: landW u16, landH u16, portW u16, portH u16,
  *   maxBytes u32, formats u8: bit n-1 = format n, PNG only from MMI apps
- *   of 2026-10-30 on), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
+ *   that take it), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
  *   format u8, size u32, phoneMs u16 = scale + encode time, for the MMI's
  *   perf log; older MMI apps ignore it), VIDEO_DATA 0x07 (phone: id u16 + bytes),
  *   VIDEO_ACK 0x08 (MMI: id u16, status u8, decodeMs u16), VIDEO_STOP 0x09
  *   (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 = the MMI's
  *   status bar over a landscape picture, 0 = the picture alone).
  *
- *   Hardware H.264 (MMI apps of 2026-11-04 on; proto.h has the details):
+ *   Hardware H.264 (MMI apps with H.264; proto.h has the details):
  *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
  *   u8, h264MaxFrame u32, and sets format bit 2. H264_CONFIG 0x0B (phone:
  *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps; NAL units

@@ -12,7 +12,7 @@
     <string name="sharp">Sharp H.264 (GPU box downscale)</string>
     <!-- in the order of CaptureService.BIT_RATES -->
     <string-array name="bit_rates">
-        <item>2.5 Mbit/s (until 05.11)</item>
+        <item>2.5 Mbit/s</item>
         <item>4 Mbit/s</item>
         <item>6 Mbit/s</item>
         <item>8 Mbit/s</item>

@@ -1,7 +1,7 @@
 // vout.h - put the DSP's decoded picture on screen: a layer-manager video
 // displayable bound to VCAP 0, and VCAP 0 switched to input 1 (the DM642's
-// video port) through dev-videoctrl. The path hello6 found on 19.10 v2 and
-// saw on every run since (docs/phone-mirroring.md 2.2, 7.4).
+// video port) through dev-videoctrl. The path hello6 found and
+// sees on every run (docs/phone-mirroring.md 2.2, 7.4).
 #ifndef COMMON_VOUT_H
 #define COMMON_VOUT_H
 

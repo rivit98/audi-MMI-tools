@@ -24,10 +24,10 @@ esac
 # as -m4 does). Atomics are SH-4A LL/SC (movli.l/movco.l), not GCC's sh4
 # default gUSA sequences: QNX's kernel doesn't restart an interrupted gUSA
 # sequence, so they lose updates between threads (hello8 "atomics stress"
-# on the car, 2026-10-30: gUSA lost 9 %, LL/SC none, at the same speed).
+# on the car: gUSA lost 9 %, LL/SC none, at the same speed).
 # The ELF says "sh4a" then; QNX's loader checks only e_machine. What is
 # precompiled into libstdc++.a / libgcc_eh.a keeps gUSA
-# (docs/cpp-apps.md). Until 2026-10-30: -m4 -Wa,--isa=sh4, soft-gusa.
+# (docs/cpp-apps.md).
 # Non-PIE, because QNX 6.3's loader expects ET_EXEC binaries like the stock
 # ones (base 0x08040000).
 # Linux-isms GCC would otherwise bake in are switched off, including Debian's

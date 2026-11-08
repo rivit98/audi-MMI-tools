@@ -1,6 +1,6 @@
 // csmp4.h - the constant-sample-size MP4 ("CS-MP4") a live H.264 stream to
 // io-media is served as (pure C++; tests/test_live.cpp runs it on the build
-// host). Played on the car on 04.11 (docs/phone-mirroring.md 7.10).
+// host). Plays on the car (docs/phone-mirroring.md 7.10).
 //
 //   ftyp | moov (one-entry stts/stsc/stco, stsz with one constant size S) |
 //   mdat with an 8-byte header | frame 0 | frame 1 | ...

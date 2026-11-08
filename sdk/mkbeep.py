@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """mkbeep.py - render src/hello5/beep.wav, hello5's sound-check chime.
 
-The first clip was 100 ms at 22.05 kHz, short enough to read as a click.
-The second, a 600 ms two-note chime, was heard at most once in the 19.10 v2
-run, and the listener could not tell which group it came from: too short to
-notice and place in a running car. This renders one long chime instead:
+A 100 ms clip reads as a click, and a 600 ms two-note chime is heard at
+most once: too short to notice and place in a running car. This renders
+one long chime instead:
 
     A5 (880 Hz) strike, then D6 (1174.66 Hz) held for ~2 s, 2.5 s total
 

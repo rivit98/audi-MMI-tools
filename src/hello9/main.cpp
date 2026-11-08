@@ -3,20 +3,19 @@
 // a CS-MP4 built on the MMI, a resource manager with blocking reads, gap
 // fill with skip frames, the unit's own unpatched io-media, VCAP 0 input 1).
 //
-// 04.11 settled that a live stream plays (docs/phone-mirroring.md 7.10;
-// that run's c9 / c10g / live / stall: src/hello9/README.md). Since then
-// hello9 feeds a raw H.264 clip from the card (c11, Annex-B, as an encoder
+// A live stream plays (docs/phone-mirroring.md 7.10; c9 / live / stall:
+// src/hello9/README.md). hello9 feeds a raw H.264 clip from the card (c11, Annex-B, as an encoder
 // emits it) frame by frame, the way a phone would, and the MMI builds
 // everything else. The driver turns the knob when the moving test picture
 // is visible. Tests, in order:
 //
-//   c5      control: a plain MP4 (720x336) from the card, seen since 21.10
+//   c5      control: a plain MP4 (720x336) from the card, plays every run
 //   live    steady 25 fps, 30 s; the header declares the receiver's
 //           default (~1.6 h)
 //   gap     pauses of 2 s at 8 s and 5 s at 16 s, gap fill on: the
 //           picture should freeze on the last frame before each pause
-//           (199, 399) and go on without skipping (04.11 without fill: it
-//           froze ~9 frames early and then skipped them)
+//           (199, 399) and go on without skipping (without fill it
+//           freezes ~9 frames early and then skips them)
 //   slow    frames come at 15 fps; skip frames make up the rest of 25
 //   burst   frames come 5 at a time every 200 ms (USB-like clumping)
 //   s56     15 s steady, every frame padded to twice the size (56 KB)
@@ -25,8 +24,8 @@
 //           s56 / s112 / f30 vs live: is io-media's ~0.5 s delay a queue
 //           of bytes or of frames? (docs/phone-mirroring.md 7.10)
 // and, on request only:
-//   c9      constant-size MP4 file (seen 04.11)
-//   stall   the gap test without gap fill (the 04.11 "stall")
+//   c9      constant-size MP4 file (plays)
+//   stall   the gap test without gap fill (the "stall")
 //
 // Every read io-media makes is counted (how far ahead it reads, how long
 // it waits) and every TIME event gives the lag: how long after a frame was
@@ -107,7 +106,7 @@ const char kSeenStall[] =
 	"more click each time it starts moving again after it froze.";
 
 const std::vector<Test> kTests = {
-	{"c5", "Control: plain MP4", "The 720x336 video seen on every run since 21.10.", Kind::File,
+	{"c5", "Control: plain MP4", "The 720x336 video seen on every run.", Kind::File,
 	 true, "c5_h264_336.mp4", 8000, 0, {}, 1, false, 0},
 	{"live", "Live stream (30 s)",
 	 "hello9 sends the video frame by frame, like a phone would, and builds the stream "
@@ -133,7 +132,7 @@ const std::vector<Test> kTests = {
 	{"f30", "Live stream at 30 fps (15 s)",
 	 "The stream timed at 30 frames a second: the counter runs a little fast.", Kind::Live, true,
 	 nullptr, 15000, 30, {}, 1, true, 600, 1, 30},
-	{"c9", "Constant-size MP4", "A file with every frame padded to the same size (seen 04.11).",
+	{"c9", "Constant-size MP4", "A file with every frame padded to the same size (plays).",
 	 Kind::File, false, "c9_h264_336_cs.mp4", 8000, 0, {}, 1, false, 0},
 	{"stall", "Live stream with pauses, no fill (36 s)",
 	 "As the pause test, without the MMI filling the pauses. The picture freezes: that is "

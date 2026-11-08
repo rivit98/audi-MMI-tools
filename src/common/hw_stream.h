@@ -1,5 +1,5 @@
 // hw_stream.h - a live H.264 stream on the screen through the unit's own
-// io-media and DM642 decoder, the path played on the car on 04.11
+// io-media and DM642 decoder, the path that plays on the car
 // (docs/phone-mirroring.md 7.10):
 //
 //   push(frame) -> live::Stream (CS-MP4 in memory, gap fill)

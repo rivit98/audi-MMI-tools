@@ -134,7 +134,7 @@ std::vector<uint8_t> make(const Spec &s, uint64_t *data_off)
 
 	const uint64_t payload = (uint64_t)s.declared * s.size;
 	if (s.mdat == 2) {
-		f.u32(1);                 // 64-bit size, as csmp4.py wrote until 03.11
+		f.u32(1);                 // 64-bit size, as an older csmp4.py wrote
 		f.tag("mdat");
 		f.u64(16 + payload);
 	} else {
