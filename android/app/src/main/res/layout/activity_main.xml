@@ -167,6 +167,13 @@
         android:paddingBottom="8dp"
         android:text="@string/latency_clock" />
 
+    <CheckBox
+        android:id="@+id/keep_screen_on"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="16dp"
+        android:text="@string/keep_screen_on" />
 
     <TextView
         android:layout_width="match_parent"

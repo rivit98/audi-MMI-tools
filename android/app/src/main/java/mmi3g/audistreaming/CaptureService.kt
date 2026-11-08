@@ -21,6 +21,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.os.SystemClock
@@ -68,6 +69,12 @@ import java.nio.ByteOrder
  * also raises the size (a new H264_CONFIG; the MMI restarts its stream).
  * The MMI's H264_STATUS: SYNC asks for an IDR, CONFIG for the config
  * again, REFUSED falls back to JPEG for this connection.
+ *
+ * [Streaming.keepScreenOn] holds a screen wake lock while streaming: the
+ * activity's FLAG_KEEP_SCREEN_ON only counts while its window is visible,
+ * and streaming is for while other apps are in front. The dim level is
+ * enough to stop the timeout that would lock the phone, and dimming doesn't
+ * touch the captured picture. The power button still turns the screen off.
  */
 class CaptureService : Service() {
     private lateinit var thread: HandlerThread
@@ -87,6 +94,7 @@ class CaptureService : Service() {
     private var last: Picture? = null
     private var lastSent = false
     private var lastLink: AccessoryLink? = null
+    private lateinit var screenLock: PowerManager.WakeLock
 
     // H.264 (capture thread only)
     private var enc: HwEncoder? = null
@@ -118,6 +126,10 @@ class CaptureService : Service() {
         super.onCreate()
         thread = HandlerThread("capture").apply { start() }
         handler = Handler(thread.looper)
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @Suppress("DEPRECATION")
+        screenLock = power.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "audistreaming:keep_screen_on")
+            .apply { setReferenceCounted(false) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -162,6 +174,7 @@ class CaptureService : Service() {
         Streaming.status = ""
         handler.removeCallbacksAndMessages(null)
         handler.post {
+            screenLock.release()
             display?.release()
             scaler?.release()
             scaler = null
@@ -185,6 +198,9 @@ class CaptureService : Service() {
      * unchanged, no MMI) look again shortly. H.264: every few ms. */
     private fun tick() {
         var next = POLL_MS
+        if (Streaming.keepScreenOn != screenLock.isHeld) {
+            if (Streaming.keepScreenOn) screenLock.acquire() else screenLock.release()
+        }
         try {
             if (wantH264()) {
                 next = h264Tick()
@@ -613,6 +629,8 @@ object Streaming {
     /** H.264 through the GL scaler (sharp text) or straight from the
      * display (the old way, for comparison), set by the activity. */
     @Volatile var sharp = true
+    /** Hold the screen on while streaming, set by the activity (its checkbox). */
+    @Volatile var keepScreenOn = false
 }
 
 /** The format drop-down, in its order (res/values/strings.xml formats). A

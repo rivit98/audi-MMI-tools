@@ -277,7 +277,9 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
   stroke's pixels; JPEG q60 added ringing. Hence the k× capture + k×k box
   average and JPEG q90.
 - The stream stops when the phone locks: Android revokes the screen
-  capture and the phone sends `VIDEO_STOP`.
+  capture and the phone sends `VIDEO_STOP`. *Keep screen on while
+  streaming* stops the screen timeout from locking the phone (the screen
+  may dim); the power button still locks it.
 
 **H.264.** Works well on the MMI: 720×432 Baseline, text sharp, rotation
 follows the phone, 22–25 fps on a moving screen (a still screen sends fewer

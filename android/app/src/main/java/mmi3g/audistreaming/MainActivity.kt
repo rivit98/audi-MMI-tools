@@ -48,7 +48,9 @@ import android.widget.TextView
  * bar (state, fps, timings) over a landscape picture; off, the picture has
  * the screen to itself. Portrait always shows the MMI's status panel. The
  * switch is remembered and sent again on every connection (the MMI starts
- * with it off). Back only moves the app to the background,
+ * with it off). "Keep screen on" (remembered) has CaptureService hold the
+ * screen on while it streams, so a timeout can't lock the phone and end the
+ * stream. Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
  *
  * Turning the phone must not recreate the activity (configChanges in the
@@ -170,6 +172,14 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             setOnCheckedChangeListener { _, on ->
                 Streaming.sharp = on
                 getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_SHARP, on).apply()
+            }
+        }
+        Streaming.keepScreenOn = prefs.getBoolean(PREF_KEEP_SCREEN_ON, false)
+        findViewById<CompoundButton>(R.id.keep_screen_on).apply {
+            isChecked = Streaming.keepScreenOn
+            setOnCheckedChangeListener { _, on ->
+                Streaming.keepScreenOn = on
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_KEEP_SCREEN_ON, on).apply()
             }
         }
         findViewById<SeekBar>(R.id.fps).apply {
@@ -365,5 +375,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_FORMAT = "format"
         private const val PREF_BIT_RATE = "bit_rate"
         private const val PREF_SHARP = "sharp_h264"
+        private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
     }
 }
