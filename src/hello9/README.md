@@ -106,7 +106,7 @@ used only by `_IO_POWER`, which isn't handled.
 | `first_time_ms`, `time_events`, `pos_ms` | Progress |
 | `errors` | ERROR events, with io-media's `iom_errno` |
 | `video`, `WxH` | From the query |
-| `knob`, `at_s` | Count, and seconds after play |
+| `knob`, `at_s` | Count, and seconds after play. Counts every ch8 message, so other buttons and the car's power-off messages show up as turns |
 | `lag` | min / median / max / last, ms |
 
 `RESULT <test> stream` lines (live tests) add:
@@ -142,14 +142,50 @@ feeder (with the first refusal), and the stream's `real`, `idr`, `skips`,
 
 ## On the car
 
+### The MMI-built stream and gap fill
+
+**All eight default tests play with no errors, no refused frames and no
+corruption.** Median lag in ms, from two complete runs, with what a video
+of the counter shows (the second run was filmed from start to end):
+
+| test | lag, run A | lag, run B | on video |
+|---|---|---|---|
+| `live` | 635 | 396 | Counter climbs 25 a second, wraps cleanly |
+| `gap` | 593 | 397 | **Freezes on exactly 199 for 2 s and 399 for 5 s**, then goes on with nothing skipped (199 → 203 → 206 → 213 at the 25 fps pace). 176 skip frames in 5 gaps, no garbage |
+| `slow` | 595 | 400 | Counter climbs 15 a second, lag steady: 210 skip frames make up the rate |
+| `burst` | 620 | 414 | Counter climbs 25 a second: clumped arrival doesn't show |
+| `s56` | 515 | 342 | Counter climbs 25 a second |
+| `s112` | 657 | 362 | Counter climbs 25 a second at 2.8 MB/s of reads |
+| `f30` | 577 | 365 | Counter climbs 30 a second |
+
+- **Skip frames work on the DSP**, even several non-reference frames in a
+  row with POC type 2, which is outside the spec. A sender that pauses
+  loses nothing, and the last frame before a pause does reach the screen.
+- **The io-media queue isn't counted in bytes.** With frames 2× and 4× the
+  size, a byte queue would halve and quarter the lag. It moves by −120 to
+  +22 ms, and not in order of frame size. So a bigger frame size cap costs
+  no delay.
+- **30 fps isn't worth it:** the lag drops by 8–9 %, 31–58 ms, less than
+  the 1/6 a queue of frames predicts.
+- **The lag differs from run to run, and is steady within a run:** every
+  test in run A sits ~200 ms above the same test in run B. The cause isn't
+  known. Unit CPU load is about the same in both. Compare lag within one
+  run only.
+- **Power-off doesn't stop it:** the ch8 power sequence (bytes 14–15
+  `02 02`, `01 03`, `01 00`, [docs/power-onoff.md](../../docs/power-onoff.md))
+  came during run A's `slow`, and the unit played the remaining tests to
+  the end.
+
+Nothing is left to answer, so hello9 is not in the default run. `make test`
+agrees: the MMI-built header and frames are byte-identical to `csmp4.py`'s,
+and ffmpeg decodes a filled gap with every skip an exact copy of the frame
+before. A host run of `gap` on c11 freezes on 199 for 49 frames and on 399
+for 125, the same picture as on the car.
+
+### The prebuilt stream
+
 The results below come from a CS-MP4 stream prebuilt on the host by
 `media/csmp4.py` and served frame by frame by the same resource manager.
-The MMI-built stream (`HwStream`) and gap fill, and so the tests `live`,
-`gap`, `slow`, `burst`, `s56`, `s112` and `f30` as described above, are
-built, not yet confirmed on the car. `make test`: the MMI-built header and
-frames are byte-identical to `csmp4.py`'s, and ffmpeg decodes a filled gap
-with every skip an exact copy of the frame before. A host run of `gap` on
-c11 freezes on 199 for 49 frames and on 399 for 125.
 
 | test | result |
 |---|---|

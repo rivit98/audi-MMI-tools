@@ -28,11 +28,11 @@ Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
   An app that wants to be quieter than the car volume has to scale its own
   samples. The output survey comes from step `g`. More detail is in
   [docs/platform-notes.md](../../docs/platform-notes.md) §9.
-- **Screen:** after MEDIA, the MMI's Media screen stays over hello5 (the
-  pings and the log go on; only the instructions are hidden), as with
+- **Screen:** MEDIA brings the MMI's Media screen up over hello5, as with
   hello7's MENU. hello5 shows its displayable again every second
-  (`screen_set_reshow`, `common/screen.c`). Built, not yet confirmed on
-  the car.
+  (`screen_set_reshow`, `common/screen.c`), and its screen comes back over
+  the Media screen. Nothing is left to answer, so hello5 is not in the
+  default run.
 
 The knob/button log that used to be part of hello5 is now
 [hello7](../hello7/).

@@ -37,18 +37,18 @@ expectation that failed.
   `hello8 exit` says the static destructors ran.
 - **If it crashes or hangs:** the last `check ...` line names the check.
   Rerun the others with the third argument.
-- **Status:** all checks up to `atomics stress` pass on the car with the
-  SDK's LL/SC build, and on the build host with glibc's libstdc++
-  (`make test`). `sync reuse` (the SDK's `std::mutex` calls
-  `pthread_mutex_init`/`pthread_mutex_destroy`) is built, not yet
-  confirmed on the car; hello8 is in the default run for it.
+- **Status:** all 19 checks pass on the car with the SDK's LL/SC build, and
+  on the build host with glibc's libstdc++ (`make test`). Nothing is left
+  to answer, so hello8 is not in the default run.
 
 ## On the car
 
-18 of 18 checks pass (`sync reuse` not yet run). The log says `atomics:
-hard-llcs (SH-4A movli.l/movco.l)`, exit 0, and `static destructor ran at
-exit` comes last, so `__cxa_atexit` works too. All checks run in about
-3.8 s. The system log has nothing from or about hello8. Timings are the
+19 of 19 checks pass. The log says `atomics: hard-llcs (SH-4A
+movli.l/movco.l)`, exit 0, and `static destructor ran at exit` comes last,
+so `__cxa_atexit` works too. `sync reuse` passes: all four types rebuilt in
+the same buffer three times, and a mutex holder three times on the same
+stack frame and three times on the heap, none with `EINVAL`. All checks run
+in about 3.8 s. The system log has nothing from or about hello8. Timings are the
 same from run to run:
 
 | | on the car |
@@ -61,7 +61,7 @@ same from run to run:
 | chrono | `sleep_for(100ms)` took 101 ms |
 | sync | `wait_for(50ms)` took 50 ms |
 | threads | `hardware_concurrency` 1; 4 × 20000 mutex lock/unlock: 16 ms |
-| atomics | 4 × 200000 `fetch_add`: 7 ms, 0 lost |
+| atomics | 4 × 200000 `fetch_add`: 7–10 ms, 0 lost |
 
 `atomics stress`, 4 `SCHED_RR` threads, 1.5 s per loop:
 

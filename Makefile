@@ -95,11 +95,11 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # 12 tori pass; 16 tori freeze the unit (docs/gpu-results.md sections 8-9).
 # Stress steps 16 and up stay commented out (src/hello4/main.c).
 #
-# hello8, the C++ test (src/hello8/checks.cpp): 18 of 18 pass, and
+# hello8, the C++ test (src/hello8/checks.cpp): 19 of 19 pass, and
 # "atomics stress" settled the last question (gUSA atomics lose updates
-# under QNX, SH-4A LL/SC ones don't; docs/cpp-apps.md). The SDK builds
-# everything with LL/SC (18 of 18, LL/SC 0 lost), so hello8 is not in the
-# default run.
+# under QNX, SH-4A LL/SC ones don't; docs/cpp-apps.md). "sync reuse" passes
+# too (the SDK's std::mutex calls pthread_mutex_init/destroy), so hello8 is
+# not in the default run.
 #
 # hello7 is a tool, not a test: a live knob and button tester, run when
 # needed (`make sd SD_APPS="hello7 ..."`). It is not in the default run:
@@ -111,19 +111,24 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # input 1, is rechecked by hello9's c5 control on every hello9 run. What
 # it leaves open needs RE or new tests (src/hello6/README.md).
 #
-# hello9 needs the driver watching for about 3.5 minutes and puts ~70 MB of
-# test videos on the card. audi_stream_receiver runs until the SD card is pulled, so
-# it is always last: pulling the card ends it and the whole run (no final
-# "done" screen; everything before it is already on the card).
+# hello5 is not in the default run: all its steps have answered on the car
+# (the sound replaces radio and music and follows the volume knob, the
+# re-shown screen comes back over the Media screen; src/hello5/README.md).
+#
+# hello9 is not in the default run: all eight tests have answered on the
+# car (skip frames work on the DSP, the io-media queue isn't counted in
+# bytes, a 30 fps stream doesn't pay; src/hello9/README.md). It needs the
+# driver watching for about 4.5 minutes and puts ~70 MB of test videos on
+# the card.
+#
+# audi_stream_receiver runs until the SD card is pulled, so it is always
+# last: pulling the card ends it and the whole run (no final "done" screen;
+# everything before it is already on the card).
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver
 CXX_APPS := hello8 hello9 audi_stream_receiver
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-# hello8 is in the default run for its "sync reuse" check: the SDK's
-# std::mutex calls pthread_mutex_init/destroy (hello9 died of the old way,
-# a mutex reused at the same address failing its first lock). Drop it
-# once that passes on the car.
-TESTS   := hello8 hello5 hello9 audi_stream_receiver
+TESTS   := audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.

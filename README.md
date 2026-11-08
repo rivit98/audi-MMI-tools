@@ -37,7 +37,7 @@ what it showed on the car). Shared code is in [src/common/](src/common/).
 | [hello5](src/hello5/README.md) | sound from an app through io-media | works on one output |
 | [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode | done (5 of 10 clips play) |
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
-| [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 18/18 |
+| [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP | works |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): JPEG/PNG or hardware H.264; phone app in [android/](android/) | works |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens | tool |
@@ -57,13 +57,15 @@ Tested on one unit (9411, HN+R_EU_AU_P1001, board E1):
   uploads can freeze the whole unit.
 - **Video:** the DM642 DSP decodes MPEG-2, MPEG-4 and H.264 Baseline up to
   720×576 onto the screen, including a live stream served by the app's own
-  resource manager (~0.5 s lag).
+  resource manager (0.4–0.65 s lag). Skip frames keep it moving when the
+  sender pauses.
 - **Sound:** one audible output (`mixer:DSPOUT_TDM1_20_SAD`); it replaces
   the radio while playing and follows the volume knob. Live PCM is not
   solved.
 - **Input:** knob and button messages decoded; the HMI still acts on them.
 - **USB:** Android Open Accessory link to a phone; screen streaming as
-  pictures (~3 fps) and as hardware H.264 (25 fps).
+  pictures (~3 fps) and as hardware H.264 (~25 fps, sharp text, follows
+  the phone's rotation).
 
 What is built but not yet confirmed is listed in each app's README and in
 [docs/TODO.md](docs/TODO.md).

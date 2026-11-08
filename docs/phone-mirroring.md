@@ -49,8 +49,8 @@ not covered here.
     can be written before the frames exist (§7.8). With a 32-bit `mdat`
     header (io-media's own demuxer can't read the 64-bit one, §7.9) it plays
     from a file and as a live stream served through blocking reads, at
-    25 fps with a steady ~0.5 s lag and ~10 % CPU. Pauses in the stream are
-    waited out (§7.10).
+    25 fps with a steady 0.4–0.65 s lag and ~10 % CPU. Pauses in the stream
+    are waited out (§7.10) and filled with skip frames (§7.11).
   - The phone's own H.264 played on the car through `audi_stream_receiver`
     (§7.13).
 - **Option 1** is not built. Options 4 and 5 build on 2a.
@@ -819,9 +819,10 @@ only. Details per test: [src/hello9/README.md](../src/hello9/README.md),
   only reads 64 KB at a time, in order, with no `pread`s and no seeks, and
   never more than ~2.7 frames past what has been released. A read can
   wait at least 5 s without io-media giving up.
-- **Latency added by io-media: ~0.5 s, steady.** Two measures agree:
+- **Latency added by io-media: 0.4–0.65 s, steady within a run.** The
+  level differs between runs by ~200 ms, cause unknown. Two measures agree:
   - TIME positions trail the frame release by 514–560 ms over the whole
-    30 s, with no drift.
+    30 s, with no drift (other runs: medians of 396 and 635 ms).
   - When starved, the picture stops ~9 frames (~0.35 s) behind the
     newest frame io-media has read (frozen on 190 with 198 served, on 391
     with 399 served). The rest is decode and display.
@@ -864,20 +865,24 @@ only. Details per test: [src/hello9/README.md](../src/hello9/README.md),
    28 KB × 25 fps, ~2.9 h at 16 KB. A longer session needs a graph
    restart (a short black gap) or a smaller S.
 
+**Latency tuning doesn't help:** the queue isn't counted in bytes (frames
+2× and 4× the size change the lag by −120 to +22 ms, not by half or more),
+and a stream at 30 fps cuts only 31–58 ms (§7.12).
+
 **Open questions:**
 
-- **Latency tuning:** does the ~9-frame queue shrink with a smaller S (is
-  it counted in bytes or frames)? With a higher declared rate (30 fps)?
-  hello9 `s56`, `s112` and `f30` test it (§7.12), not yet run on the car.
 - **Robustness:** a session of 10+ minutes; the HMI starting its own
   media or video (MMI3GMedia owns the video lock); reverse gear (the
   camera is VCAP 0 input 0); unplugging mid-stream; a graph restart.
 
 ### 7.11 The MMI side: shared stream code and gap fill
 
-The receiver's use of this code played the phone's stream on the car
-(§7.13). Gap fill and hello9's `gap`, `slow` and `burst` tests are built
-and checked on the build host, **not yet confirmed on the car**.
+The receiver's use of this code plays the phone's stream on the car
+(§7.13). **Gap fill works on the DSP:** in hello9's `gap` the picture
+freezes on exactly the last frame before each pause and goes on with nothing
+skipped, including POC type 2 with several non-reference skips in a row, and
+in `slow` skips make a 15 fps sender up to 25 with a steady lag. Clumped
+arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
 
 - **`src/common`, C++ (Makefile group `LIVE`):**
   - `h264`: Annex-B → NAL units and frames; SPS / PPS / slice header
@@ -960,23 +965,41 @@ and checked on the build host, **not yet confirmed on the car**.
 - **Tuning (hello9):** `s56` / `s112` (frames padded 2× / 4×) and `f30`
   (stream at 30 fps) against `live`, from the `lag` in their RESULT lines.
   Lag the same with bigger frames = the queue is frames (bigger frames
-  only cost io-media reading); lower = bytes. `f30` lower by ~1/6 =
-  frames, and a 30 fps stream would cut ~60 ms. Built, not yet run on
-  the car.
+  only cost io-media reading); lower = bytes. Against `live`, in two runs:
+  `s56` −120 / −54 ms, `s112` +22 / −34 ms, `f30` −58 / −31 ms. Not bytes,
+  so large frames are free; 30 fps isn't worth changing the stream clock for.
 
 **Open:** whether repeat-previous-frame really keeps a still screen at
 the slider's rate on this phone, and the robustness list (§7.10).
 
 ### 7.13 Phone H.264 on the car; text sharpness
 
-**On the car [confirmed]:** the phone's H.264 plays on the MMI: 720×432
-Baseline, POC type 0, lag 600–650 ms steady, MMI CPU ~24 % (receiver 4 %,
-against ~45 % for JPEG). IDRs go over 64 KB, so the phone raises the frame
-size to 128 KB (a new `H264_CONFIG`; the MMI restarts, and a second
-identical config queued during the first restart causes a second restart
-~300 ms later).
+**On the car [confirmed]:** the phone's H.264 plays on the MMI, and works
+well in use: 720×432 Baseline, POC type 0, sharp text, rotation follows the
+phone.
 
-**Direct capture into the encoder blurs text.** With the virtual display
+- **Frame rate:** 22–25 fps of real frames on a moving screen. A still
+  screen sends fewer (8.5–13.5 a second), and skip frames fill up to 25.
+- **Lag:** ~500 ms (300–530 ms across streams), but ~1.1 s on the first
+  stream of a session, falling to ~835 ms where that stream lasts; the graph
+  starts ~1 s after the first frames there [inferred cause].
+- **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
+  160 KB, against ~45 % for JPEG).
+
+**Restarts are wasteful, but only cost a short break in the picture.** Each
+rotation or frame-size change sends a new `H264_CONFIG`, and the graph
+restarts:
+
+- IDRs go over 64 KB, so the phone grows the frame size to 128–160 KB. After
+  a rotation it starts again from 64 KB, so the next big IDR causes one more
+  restart.
+- Identical configs queued during a restart cause more restarts: 18 of 30
+  streams in one session ended with 0 frames in, up to 6 in a row.
+- A restart racing the player sometimes gives `player: ERROR event:
+  Input/output error` (2 in 30 streams, 1 in 10) or `bad event size 1000`,
+  and the next restart recovers.
+
+**Direct capture at the old 2.5 Mbit/s blurs text.** With the virtual display
 drawing straight into the encoder at 720×432, Android scales the 2340×1080
 screen 3.25:1 in one bilinear step (2×2 taps per output pixel out of ~3×3
 covered: thin strokes are hit or missed). That is the same blur the
@@ -984,7 +1007,9 @@ pictures' k× capture fixes (option 0). Smaller parts: the letterbox (the
 screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
 frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
-**k× capture + GPU box filter (built, not yet confirmed on the car):**
+**k× capture + GPU box filter, 4 Mbit/s default:** text is sharp on the car.
+The *Sharp H.264* switch alone makes little visible difference, so the higher
+rate may matter as much as the filter:
 
 - `GlScaler.kt` / `GlBox.kt`: the virtual display renders at k× the
   picture into a SurfaceTexture (k = the largest ≤ 4 with k× the mirrored
@@ -1003,8 +1028,6 @@ frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
 **Open questions:**
 
-- Small-text sharpness with Sharp on/off at 4 and 6 Mbit/s, Max fps 10
-  and 25.
 - IDR sizes at the higher rates (frames over 256 KB can't be sent at all)
   and the MMI's `h264:` lag at those rates.
 - Whether the video displayable can be shown 1:1 (720×432 centred, no

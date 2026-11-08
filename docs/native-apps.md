@@ -386,8 +386,8 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
 - Don't hardcode `alpha_sid`: it changes every run.
 - **The HMI can take the screen back.** MENU, BACK and MEDIA make it show
   its own screens over yours, and nothing tells you. An app that must stay
-  up re-shows itself on a timer: `screen_set_reshow(ms)` (built, not yet
-  confirmed on the car).
+  up re-shows itself on a timer: `screen_set_reshow(ms)`. Its screen comes
+  back over the Media screen.
 - **CPU writes into the VFB are slow:** ~9 MB/s, so a full 800×480×4 copy
   takes ~160 ms (main RAM: memcpy 107 MB/s). Draw into a RAM canvas and
   copy only what changed: `screen_set_partial(1)` keeps a shadow of each

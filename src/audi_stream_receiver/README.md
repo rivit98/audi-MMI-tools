@@ -157,8 +157,8 @@ screen footer shows the last second.
 ## Hardware H.264
 
 Besides JPEG / PNG pictures decoded on the CPU, the app takes an **H.264
-stream** and has the unit's DM642 decode it: no CPU decoding, 25 fps,
-~0.5 s added by io-media ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
+stream** and has the unit's DM642 decode it: no CPU decoding, ~25 fps,
+0.4–0.65 s added by io-media ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
 On the phone: *Format* → **H.264** (Android 10+). The phone encodes its
 screen in hardware at 720×432 (the MMI's 720×576 limit, the screen's 5:3
 shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
@@ -280,7 +280,10 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
 - The stream stops when the phone locks: Android revokes the screen
   capture and the phone sends `VIDEO_STOP`.
 
-**H.264.** Plays on the MMI: 720×432 Baseline, lag 600–650 ms steady, MMI
-CPU ~24 % (receiver 4 %, against ~45 % for JPEG). With the direct capture
-path the picture is blurry. *Sharp H.264* and the *H.264 rate* drop-down
-are built, not yet confirmed on the car (docs/phone-mirroring.md §7.13).
+**H.264.** Works well on the MMI: 720×432 Baseline, text sharp, rotation
+follows the phone, 22–25 fps on a moving screen (a still screen sends fewer
+real frames, and skip frames fill up to 25). Lag is ~500 ms, ~1.1 s on the
+first stream of a session. MMI CPU ~30 % (receiver 6–9 %, up to 15 % with big
+frames, against ~45 % for JPEG). Every rotation or frame-size growth restarts
+the graph, usually several times in a row, with an occasional harmless
+`player: ERROR`: docs/phone-mirroring.md §7.13.
