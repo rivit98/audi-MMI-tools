@@ -153,7 +153,7 @@ class AccessoryLink(
     fun close(reason: String) {
         if (closed) return
         closed = true
-        Log.i(TAG, "close: $reason")
+        AppLog.i("link closed: $reason")
         writer.shutdownNow()
         // Closing the fd makes a blocked read/write fail; the reader may
         // still sit in read() until the host sends something - it is a

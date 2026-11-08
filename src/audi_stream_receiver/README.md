@@ -280,6 +280,13 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
   capture and the phone sends `VIDEO_STOP`. *Keep screen on while
   streaming* stops the screen timeout from locking the phone (the screen
   may dim); the power button still locks it.
+- **Phone log:** the app keeps its own log, up to 2 MiB:
+  `adb pull /sdcard/Android/data/mmi3g.audistreaming/files/audi_streaming.log`
+  (older lines in `.log.1`). It has screen and lock events, focus changes,
+  how each projection ended, why Android ended earlier processes, and a
+  status line every 5 s. A status line with `encoded` growing but no
+  `display frames` means a frozen picture; gaps between lines mean the CPU
+  slept.
 
 **H.264.** Works well on the MMI: 720×432 Baseline, text sharp, rotation
 follows the phone, 22–25 fps on a moving screen (a still screen sends fewer

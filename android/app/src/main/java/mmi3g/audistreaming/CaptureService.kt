@@ -1,13 +1,17 @@
 package mmi3g.audistreaming
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
@@ -23,7 +27,6 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.DisplayMetrics
-import android.util.Log
 import android.os.SystemClock
 import android.view.Display
 import java.io.ByteArrayOutputStream
@@ -75,6 +78,12 @@ import java.nio.ByteOrder
  * and streaming is for while other apps are in front. The dim level is
  * enough to stop the timeout that would lock the phone, and dimming doesn't
  * touch the captured picture. The power button still turns the screen off.
+ *
+ * Diagnostics ([AppLog]): screen and lock events, the virtual display's
+ * callbacks, how the projection ended, and every few seconds what the
+ * capture produced. "display frames" count what the system composes into
+ * the capture; "encoded" also counts the encoder's repeats of a still
+ * picture, so encoded frames with no display frames mean a frozen picture.
  */
 class CaptureService : Service() {
     private lateinit var thread: HandlerThread
@@ -95,6 +104,27 @@ class CaptureService : Service() {
     private var lastSent = false
     private var lastLink: AccessoryLink? = null
     private lateinit var screenLock: PowerManager.WakeLock
+    @Volatile private var destroying = false
+
+    // what the last status line counted (capture thread)
+    private var statusAt = 0L
+    private var statusDisplayFrames = 0
+    private var statusEncoded = 0
+    private var statusDropped = 0
+
+    private val displayEvents = object : VirtualDisplay.Callback() {
+        override fun onPaused() = AppLog.i("virtual display paused: ${state()}")
+        override fun onResumed() = AppLog.i("virtual display resumed: ${state()}")
+        override fun onStopped() = AppLog.i("virtual display stopped: ${state()}")
+    }
+
+    private val screenEvents = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val reason = intent.getStringExtra("reason")?.let { " ($it)" } ?: ""
+            val name = intent.action?.substringAfterLast('.')
+            handler.post { AppLog.i("$name$reason: ${state()}") }
+        }
+    }
 
     // H.264 (capture thread only)
     private var enc: HwEncoder? = null
@@ -124,8 +154,21 @@ class CaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         thread = HandlerThread("capture").apply { start() }
         handler = Handler(thread.looper)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+            @Suppress("DEPRECATION")
+            addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenEvents, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenEvents, filter)
+        }
         val power = getSystemService(Context.POWER_SERVICE) as PowerManager
         @Suppress("DEPRECATION")
         screenLock = power.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "audistreaming:keep_screen_on")
@@ -134,6 +177,7 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            AppLog.i("stop asked in the app or its notification")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -151,7 +195,7 @@ class CaptureService : Service() {
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val p = if (code == Activity.RESULT_OK && data != null) mpm.getMediaProjection(code, data) else null
         if (p == null) {
-            Log.w(TAG, "no media projection (code $code)")
+            AppLog.w("no media projection (code $code)")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -159,17 +203,31 @@ class CaptureService : Service() {
         // Registered before createVirtualDisplay (required since Android 14).
         p.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
-                Log.i(TAG, "projection stopped")
+                AppLog.i("projection stopped ${if (destroying) "by the app" else "from outside the app"}: ${state()}")
                 stopSelf()
             }
         }, handler)
+        AppLog.i("projection started: ${state()}")
         Streaming.running = true
         Streaming.status = "starting"
         handler.post(::tick)
         return START_NOT_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        AppLog.i("task removed from recents: ${state()}")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        AppLog.i("trim memory, level $level")
+        super.onTrimMemory(level)
+    }
+
     override fun onDestroy() {
+        destroying = true
+        AppLog.i("service destroyed")
+        unregisterReceiver(screenEvents)
         Streaming.running = false
         Streaming.status = ""
         handler.removeCallbacksAndMessages(null)
@@ -200,7 +258,9 @@ class CaptureService : Service() {
         var next = POLL_MS
         if (Streaming.keepScreenOn != screenLock.isHeld) {
             if (Streaming.keepScreenOn) screenLock.acquire() else screenLock.release()
+            AppLog.i("keep screen on: ${Streaming.keepScreenOn}")
         }
+        logStatus()
         try {
             if (wantH264()) {
                 next = h264Tick()
@@ -209,10 +269,44 @@ class CaptureService : Service() {
                 if (capture()) next = 1000L / Streaming.maxFps.coerceIn(MIN_FPS, MAX_FPS)
             }
         } catch (e: RuntimeException) {
-            Log.w(TAG, "capture", e)
+            AppLog.w("capture", e)
             Streaming.status = "capture error: ${e.message}"
         }
         if (projection != null) handler.postDelayed(::tick, next)
+    }
+
+    /** The phone's and the stream's state, for the log. */
+    private fun state(): String {
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val process = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(process)
+        @Suppress("DEPRECATION")
+        val foreground = am.getRunningServices(Int.MAX_VALUE).any {
+            it.service.className == CaptureService::class.java.name && it.foreground
+        }
+        return "screen ${if (power.isInteractive) "on" else "off"}, " +
+            "keyguard ${if (keyguard.isKeyguardLocked) "locked" else "open"}, " +
+            "importance ${process.importance}, foreground service $foreground, " +
+            "link ${if (Streaming.link != null) "up" else "down"}"
+    }
+
+    private fun logStatus() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - statusAt < STATUS_LOG_MS) return
+        statusAt = now
+        val displayFrames = scaler?.frames ?: 0
+        // a new scaler or encoder starts from 0 again
+        val newDisplayFrames = displayFrames - if (displayFrames < statusDisplayFrames) 0 else statusDisplayFrames
+        val v = Streaming.link?.video
+        AppLog.i("status: ${state()}; " +
+            (if (scaler != null) "display frames +$newDisplayFrames, " else "") +
+            "encoded +${h264.frames - statusEncoded}, dropped +${h264.dropped - statusDropped}, queue ${queue.size}; " +
+            "MMI sent ${v?.sent ?: 0}, shown ${v?.shown ?: 0}")
+        statusDisplayFrames = displayFrames
+        statusEncoded = h264.frames
+        statusDropped = h264.dropped
     }
 
     // --- H.264 (capture thread) -------------------------------------------
@@ -247,7 +341,7 @@ class CaptureService : Service() {
         scaler?.let {
             if (it.failed) {
                 h264ScalerFailed = it.error
-                Log.w(TAG, "GL scaler stopped (${it.error}): direct from now on")
+                AppLog.w("GL scaler stopped (${it.error}): direct from now on")
                 stopEncoder()
             }
         }
@@ -286,7 +380,7 @@ class CaptureService : Service() {
         val p = projection ?: return false
         val (w, h) = H264.pictureSize(caps.h264MaxW, caps.h264MaxH)
         val e = HwEncoder(w, h, fps, Streaming.bitRate, handler, ::onH264Config, ::onH264Frame) { why ->
-            Log.w(TAG, "H.264: $why")
+            AppLog.w("H.264: $why")
             h264Failed = why
             Streaming.status = "H.264 failed ($why): JPEG instead"
         }
@@ -313,14 +407,14 @@ class CaptureService : Service() {
                 vh = sc.srcH
             } else {
                 h264ScalerFailed = sc.error
-                Log.w(TAG, "GL scaler failed (${sc.error}): the display draws into the encoder directly")
+                AppLog.w("GL scaler failed (${sc.error}): the display draws into the encoder directly")
             }
         }
         val dpi = resources.displayMetrics.densityDpi
         val d = display
         if (d == null) {
             display = p.createVirtualDisplay("mmi-mirror", vw, vh, dpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, input, null, handler)
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, input, displayEvents, handler)
         } else {
             d.surface = input
             d.resize(vw, vh, dpi)
@@ -332,7 +426,7 @@ class CaptureService : Service() {
         queue.clear()
         waitIdr = true
         frameBytes = START_FRAME_BYTES.coerceAtMost(caps.h264MaxFrame)
-        Log.i(TAG, "H.264 on: ${e.description}, display ${vw}x$vh${scaler?.let { " -> GL x${it.k}" } ?: " direct"}")
+        AppLog.i("H.264 on: ${e.description}, display ${vw}x$vh${scaler?.let { " -> GL x${it.k}" } ?: " direct"}")
         return true
     }
 
@@ -347,7 +441,7 @@ class CaptureService : Service() {
         pps = null
         configLink = null
         queue.clear()
-        Log.i(TAG, "H.264 off")
+        AppLog.i("H.264 off")
     }
 
     private fun sendConfig(link: AccessoryLink, why: String) {
@@ -360,7 +454,7 @@ class CaptureService : Service() {
         queue.clear()
         waitIdr = true
         enc?.requestSync()
-        Log.i(TAG, "H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B")
+        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B")
     }
 
     // encoder callback (capture thread)
@@ -402,7 +496,7 @@ class CaptureService : Service() {
             h264.tooBig++
             val max = link.videoCaps?.h264MaxFrame ?: frameBytes
             val grown = H264.grow(frameBytes, need, max)
-            Log.w(TAG, "H.264 frame of $need B > $frameBytes B${if (grown > frameBytes) ": now $grown" else ""}")
+            AppLog.w("H.264 frame of $need B > $frameBytes B${if (grown > frameBytes) ": now $grown" else ""}")
             if (grown > frameBytes) {
                 frameBytes = grown
                 sendConfig(link, "bigger frames")
@@ -540,7 +634,7 @@ class CaptureService : Service() {
         val d = display
         if (d == null) {
             display = p.createVirtualDisplay("mmi-mirror", cw, ch, dpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, null, handler)
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, displayEvents, handler)
         } else {
             d.surface = r.surface
             d.resize(cw, ch, dpi)
@@ -551,7 +645,7 @@ class CaptureService : Service() {
         pxBuf = ByteBuffer.allocateDirect(s.w * s.h * 4).order(ByteOrder.nativeOrder())
         frame?.recycle()
         frame = Bitmap.createBitmap(s.w, s.h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
-        Log.i(TAG, "capture ${cw}x${ch} -> ${s.w}x${s.h} (${if (s.w < s.h) "portrait" else "landscape"}, x$k)")
+        AppLog.i("capture ${cw}x${ch} -> ${s.w}x${s.h} (${if (s.w < s.h) "portrait" else "landscape"}, x$k)")
         size = s
         factor = k
     }
@@ -581,7 +675,7 @@ class CaptureService : Service() {
     }
 
     companion object {
-        private const val TAG = "AudiStreaming"
+        private const val STATUS_LOG_MS = 5000L
         private const val CHANNEL = "capture"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "mmi3g.audistreaming.STOP_CAPTURE"

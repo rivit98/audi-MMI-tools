@@ -121,6 +121,8 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(this)
+        AppLog.i("activity created")
         setContentView(R.layout.activity_main)
         usb = getSystemService(Context.USB_SERVICE) as UsbManager
         statusView = findViewById(R.id.status)
@@ -216,6 +218,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     override fun onResume() {
         super.onResume()
+        AppLog.i("activity resumed")
         ui.post(refresh)
         if (link == null && status != Status.PERMISSION) {
             usb.accessoryList?.firstOrNull()?.let { acc ->
@@ -225,9 +228,21 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     }
 
     override fun onPause() {
+        AppLog.i("activity paused")
         ui.removeCallbacks(refresh)
         Choreographer.getInstance().removeFrameCallback(clockFrame)
         super.onPause()
+    }
+
+    override fun onStop() {
+        AppLog.i("activity stopped")
+        super.onStop()
+    }
+
+    // lost when the notification shade or a dialog opens over the activity
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        AppLog.i("activity window focus: $hasFocus")
     }
 
     override fun onPostResume() {
@@ -256,6 +271,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ_CAPTURE) return
+        AppLog.i("capture consent: ${if (resultCode == RESULT_OK) "allowed" else "refused"}")
         if (resultCode == RESULT_OK && data != null) {
             CaptureService.start(this, resultCode, data)
         } else {
@@ -307,6 +323,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     }
 
     override fun onDestroy() {
+        AppLog.i("activity destroyed")
         unregisterReceiver(receiver)
         link?.close("app closed")
         link = null
