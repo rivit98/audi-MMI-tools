@@ -150,7 +150,7 @@ class CaptureService : Service() {
     private val queue = ArrayDeque<ByteArray>()
     private var waitIdr = true
     private var configLink: AccessoryLink? = null     // the link the config went to
-    private var configVcapMode = VcapMode.KEEP        // the capture mode it asked for
+    private var configVcapMode = VcapMode.WEAVE        // the capture mode it asked for
     private var refusedLink: AccessoryLink? = null    // REFUSED: JPEG on this one
     private var h264Failed = ""                       // the phone can't: why
     private var h264ScalerFailed = ""                 // GL scaler failed once: direct from then on
@@ -532,7 +532,7 @@ class CaptureService : Service() {
         val p = pps ?: return
         val caps = link.videoCaps ?: return
         val mode = Streaming.vcapMode
-        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.ordinal))
+        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.wire))
         configLink = link
         configVcapMode = mode
         // the MMI (re)starts its stream at the next IDR, after PLAYING
@@ -834,7 +834,7 @@ object Streaming {
     /** H.264 bits a second, set by the activity (its drop-down). */
     @Volatile var bitRate = CaptureService.DEFAULT_BIT_RATE
     /** The MMI's capture field mode for H.264, set by the activity (its drop-down). */
-    @Volatile var vcapMode = VcapMode.KEEP
+    @Volatile var vcapMode = VcapMode.WEAVE
     /** H.264 box-filtered k:1 (sharp text) or k = 1 (Android's one scaling
      * step, for comparison), set by the activity. */
     @Volatile var sharp = true
@@ -853,12 +853,11 @@ enum class Format {
 }
 
 /** The MMI's capture field mode, in the order of the drop-down
- * (res/values/strings.xml vcap_modes). The ordinal goes in H264_CONFIG (proto.h
- * kVcap*). A saved choice that is no longer here reads as KEEP. */
-enum class VcapMode {
-    /** Whatever the MMI has at the time: the HMI's setting, if it made one. */
-    KEEP,
-    BOB,
-    WEAVE,
-    ODD_ONLY,
+ * (res/values/strings.xml vcap_modes). [wire] goes in H264_CONFIG (proto.h
+ * kVcap*). A saved choice that is no longer here reads as WEAVE. */
+enum class VcapMode(val wire: Int) {
+    /** Both fields together: the whole 480 lines. The HMI's own setting. */
+    WEAVE(2),
+    /** One field, each line twice: half the lines. */
+    ODD_ONLY(3),
 }

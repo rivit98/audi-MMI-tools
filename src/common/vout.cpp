@@ -79,7 +79,6 @@ int capture(bool on)
 const char *mode_name(Mode m)
 {
 	switch (m) {
-	case Mode::Bob: return "BOB";
 	case Mode::Weave: return "WEAVE";
 	case Mode::OddOnly: return "ODD ONLY";
 	default: return "unchanged";
@@ -98,7 +97,7 @@ int set_mode(Mode m)
 	if (!vc_open())
 		return -1;
 	Mode to = m == Mode::Keep ? Mode::Weave : m;
-	int rc_mode = vc_set(kSetMode, to == Mode::Bob ? 0 : to == Mode::Weave ? 1 : 2);
+	int rc_mode = vc_set(kSetMode, to == Mode::Weave ? 1 : 2);
 	int rc_up = vc_update();
 	log_msg("  videoctrl VP %d: mode %s rc=%d, update rc=%d", kVp, mode_name(to), rc_mode, rc_up);
 	mode_now = m;

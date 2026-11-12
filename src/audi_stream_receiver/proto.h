@@ -73,7 +73,7 @@
 //                            same config again changes nothing; a new one
 //                            restarts the stream (~1-2 s black).
 //                            vcap_mode (kVcap*): VCAP 0's field mode for
-//                            this stream. Absent = kVcapKeep.
+//                            this stream. Absent or any other value = kVcapWeave.
 //   (VIDEO_START / VIDEO_DATA with format kFmtH264: one encoded frame,
 //   Annex-B (start codes), as MediaCodec hands it out; w/h the stream's
 //   size. Counted in VIDEO_ACKS on arrival - shown: in the stream, dropped:
@@ -124,9 +124,8 @@ constexpr uint8_t kH264Sync = 1;
 constexpr uint8_t kH264Refused = 2;
 constexpr uint8_t kH264ConfigWanted = 3;
 
-// H264_CONFIG vcap_mode
-constexpr uint8_t kVcapKeep = 0;    // leave the mode as it is
-constexpr uint8_t kVcapBob = 1;
+// H264_CONFIG vcap_mode. 0 (leave as is) and 1 (BOB) were retired: BOB makes
+// text flicker, and leaving it is WEAVE anyway (docs/phone-mirroring.md 7.4).
 constexpr uint8_t kVcapWeave = 2;
 constexpr uint8_t kVcapOddOnly = 3;
 
@@ -241,7 +240,7 @@ struct H264Config {
 	uint32_t       frame_bytes;
 	const uint8_t *sps, *pps;
 	unsigned       sps_len, pps_len;
-	uint8_t        vcap_mode;      // kVcap*; an unknown value reads as kVcapKeep
+	uint8_t        vcap_mode;      // kVcap*; anything else reads as kVcapWeave
 };
 
 // Nothing if malformed (short, lengths past the end, an empty SPS / PPS, fps 0).
@@ -264,7 +263,7 @@ inline std::optional<H264Config> parse_h264_config(const uint8_t *p, unsigned n)
 		return std::nullopt;
 	c.pps = p + at;
 	at += c.pps_len;
-	c.vcap_mode = at < n && p[at] <= kVcapOddOnly ? p[at] : kVcapKeep;
+	c.vcap_mode = at < n && p[at] == kVcapOddOnly ? kVcapOddOnly : kVcapWeave;
 	if (c.fps == 0)
 		return std::nullopt;
 	return c;

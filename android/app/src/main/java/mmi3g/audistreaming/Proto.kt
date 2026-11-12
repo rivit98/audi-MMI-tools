@@ -89,7 +89,7 @@ object Proto {
     }
 
     /** H264_CONFIG: the stream's rate, the largest frame, SPS and PPS (NAL
-     * units, no start codes), VCAP 0's field mode (VcapMode.ordinal). */
+     * units, no start codes), VCAP 0's field mode (VcapMode.wire). */
     fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray, vcapMode: Int): ByteArray {
         val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size + 1)
         p[0] = fps.toByte()

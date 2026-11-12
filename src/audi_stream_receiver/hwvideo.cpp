@@ -228,10 +228,7 @@ void setup(const std::vector<uint8_t> &payload)
 	std::snprintf(g, sizeof(g), "audi_stream_%d_%u", (int)getpid(), ++graphs);
 	o.graph = g;
 	o.video_on_already = video_held;
-	o.vcap_mode = c.vcap_mode == proto::kVcapBob ? vout::Mode::Bob
-	            : c.vcap_mode == proto::kVcapWeave ? vout::Mode::Weave
-	            : c.vcap_mode == proto::kVcapOddOnly ? vout::Mode::OddOnly
-	            : vout::Mode::Keep;
+	o.vcap_mode = c.vcap_mode == proto::kVcapOddOnly ? vout::Mode::OddOnly : vout::Mode::Weave;
 	picture_mode = o.vcap_mode;
 
 	h264::Sps sps;

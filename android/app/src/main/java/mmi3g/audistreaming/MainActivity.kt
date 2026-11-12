@@ -174,7 +174,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         }
         Streaming.vcapMode = VcapMode.entries.firstOrNull {
             it.name == prefs.getString(PREF_VCAP_MODE, null)
-        } ?: VcapMode.KEEP
+        } ?: VcapMode.WEAVE
         findViewById<Spinner>(R.id.vcap_mode).apply {
             setSelection(Streaming.vcapMode.ordinal)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {

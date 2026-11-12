@@ -7,9 +7,9 @@
 
 namespace vout {
 
-// VCAP 0's field mode (dev-videoctrl: BOB, WEAVE, ODD ONLY). Keep leaves it
-// as it is.
-enum class Mode { Keep, Bob, Weave, OddOnly };
+// VCAP 0's field mode (dev-videoctrl also has BOB, of no use: text flickers).
+// Keep leaves it as it is.
+enum class Mode { Keep, Weave, OddOnly };
 const char *mode_name(Mode m);
 
 // Set the mode, if it isn't that already. Keep after another mode goes back

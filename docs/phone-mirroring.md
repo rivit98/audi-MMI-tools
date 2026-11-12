@@ -564,11 +564,14 @@ The HMI's own sequence for VP 1 (slog at boot) also sets an input viewport
 deinterlacing before enabling. None of these are needed for a correct
 picture. Those devctls are available if a stream needs them (§7.3 table).
 The phone's *Capture mode* drop-down picks the deinterlacing for a stream
-(`H264_CONFIG`'s `vcap_mode`); "Unchanged" leaves what the HMI last set
-(`WEAVE`, from boot and every camera session). On the phone's progressive
-picture **`WEAVE`, `ODD ONLY` and Unchanged give sharp, still text; `BOB`
-makes text flicker up and down** [confirmed]: it line-doubles each field in
-turn, and the two fields sit one line apart. `BOB` is of no use here.
+(`H264_CONFIG`'s `vcap_mode`): `WEAVE` (the default, and the HMI's own value
+from boot and every camera session) or `ODD ONLY`. Both give sharp, still
+text on the phone's progressive picture [confirmed]. `WEAVE` keeps all 480
+lines; both fields come from the same progressive frame, so there is no
+combing. `ODD ONLY` keeps one field and doubles each line, so half the
+vertical resolution [inferred]. `BOB` makes text flicker up and down
+[confirmed]: it line-doubles each field in turn, and the two fields sit one
+line apart. It is not offered.
 
 **Conclusions**
 
