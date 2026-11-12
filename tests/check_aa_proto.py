@@ -96,7 +96,7 @@ def prepare(d: Path, proto_root: Path) -> None:
     put("sd_request", msg(CTRL + "ServiceDiscoveryRequest")(label_text="Android Auto", device_name="Test Phone"))
     put("channel_open", msg(CTRL + "ChannelOpenRequest")(priority=-1, service_id=3))
     put("ping", msg(CTRL + "PingRequest")(timestamp=123))
-    put("pong", msg(CTRL + "PingResponse")(timestamp=2000))
+    put("pong", msg(CTRL + "PingResponse")(timestamp=2140))
     put("byebye", msg(CTRL + "ByeByeRequest")(reason=1))  # USER_SELECTION
     put("audio_focus", msg(CTRL + "AudioFocusRequest")(audio_focus_type=1))  # GAIN
     put("nav_focus", msg(CTRL + "NavFocusRequestNotification")(focus_type=2))  # PROJECTED

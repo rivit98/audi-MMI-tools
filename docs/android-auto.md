@@ -102,7 +102,7 @@ the same `HwStream`. What differs is who controls the encoder:
 | Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`, phone-mirroring §7.8), and the DSP's `NvMixer_Video.c` has `assert(width < 720)` [repo] |
 | Level | ≤ 3 | 800x480 at 30 fps is 45 000 MB/s, above level 3's 40 500, which io-media rejects; the phone may signal 3.1 (patching `level_idc` in the SPS: unverified) |
 | Frame rate | 25 | 30 or 60; 30 is allowed at 480 lines |
-| Pacing | batched `VIDEO_ACKS` | the protocol's media acks |
+| Pacing | batched `VIDEO_ACKS` | the protocol's media acks, held to 25 fps (ack pacing) |
 
 So the 720-wide limit is the one blocker, the same one an 800x480 clip hit
 in the mirroring tests.
@@ -117,12 +117,25 @@ in the mirroring tests.
    passes io-media's check. The SPS is a few bytes, rewritten once per
    codec config; `common/h264.h` already parses cropping.
 
+The rewrite is built: `h264::crop_sps` sets the cropping and `level_idc`
+and keeps the rest of the SPS bit for bit; ffmpeg decodes a cropped stream
+to exactly the original's top-left [repo, `make test`]. At 25 fps the
+800-wide coded picture is 37 500 macroblocks/s, within Level 3, so level
+3.0 in the rewritten SPS is true.
+
 Open: whether the DM642 decodes a 50-macroblock-wide coded picture that is
 cropped to 720 for display, or trips its width assertion or overflows a
-buffer sized for 720. A hello9-style test answers it without a phone: an
-ffmpeg 800x480 Baseline clip with the cropped SPS, streamed through
-`HwStream` on VCAP 0 input 1. If it plays, AA video on screen is mostly
-wiring. If not, the options are below.
+buffer sized for 720. [hello10](../src/hello10/README.md) answers it
+without a phone: an ffmpeg 800x480 Baseline clip with the cropped SPS,
+streamed through `HwStream` on VCAP 0 input 1, also cropped to 720x416
+(the bottom bar cut). If it plays, AA video on screen is mostly wiring. If
+not, the options are below.
+
+**Frame rate: ack pacing [estimate].** The phone encodes at 30 fps, the
+stream plays at 25. android_auto holds each video ack until a frame period
+after the last (`fps=`, default 25; its README): with one frame unacked,
+the phone can't send faster. Whether it then drops frames (the age of
+arrivals stays flat) or queues them (it grows) is unmeasured.
 
 - **DSP driven directly** (option 2b): bypasses io-media's check, but the
   DSP assertion stays; months of work.

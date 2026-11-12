@@ -11,7 +11,7 @@ receiver needs: [docs/android-auto.md](../../docs/android-auto.md).
 phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  android_auto.h264 + log
 ```
 
-- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [save=MB] [tls=N]`.
+- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [save=MB] [tls=N] [fps=N]`.
   Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
   - `audio=0`: advertise no audio channels (default: media 48 kHz stereo,
     guidance and system 16 kHz mono; the PCM is counted and dropped, so the
@@ -20,8 +20,10 @@ phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  android_a
   - `save=MB`: cap of `android_auto.h264` (default 64; 0 = don't save)
   - `tls=N`: mbedTLS trace level in the log (default 1, errors only; 2 shows
     each handshake step)
-- **Output** (in `var/` on the card): `android_auto.log` (USB, every protocol step, a `stats:` line
-  every 10 s, a `cpu:` line every 10 s); `android_auto.h264` (Annex-B,
+  - `fps=N`: ack pacing, video frames acked at most N per second (default
+    25; 0 = every frame acked at once). Below.
+- **Output** (in `var/` on the card): `android_auto.log` (USB, every protocol step, a `stats:` and
+  a `pace:` line every 10 s, a `cpu:` line every 10 s); `android_auto.h264` (Annex-B,
   `ffplay android_auto.h264`); USB slog snapshots in `var/`. The previous
   run's files are kept as `*.prev.*`.
 - **Build:**
@@ -59,7 +61,22 @@ frames, each encrypted on its own; channels interleave.
 | 3 | AUTH_COMPLETE (status 0); encrypted from here | SERVICE_DISCOVERY_REQUEST (its name) |
 | 4 | SERVICE_DISCOVERY_RESPONSE: the services below | CHANNEL_OPEN_REQUEST per service -> OK |
 | 5 | SETUP -> CONFIG ready, 1 unacked; VIDEO_FOCUS projected | START (session id), codec config, frames |
-| 6 | an ACK per media message; PING every second | PINGs, focus requests, sensor requests |
+| 6 | an ACK per media message (video: paced); PING every second | PINGs, focus requests, sensor requests |
+
+**Ack pacing** (session.cpp, `video_frame_in`): Android Auto offers only 30
+or 60 fps, and the DM642 path wants a steady 25 (io-media plays exactly the
+stream's rate, docs/phone-mirroring.md §7.10). With 1 frame unacked the
+phone sends the next frame only after the ack, so the session holds each
+video frame's ack until one frame period (40 ms at 25 fps) after the last
+one. A frame later than that is acked at once; acks are never saved up, so
+a pause brings no burst. The session thread wakes for a held ack
+(`ms_to_next`). The `pace:` line tells what the phone does with it, over
+the last 10 s:
+
+| Field | Meaning |
+|---|---|
+| `N of M acks held, avg, max` | frames whose ack waited, and how long: ~0 held = the phone is slower than the cap anyway |
+| `frame age +X ms (max)` | our arrival time minus the phone's frame timestamp, relative to the smallest seen. Flat = the phone drops or slows its encoder; growing = it queues frames and the picture falls behind |
 
 Services advertised (channel: what):
 
@@ -67,7 +84,7 @@ Services advertised (channel: what):
 |---|---|---|
 | 1 | input | touch screen 800x480; keys HOME, BACK, D-pad, SEARCH, media, rotary |
 | 2 | sensors | driving status (always unrestricted = parked), night mode (always day) |
-| 3 | video sink | H.264 Baseline, 800x480, 30 fps, 140 dpi |
+| 3 | video sink | H.264 Baseline, 800x480, 30 fps, 140 dpi (acks paced to 25) |
 | 4, 5, 6 | audio sinks | media 48 kHz stereo, guidance and system 16 kHz mono (with `audio=1`) |
 
 Audio, navigation and video focus requests are always granted. Message ids
@@ -147,5 +164,8 @@ DRBG is seeded by the own jitter source. CPU: the app 15-26 %, the unit
 
 Open points:
 
-- showing the video (800 wide is refused by the DM642, docs/android-auto.md
-  §4.1), touch / knob input, audio out
+- showing the video (800 wide is refused by the DM642; the SPS crop to 720
+  is tested by [hello10](../hello10/README.md), docs/android-auto.md §4.1),
+  touch / knob input, audio out
+- ack pacing at 25 fps: built and host-tested, not yet run with a phone.
+  The `pace:` line answers whether the phone drops frames or queues them

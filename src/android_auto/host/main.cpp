@@ -16,7 +16,8 @@
 // when the bus changes (the phone re-enumerating) the process starts over
 // (execv), like tools/aoa_host.py.
 //
-// usage: aa_host [--out DIR] [--cert DIR] [--play] [--no-audio] [--version M.m] [--tls N]
+// usage: aa_host [--out DIR] [--cert DIR] [--play] [--no-audio] [--version M.m] [--tls N] [--fps N]
+//   --fps N  ack video frames at most N per second (default 25, 0 = at once)
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -249,7 +250,7 @@ void run_session(Accessory &a, const aa::Config &cfg, const std::string &cert, c
 		std::deque<std::vector<uint8_t>> q;
 		{
 			std::unique_lock<std::mutex> g(lock);
-			cond.wait_ms(g, 50, [&] { return !rxq.empty() || desk.failed || quit; });
+			cond.wait_ms(g, s.ms_to_next(50), [&] { return !rxq.empty() || desk.failed || quit; });
 			q.swap(rxq);
 		}
 		for (const auto &b : q)
@@ -258,10 +259,13 @@ void run_session(Accessory &a, const aa::Config &cfg, const std::string &cert, c
 		if (log_ms() - last_stats >= 10000) {
 			last_stats = log_ms();
 			const aa::Stats &st = s.stats();
-			log_msg("stats: video %llu frames %llu KB, audio %llu/%llu/%llu KB, rtt %u ms, pings %u/%u",
+			log_msg("stats: video %llu frames %llu KB, audio %llu/%llu/%llu KB, rtt %u ms, pings %u/%u; "
+			        "pace %u fps: %llu acks held (max %u ms), frame age +%u ms (max +%u ms)",
 			        (unsigned long long)st.video_frames, (unsigned long long)(st.video_bytes >> 10),
 			        (unsigned long long)(st.audio_bytes[0] >> 10), (unsigned long long)(st.audio_bytes[1] >> 10),
-			        (unsigned long long)(st.audio_bytes[2] >> 10), st.last_rtt_ms, st.pongs, st.pings_sent);
+			        (unsigned long long)(st.audio_bytes[2] >> 10), st.last_rtt_ms, st.pongs, st.pings_sent,
+			        cfg.video_fps, (unsigned long long)st.acks_held, st.ack_wait_ms_max, st.age_ms,
+			        st.age_ms_max);
 		}
 	}
 	if (quit && s.phase() == aa::Phase::Running) {
@@ -298,9 +302,11 @@ int main(int argc, char **argv)
 			cfg.version_minor = (uint16_t)n;
 		} else if (a == "--tls" && i + 1 < argc)
 			tls = std::atoi(argv[++i]);
+		else if (a == "--fps" && i + 1 < argc)
+			cfg.video_fps = (unsigned)std::atoi(argv[++i]);
 		else {
 			std::fprintf(stderr, "usage: %s [--out DIR] [--cert DIR] [--play] [--no-audio] "
-			                     "[--version M.m] [--tls N]\n", argv[0]);
+			                     "[--version M.m] [--tls N] [--fps N]\n", argv[0]);
 			return 2;
 		}
 	}

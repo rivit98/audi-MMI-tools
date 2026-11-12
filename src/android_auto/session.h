@@ -10,7 +10,11 @@
 //      (driving status, night mode), input (touch screen 800x480 + keys)
 //   4. the phone opens each channel (CHANNEL_OPEN_REQUEST -> OK), sets up
 //      each media sink (SETUP -> CONFIG ready, max 1 unacked), starts it
-//      and streams; every media message is acked
+//      and streams; every media message is acked. Video frames are acked
+//      no faster than Config::video_fps (ack pacing): the phone sends the
+//      next frame only after the ack, so it can't send faster than that
+//      (Android Auto offers only 30 and 60 fps; the DM642 path wants a
+//      steady 25)
 //   5. pings both ways, audio / navigation / video focus always granted,
 //      sensors answered with fixed values: parked (unrestricted), day
 //
@@ -60,6 +64,9 @@ struct Config {
 	bool        audio = true;          // advertise the three audio sinks
 	unsigned    dpi = 140;
 	unsigned    ping_ms = 1000;
+	// Video frame acks at most this many per second, held back in tick()
+	// until due (0: acked at once, as every other media message).
+	unsigned    video_fps = 25;
 	std::string display_name = "MMI 3G+";
 };
 
@@ -72,6 +79,13 @@ struct Stats {
 	int32_t     video_session = -1;  // from START, -1 none yet
 	bool        video_started = false;
 	uint64_t    video_frames = 0, video_bytes = 0, video_configs = 0;
+	// ack pacing: frame acks that had to wait for their turn, and how long
+	uint64_t    acks_held = 0, ack_wait_ms_sum = 0;
+	unsigned    ack_wait_ms_max = 0;
+	// Frame age: our arrival time minus the phone's timestamp, relative to
+	// the smallest seen (the phone's clock is its own, so only changes
+	// mean something). Growing = frames wait longer on the phone side.
+	unsigned    age_ms = 0, age_ms_max = 0;
 	uint64_t    audio_bytes[3] = {};  // media, guidance, system
 	uint64_t    rx_bytes = 0, tx_bytes = 0, rx_frames = 0;
 	unsigned    pings_sent = 0, pongs = 0, pings_answered = 0;
@@ -103,8 +117,10 @@ public:
 	bool start(const std::string &cert_pem, const std::string &key_pem);
 	// Bytes read from bulk IN, any boundaries.
 	void rx(const uint8_t *p, size_t n);
-	// Pings; call every ~100 ms or so.
+	// Pings and paced video acks; call at least every ms_to_next() ms.
 	void tick();
+	// ms until tick() has something due (a held video ack), at most limit.
+	unsigned ms_to_next(unsigned limit) const;
 	// Tell the phone we are going (BYEBYE_REQUEST), if the session is up.
 	void bye();
 
@@ -132,6 +148,8 @@ private:
 	void on_input(uint16_t id, const uint8_t *p, size_t n);
 	void send_video_focus();
 	void ack_media(uint8_t ch);
+	void video_frame_in(uint64_t ts_us);
+	void send_due_acks();
 	bool channel_known(uint8_t ch) const;
 	void log_unknown(uint8_t ch, uint16_t id, size_t n);
 
@@ -147,6 +165,12 @@ private:
 	unsigned       last_ping_ = 0;
 	unsigned       last_pong_ = 0;
 	bool           pong_warned_ = false;
+	// ack pacing (times in us of now_ms())
+	unsigned       acks_due_ = 0;       // video frame acks held back
+	uint64_t       next_ack_us_ = 0;    // when the first of them is due
+	uint64_t       held_since_us_ = 0;  // when it arrived
+	bool           age_known_ = false;
+	int64_t        age_min_ = 0;
 	std::vector<uint8_t> plain_;     // scratch: a frame's plaintext
 };
 

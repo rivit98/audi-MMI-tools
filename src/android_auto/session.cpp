@@ -578,6 +578,10 @@ void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
 			}
 			stats_.video_bytes += n;
 			host_.video(p, n, ts, config);
+			if (!config && cfg_.video_fps > 0) {
+				video_frame_in(ts);
+				return;
+			}
 		} else if (ai >= 0) {
 			stats_.audio_bytes[ai] += n;
 			host_.audio(ch, p, n);
@@ -601,6 +605,68 @@ void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
 		return;
 	}
 	log_unknown(ch, id, n);
+}
+
+// A video frame came: its ack is due one frame period after the last one
+// (or now, if the phone was slower than that). Acks are never saved up: a
+// phone that paused gets no burst of quick acks afterwards.
+void Session::video_frame_in(uint64_t ts_us)
+{
+	uint64_t now = (uint64_t)host_.now_ms() * 1000;
+	int64_t age = (int64_t)(now / 1000) - (int64_t)(ts_us / 1000);
+	if (ts_us != 0) {
+		if (!age_known_ || age < age_min_) {
+			age_min_ = age;
+			age_known_ = true;
+		}
+		stats_.age_ms = (unsigned)(age - age_min_);
+		if (stats_.age_ms > stats_.age_ms_max)
+			stats_.age_ms_max = stats_.age_ms;
+	}
+	uint64_t period = 1000000 / cfg_.video_fps;
+	if (acks_due_ == 0) {
+		uint64_t due = next_ack_us_ + period;    // after the last ack sent
+		next_ack_us_ = due > now ? due : now;
+		held_since_us_ = now;
+	}
+	acks_due_++;
+	send_due_acks();
+}
+
+void Session::send_due_acks()
+{
+	if (acks_due_ == 0)
+		return;
+	uint64_t now = (uint64_t)host_.now_ms() * 1000;
+	if (now < next_ack_us_)
+		return;
+	unsigned waited = (unsigned)((now - held_since_us_) / 1000);
+	if (waited > 0) {
+		stats_.acks_held++;
+		stats_.ack_wait_ms_sum += waited;
+		if (waited > stats_.ack_wait_ms_max)
+			stats_.ack_wait_ms_max = waited;
+	}
+	ack_media(kChVideo);
+	acks_due_--;
+	// next_ack_us_ stays the nominal time of this ack, so a late tick
+	// doesn't lower the rate. More than one frame without its ack (the
+	// phone sent past max unacked): the next one a period later.
+	if (acks_due_ > 0) {
+		held_since_us_ = now;
+		next_ack_us_ += 1000000 / cfg_.video_fps;
+	}
+}
+
+unsigned Session::ms_to_next(unsigned limit) const
+{
+	if (acks_due_ == 0)
+		return limit;
+	uint64_t now = (uint64_t)host_.now_ms() * 1000;
+	if (now >= next_ack_us_)
+		return 0;
+	uint64_t ms = (next_ack_us_ - now + 999) / 1000;
+	return ms < limit ? (unsigned)ms : limit;
 }
 
 void Session::on_sensor(uint16_t id, const uint8_t *p, size_t n)
@@ -647,6 +713,7 @@ void Session::tick()
 {
 	if (phase_ != Phase::Running)
 		return;
+	send_due_acks();
 	unsigned now = host_.now_ms();
 	if (now - last_ping_ >= cfg_.ping_ms) {
 		last_ping_ = now;

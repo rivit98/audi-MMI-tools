@@ -466,19 +466,45 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	std::vector<uint8_t> big(8 + 40000);
 	for (size_t i = 8; i < big.size(); i++)
 		big[i] = (uint8_t)i;
+	big[6] = 0x03;                                   // timestamp 1000 us
+	big[7] = 0xe8;
 	phone.msg(3, aap::kEncrypted, 0x0000, big);
+	// the second frame comes at once (timestamp 9 us: 1 ms older than the
+	// first's, so 1 ms "older" on arrival): ack pacing holds its ack for a
+	// frame period (25 fps: 40 ms)
 	phone.msg(3, aap::kEncrypted, 0x0000, {0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 1, 0x41});
 	phone.flush();
 	CHECK_EQ(phone.config_status, 2);
 	CHECK_EQ(phone.config_unacked, 1);
 	CHECK(phone.focus);
+	CHECK_EQ(phone.acks, 2);                         // codec config + first frame
+	CHECK_EQ(hu.ms_to_next(50), 40);
+	CHECK_EQ(hu.ms_to_next(10), 10);
+	phone.clock += 39;
+	hu.tick();
+	CHECK_EQ(phone.acks, 2);
+	CHECK_EQ(hu.ms_to_next(50), 1);
+	phone.clock += 1;
+	hu.tick();
 	CHECK_EQ(phone.acks, 3);
+	CHECK_EQ(hu.ms_to_next(50), 50);
+	CHECK_EQ(hu.stats().acks_held, 1);
+	CHECK_EQ(hu.stats().ack_wait_ms_max, 40);
+	CHECK_EQ(hu.stats().age_ms, 1);
+	// a frame 100 ms later: acked at once (no burst saved up, no wait)
+	phone.clock += 100;
+	phone.msg(3, aap::kEncrypted, 0x0000, {0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 1, 0x41});
+	phone.flush();
+	CHECK_EQ(phone.acks, 4);
+	CHECK_EQ(hu.stats().acks_held, 1);
+	CHECK_EQ(hu.stats().age_ms, 141);                // its timestamp 9 us again, 140 ms later
+	CHECK_EQ(hu.stats().age_ms_max, 141);
 	CHECK_EQ(phone.ack_session, 7);
-	CHECK_EQ(phone.video_calls, 3);
+	CHECK_EQ(phone.video_calls, 4);
 	CHECK_EQ(phone.video_configs, 1);
-	CHECK_EQ(phone.video_got.size(), 6 + 40000 + 5);
+	CHECK_EQ(phone.video_got.size(), 6 + 40000 + 5 + 5);
 	CHECK_EQ(phone.video_got[6 + 1], 9);                 // byte 9 of `big`
-	CHECK_EQ(hu.stats().video_frames, 2);
+	CHECK_EQ(hu.stats().video_frames, 3);
 
 	// focus: audio and navigation granted, video re-sent on request
 	pb::Writer af, nf, vf;
@@ -525,7 +551,7 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	pb::Writer ping, pong;
 	ping.i(1, 123);
 	phone.msg(0, 0, 11, phone.body("ping", ping.buf));
-	pong.i(1, 2000);                                 // our ping's timestamp back
+	pong.i(1, 2140);                                 // our ping's timestamp back
 	phone.msg(0, 0, 12, phone.body("pong", pong.buf));
 	phone.flush();
 	CHECK_EQ(phone.pong, 1);
