@@ -453,6 +453,70 @@ void test_bits()
 	CHECK_EQ(sl.ref_idc, 3);
 }
 
+// crop_sps: the picture size and level change, nothing else does
+void test_crop()
+{
+	h264::Sps s, c;
+	CHECK_OK(h264::parse_sps(kSps.data(), kSps.size(), s));
+	std::vector<uint8_t> out, back;
+	CHECK_OK(h264::crop_sps(kSps.data(), kSps.size(), 640, 320, 31, out));
+	CHECK_OK(h264::parse_sps(out.data(), out.size(), c));
+	CHECK_EQ(c.width, 640);
+	CHECK_EQ(c.height, 320);
+	CHECK_EQ(c.level, 31);
+	CHECK_EQ(c.width_mbs, s.width_mbs);
+	CHECK_EQ(c.height_mbs, s.height_mbs);
+	CHECK_EQ(c.profile, s.profile);
+	CHECK_EQ(c.constraints, s.constraints);
+	CHECK_EQ(c.poc_type, s.poc_type);
+	CHECK_EQ(c.log2_max_frame_num, s.log2_max_frame_num);
+	CHECK_EQ(c.max_ref_frames, s.max_ref_frames);
+	CHECK_EQ(out[0], kSps[0]);
+	// back to the full picture and the old level: the original, byte for byte
+	CHECK_OK(h264::crop_sps(out.data(), out.size(), s.width, s.height, s.level, back));
+	CHECK(back == kSps);
+	// level 0 keeps it
+	CHECK_OK(h264::crop_sps(kSps.data(), kSps.size(), 720, 330, 0, out));
+	CHECK_OK(h264::parse_sps(out.data(), out.size(), c));
+	CHECK_EQ(c.level, s.level);
+	CHECK_EQ(c.height, 330);
+	// POC type 0 with its own fields
+	std::vector<uint8_t> sp0 = sps_poc0();
+	h264::Sps s0, c0;
+	CHECK_OK(h264::parse_sps(sp0.data(), sp0.size(), s0));
+	CHECK_OK(h264::crop_sps(sp0.data(), sp0.size(), 160, 120, 0, out));
+	CHECK_OK(h264::parse_sps(out.data(), out.size(), c0));
+	CHECK_EQ(c0.width, 160);
+	CHECK_EQ(c0.height, 120);
+	CHECK_EQ(c0.log2_max_poc_lsb, s0.log2_max_poc_lsb);
+	// refused: bigger than coded, odd, zero, not an SPS
+	CHECK(!h264::crop_sps(kSps.data(), kSps.size(), 736, 336, 0, out).empty());
+	CHECK(!h264::crop_sps(kSps.data(), kSps.size(), 719, 336, 0, out).empty());
+	CHECK(!h264::crop_sps(kSps.data(), kSps.size(), 0, 336, 0, out).empty());
+	CHECK(!h264::crop_sps(kPps.data(), kPps.size(), 640, 320, 0, out).empty());
+
+	// a whole access unit: the SPS is rewritten, the rest copied
+	std::vector<uint8_t> au = idr_au(s, kSps, kPps, 50), au2;
+	CHECK_OK(h264::crop_sps_annexb(au.data(), au.size(), 640, 320, 30, au2));
+	std::vector<h264::Nal> a = h264::split_annexb(au.data(), au.size());
+	std::vector<h264::Nal> b = h264::split_annexb(au2.data(), au2.size());
+	CHECK_EQ(a.size(), b.size());
+	for (size_t i = 0; i < a.size() && i < b.size(); i++) {
+		CHECK_EQ(a[i].type(), b[i].type());
+		if (a[i].type() == h264::kSps) {
+			CHECK_OK(h264::parse_sps(b[i].p, b[i].n, c));
+			CHECK_EQ(c.width, 640);
+		} else {
+			CHECK(a[i].n == b[i].n && std::memcmp(a[i].p, b[i].p, a[i].n) == 0);
+		}
+	}
+	// what the DM642 gets for 800x480: a 720x480 Level 3 stream
+	h264::Sps wide = s;
+	wide.width = 720;
+	wide.height = 480;
+	CHECK_OK(live::check_decodable(wide, 25));
+}
+
 void test_split()
 {
 	h264::Sps s;
@@ -839,6 +903,7 @@ void test_burst()
 // ---- with a real clip (tests/check_live.py prepare) ----
 
 const char kDir[] = "build/test_live.d";
+constexpr unsigned kCropW = 288, kCropH = 208;   // check_live.py's CROP
 
 bool read_file(const std::string &path, std::vector<uint8_t> &out)
 {
@@ -962,6 +1027,25 @@ void test_with_clip()
 	std::printf("test_live: %zu clip frames, header = csmp4.py's (%zu bytes), gap stream: %llu "
 	            "frames, %u skips -> %s/gap.*\n",
 	            aus.size(), hdr.size(), (unsigned long long)st.frames(), ls.skips, kDir);
+
+	// the clip with its SPS cropped to the top-left 288x208 (hello10's
+	// 800 -> 720), raw and as a CS-MP4: check_live.py decodes both and
+	// compares them with ffmpeg's own crop of the original
+	std::vector<uint8_t> crop_es, crop_mp4, au, csps;
+	CHECK_OK(h264::crop_sps(sps.data(), sps.size(), kCropW, kCropH, 30, csps));
+	h264::Sps cs;
+	CHECK_OK(h264::parse_sps(csps.data(), csps.size(), cs));
+	CHECK_EQ(cs.width, kCropW);
+	CHECK_EQ(cs.height, kCropH);
+	CHECK_OK(csmp4::build_header(csps, pps, 25, s, (uint32_t)aus.size(), crop_mp4, true));
+	for (const h264::Range &r : aus) {
+		CHECK_OK(h264::crop_sps_annexb(clip.data() + r.begin, r.end - r.begin, kCropW, kCropH, 30, au));
+		crop_es.insert(crop_es.end(), au.begin(), au.end());
+		CHECK_OK(csmp4::make_sample(au.data(), au.size(), s, smp));
+		crop_mp4.insert(crop_mp4.end(), smp.begin(), smp.end());
+	}
+	CHECK(write_file(std::string(kDir) + "/crop.h264", crop_es));
+	CHECK(write_file(std::string(kDir) + "/crop.mp4", crop_mp4));
 }
 } // namespace
 
@@ -971,6 +1055,7 @@ int main()
 	test_parse_rejects();
 	test_schedule();
 	test_bits();
+	test_crop();
 	test_split();
 	test_header();
 	test_sample();

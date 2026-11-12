@@ -9,9 +9,14 @@ check:   decodes that stream (<dir>/gap.h264, and the same frames as a
          CS-MP4 built on the MMI side, <dir>/gap.mp4) with ffmpeg: no
          decode errors, every frame comes out, and every skip frame
          (<dir>/gap_skips.txt) is the picture before it, both ways.
+         And the clip with its SPS cropped on the MMI side (<dir>/crop.h264,
+         <dir>/crop.mp4): CROP in size, and every frame the same as
+         ffmpeg's own crop of the original.
 """
 import subprocess
 import sys
+
+CROP = (288, 208)    # test_live.cpp's kCropW, kCropH
 
 
 def run(*args):
@@ -28,8 +33,9 @@ def prepare(d):
     run('python3', '-I', 'media/csmp4.py', f'{d}/in.h264', f'{d}/ref.mp4', '25', '600')
 
 
-def md5s(path):
+def md5s(path, vf=None):
     out = subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', path, '-map', '0:v',
+                          *(['-vf', vf] if vf else []),
                           '-vsync', 'passthrough', '-f', 'framemd5', '-'],
                          check=True, capture_output=True, text=True)
     if out.stderr.strip():
@@ -55,6 +61,21 @@ def check(d):
               f'the frame before them')
     if md5s(f'{d}/gap.h264') != md5s(f'{d}/gap.mp4'):
         sys.exit('check_live: gap.mp4 decodes differently from gap.h264')
+    check_crop(d)
+
+
+def check_crop(d):
+    w, h = CROP
+    ref = md5s(f'{d}/in.h264', f'crop={w}:{h}:0:0')
+    for name in ('crop.h264', 'crop.mp4'):
+        size = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                               '-show_entries', 'stream=width,height', '-of', 'csv=p=0',
+                               f'{d}/{name}'], check=True, capture_output=True, text=True)
+        if size.stdout.strip() != f'{w},{h}':
+            sys.exit(f'check_live: {name}: {size.stdout.strip()}, expected {w},{h}')
+        if md5s(f'{d}/{name}') != ref:
+            sys.exit(f'check_live: {name}: frames differ from ffmpeg\'s crop of in.h264')
+        print(f'check_live: {name}: {w}x{h}, {len(ref)} frames = the original cropped')
 
 
 if __name__ == '__main__':

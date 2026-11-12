@@ -1,7 +1,7 @@
-// ui.h - hello9's full-screen text screens (cid 40, CPU-drawn through
-// common/screen.c), as hello6's label.c.
-#ifndef HELLO9_UI_H
-#define HELLO9_UI_H
+// ui.h - full-screen text screens for the test apps (hello9, hello10):
+// cid 40, CPU-drawn through common/screen.c, as hello6's label.c.
+#ifndef COMMON_UI_H
+#define COMMON_UI_H
 
 #include <string>
 #include <vector>

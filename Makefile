@@ -23,7 +23,7 @@
 #                        log; a live ffplay window)
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
-#   make clips           hello6's and hello9's test videos (build/clips/, ffmpeg
+#   make clips           hello6's, hello9's, hello10's test videos (build/clips/, ffmpeg
 #                        in the mmi-media image; make sd does it when needed)
 #   make shell           interactive shell in the SDK container
 
@@ -80,6 +80,7 @@ CXXFLAGS := $(CFLAGS)
 #   IMGDEC  imgdec.c: JPEG decoding (stb_image)
 #   CPUMON  cpumon.c: own + unit CPU load, a "cpu:" log line per window (cpustat.c)
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
+#   UI      C++: ui.cpp, the test apps' full-screen text pages (on SCREEN)
 #   LIVE    C++ (CXX_APPS only): a live H.264 stream through the unit's
 #           io-media and DM642 (hw_stream.cpp, docs/phone-mirroring.md 7.10):
 #           h264 + csmp4 + live_stream (pure, tests/test_live.cpp),
@@ -102,6 +103,7 @@ PROC   := $(call common,proc)
 IMGDEC := $(call common,imgdec) src/common/stb_image.h
 CPUMON := $(call common,cpumon cpustat)
 IOM    := $(call common,iom)
+UI     := $(call commonxx,ui)
 LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vout hw_stream) src/common/camera_log.h $(IOM)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
@@ -147,6 +149,11 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # driver watching for about 4.5 minutes and puts ~70 MB of test videos on
 # the card.
 #
+# hello10 asks whether the DM642 shows an 800-wide stream whose SPS says
+# 720 (Android Auto's 800x480 with a width margin, docs/android-auto.md
+# 4.1). Run it on its own before android_auto: `make sd SD_APPS="hello10
+# android_auto"`. It puts ~5 MB of test videos on the card.
+#
 # audi_stream_receiver runs until the SD card is pulled, so it is always
 # last: pulling the card ends it and the whole run (no final "done" screen;
 # everything before it is already on the card).
@@ -154,9 +161,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # android_auto (an Android Auto head unit, proof of connectivity) runs
 # until the SD card is pulled, like audi_stream_receiver. Both are on the
 # card; run.sh's APPS line picks which one runs.
-APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver \
-           android_auto
-CXX_APPS := hello8 hello9 audi_stream_receiver android_auto
+APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 \
+           audi_stream_receiver android_auto
+CXX_APPS := hello8 hello9 hello10 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
 TESTS   := android_auto audi_stream_receiver
@@ -212,12 +219,17 @@ build/hello8-gusa.o: src/hello8/gusa.cpp src/hello8/checks.h
 # HwStream, the code audi_stream_receiver uses for the phone's frames
 # (stream_server.cpp's headers need src/common/qnx/sys/pm.h). schedule.cpp
 # is plain C++, also tested on the build host (tests/test_live.cpp).
-build/hello9: $(wildcard src/hello9/*.cpp src/hello9/*.h) $(BASE) $(SCREEN) $(PROC) $(LIVE)
+build/hello9: $(wildcard src/hello9/*.cpp src/hello9/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE)
 LIBS_hello9 := -lgf
 # QNX's <sys/compiler_gnu.h> declares _Uint8t/_Uint32t (uint8_t, uint32_t)
 # with __aligned__ at their natural alignment, which g++ reports for every
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
+# hello10: C++. 800x480 cropped to 720 in the SPS (h264::crop_sps), pushed
+# through LIVE's HwStream like hello9's live tests.
+build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE)
+LIBS_hello10 := -lgf
+CXXFLAGS_hello10 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
 # phone's pictures are JPEGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
@@ -345,9 +357,11 @@ check: build/$(APP)
 CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
 CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
+CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
 FWTOOLS_hello9 := testapp-file testapp-cmdline
+FWTOOLS_hello10 := testapp-file testapp-cmdline
 FILES_hello5   := src/hello5/beep.wav
 
 ifneq ($(filter sd,$(MAKECMDGOALS)),)
@@ -378,7 +392,7 @@ sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/c
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
 	@du -sh build/sd | sed 's/\t.*/ on the card/; s/^/  /'
 
-# hello6's and hello9's test videos: media/mkclips.sh in the mmi-media image (ffmpeg).
+# hello6's, hello9's and hello10's test videos: media/mkclips.sh in the mmi-media image (ffmpeg).
 MEDIA_IMAGE := mmi-media
 build/.media-image: media/Dockerfile
 	docker build -t $(MEDIA_IMAGE) media

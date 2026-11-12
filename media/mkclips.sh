@@ -1,5 +1,6 @@
 #!/bin/bash
-# mkclips.sh <outdir> - hello6's test videos (runs in the mmi-media image).
+# mkclips.sh <outdir> - hello6's, hello9's and hello10's test videos (runs in the
+# mmi-media image).
 #
 # Every clip is D seconds of ffmpeg's moving testsrc2 pattern with its own
 # name and a frame counter burnt in, so the driver can tell what is on the
@@ -79,6 +80,22 @@ ff -f lavfi -i "$(vf 720 336 'c9 H.264 720x336 const-size MP4')" "${CS264[@]}" "
 python3 media/csmp4.py "$OUT/c9.h264" "$OUT/c9_h264_336_cs.mp4" "$FPS"
 rm -f "$OUT/c9.h264"
 ff -f lavfi -i "$(vf 720 336 'c11 live H.264, MMI-built stream')" "${CS264[@]}" "$OUT/c11_h264_336.h264"
+
+# c12: hello10's crop test, raw 800x480 as Android Auto sends it with an
+# 80 px width margin: the picture (label, counter) in the left 720
+# columns, a red band in the right 80 (cut by the MMI's SPS crop to 720),
+# a blue band in the bottom 64 lines (cut too in hello10's cropnav test).
+# Level 3.1 like the phone's; the MMI rewrites it to 3.0.
+C12_VF="testsrc2=size=720x480:rate=$FPS:duration=$D,\
+drawtext=fontfile=$FONT:text='c12 800x480 cropped to 720':x=(w-tw)/2:y=h/10:fontsize=h/12:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=6,\
+drawtext=fontfile=$FONT:text='%{n}':x=(w-tw)/2:y=(h-th)/2:fontsize=h/4:fontcolor=yellow:box=1:boxcolor=black@0.7:boxborderw=8,\
+drawbox=x=0:y=416:w=720:h=64:color=blue:t=fill,\
+drawtext=fontfile=$FONT:text='blue band - cut in cropnav':x=(w-tw)/2:y=432:fontsize=32:fontcolor=white,\
+pad=800:480:0:0:color=red,\
+drawtext=fontfile=$FONT:text='CUT':x=730:y=(h-th)/2:fontsize=28:fontcolor=white"
+ff -f lavfi -i "$C12_VF" -c:v libx264 -profile:v baseline -level:v 3.1 -pix_fmt yuv420p \
+  -preset veryfast -b:v 1500k -maxrate 1500k -bufsize 400k -g "$FPS" -keyint_min "$FPS" \
+  -sc_threshold 0 -bf 0 -refs 1 -an -f h264 "$OUT/c12_h264_800.h264"
 
 # what came out
 for f in "$OUT"/*.*; do

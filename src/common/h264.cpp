@@ -12,6 +12,9 @@ public:
 	Bits(const uint8_t *p, size_t n) : p_(p), n_(n) {}
 
 	bool fail() const { return fail_; }
+	// Bits read so far, counted in the RBSP (emulation prevention bytes
+	// not counted).
+	size_t pos() const { return rbsp_bytes_ * 8 - left_; }
 
 	unsigned u(unsigned bits)
 	{
@@ -61,13 +64,14 @@ private:
 			zeros_ = b == 0 ? zeros_ + 1 : 0;
 			cur_ = b;
 			left_ = 8;
+			rbsp_bytes_++;
 		}
 		left_--;
 		return cur_ >> left_ & 1;
 	}
 
 	const uint8_t *p_;
-	size_t n_, pos_ = 0;
+	size_t n_, pos_ = 0, rbsp_bytes_ = 0;
 	unsigned zeros_ = 0, left_ = 0;
 	uint8_t cur_ = 0;
 	bool fail_ = false;
@@ -179,7 +183,15 @@ std::vector<Range> split_access_units(const uint8_t *p, size_t n)
 	return out;
 }
 
-std::string parse_sps(const uint8_t *nal, size_t n, Sps &s)
+namespace {
+
+// Where frame_cropping_flag starts and where its fields end, in RBSP bits
+// (crop_sps rewrites what is between).
+struct SpsPos {
+	size_t crop = 0, after_crop = 0;
+};
+
+std::string parse_sps_at(const uint8_t *nal, size_t n, Sps &s, SpsPos *at)
 {
 	s = Sps();
 	if (n < 4 || (nal[0] & 0x1f) != kSps)
@@ -231,6 +243,8 @@ std::string parse_sps(const uint8_t *nal, size_t n, Sps &s)
 	s.height_mbs = map_units * (s.frame_mbs_only ? 1 : 2);
 	s.width = s.width_mbs * 16;
 	s.height = s.height_mbs * 16;
+	if (at != nullptr)
+		at->crop = b.pos();
 	if (b.u(1)) {                           // frame_cropping
 		unsigned l = b.ue(), r = b.ue(), t = b.ue(), bo = b.ue();
 		unsigned cx = s.chroma_format == 0 || s.chroma_format == 3 ? 1 : 2;
@@ -240,10 +254,106 @@ std::string parse_sps(const uint8_t *nal, size_t n, Sps &s)
 		s.width -= cx * (l + r);
 		s.height -= cy * (t + bo);
 	}
+	if (at != nullptr)
+		at->after_crop = b.pos();
 	if (b.fail())
 		return "SPS is cut short";
 	if (s.log2_max_frame_num > 16 || s.log2_max_poc_lsb > 16)
 		return "SPS: bad frame_num / POC sizes";
+	return "";
+}
+
+// NAL payload -> RBSP: the 03 after two zero bytes is dropped.
+std::vector<uint8_t> unescape(const uint8_t *p, size_t n)
+{
+	std::vector<uint8_t> out;
+	unsigned zeros = 0;
+
+	out.reserve(n);
+	for (size_t i = 0; i < n; i++) {
+		if (zeros >= 2 && p[i] == 3) {
+			zeros = 0;
+			continue;
+		}
+		out.push_back(p[i]);
+		zeros = p[i] == 0 ? zeros + 1 : 0;
+	}
+	return out;
+}
+
+} // namespace
+
+std::string parse_sps(const uint8_t *nal, size_t n, Sps &s)
+{
+	return parse_sps_at(nal, n, s, nullptr);
+}
+
+std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned height,
+                     uint8_t level, std::vector<uint8_t> &out)
+{
+	Sps s;
+	SpsPos at;
+	std::string err = parse_sps_at(nal, n, s, &at);
+	if (!err.empty())
+		return err;
+	if (s.chroma_format != 1 || !s.frame_mbs_only)
+		return "crop: 4:2:0 frames only";
+	unsigned cw = s.width_mbs * 16, ch = s.height_mbs * 16;
+	if (width == 0 || height == 0 || width > cw || height > ch || width % 2 || height % 2)
+		return "crop: " + std::to_string(width) + "x" + std::to_string(height) +
+		       " does not fit the coded " + std::to_string(cw) + "x" + std::to_string(ch);
+
+	std::vector<uint8_t> rbsp = unescape(nal + 1, n - 1);
+	// the last 1 bit is rbsp_stop_one_bit; the fields end before it
+	size_t end = rbsp.size() * 8;
+	while (end > 0 && !(rbsp[(end - 1) / 8] >> (7 - (end - 1) % 8) & 1))
+		end--;
+	if (end == 0 || end - 1 < at.after_crop)
+		return "crop: no rbsp_stop_one_bit after the cropping fields";
+	end--;
+	if (level != 0)
+		rbsp[2] = level;                     // level_idc: byte 2, byte-aligned
+
+	auto bit = [&](size_t i) { return (unsigned)(rbsp[i / 8] >> (7 - i % 8) & 1); };
+	Writer w;
+	for (size_t i = 0; i < at.crop; i++)
+		w.u(1, bit(i));
+	bool crop = width != cw || height != ch;
+	w.u(1, crop);
+	if (crop) {                              // in 2-pixel units (4:2:0 frames)
+		w.ue(0);
+		w.ue((cw - width) / 2);
+		w.ue(0);
+		w.ue((ch - height) / 2);
+	}
+	for (size_t i = at.after_crop; i < end; i++)
+		w.u(1, bit(i));
+	w.trailing();
+
+	out.clear();
+	out.push_back(nal[0]);
+	escape(w.out, out);
+	return "";
+}
+
+std::string crop_sps_annexb(const uint8_t *p, size_t n, unsigned width, unsigned height,
+                            uint8_t level, std::vector<uint8_t> &out)
+{
+	static const uint8_t kStart[4] = {0, 0, 0, 1};
+	std::vector<uint8_t> sps;
+
+	out.clear();
+	for (const Nal &nal : split_annexb(p, n)) {
+		out.insert(out.end(), kStart, kStart + 4);
+		if (nal.type() != kSps) {
+			out.insert(out.end(), nal.p, nal.p + nal.n);
+			continue;
+		}
+		std::string err = crop_sps(nal.p, nal.n, width, height, level, sps);
+		if (!err.empty())
+			return err;
+		out.insert(out.end(), sps.begin(), sps.end());
+	}
 	return "";
 }
 
