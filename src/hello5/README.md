@@ -18,7 +18,7 @@ Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
 
 - **Run:** `hello5 <sd_path> [steps] [outputs]`. The default steps are
   `mntv`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).
-- **Output:** `hello5.log` (`RESULT` lines; step `n`'s timed events),
+- **Output** (in `var/` on the card): `hello5.log` (`RESULT` lines; step `n`'s timed events),
   `hello5_<step>.log` (`testapp-file`'s output).
 - **Status:** all four steps are answered (below): our sound replaces the
   radio and the music while it plays, and follows the car's volume knob.

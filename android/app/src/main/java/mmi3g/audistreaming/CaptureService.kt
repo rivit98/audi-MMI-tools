@@ -65,16 +65,25 @@ import java.nio.ByteOrder
  * the encoder, Android's one 3.25:1 bilinear step blurred text). The
  * "Sharp H.264" switch makes k = 1 for comparison. A phone whose GL setup
  * fails gets the direct path, navigation bar included. The bit rate is the drop-down's. The
- * encoder runs at the "Max fps" slider's rate (at most the MMI's 25) and
- * repeats the last frame when the screen is still; the MMI times its
- * stream at 25 fps and fills the rest with skip frames. Every frame goes
+ * scaler draws at exactly the "Max fps" slider's rate (at most the MMI's
+ * 25, [FrameClock]), a still screen too; the MMI times its stream at 25 fps
+ * and fills the rest with skip frames. Every frame goes
  * out in order - a lost one would spoil the ones after it - so frames
  * queue here while the MMI's acks are outstanding; if the queue gets long,
  * or a frame is bigger than the MMI's per-frame size, the frames up to the
  * next IDR are dropped and an IDR is asked for. A frame that doesn't fit
  * also raises the size (a new H264_CONFIG; the MMI restarts its stream).
  * The MMI's H264_STATUS: SYNC asks for an IDR, CONFIG for the config
- * again, REFUSED falls back to JPEG for this connection.
+ * again, REFUSED falls back to JPEG for this connection. After an
+ * H264_CONFIG no frame goes until the MMI says PLAYING (it would only be
+ * refused while the MMI sets its stream up), and then the stream starts at
+ * an IDR.
+ *
+ * H.264 is landscape only: a portrait screen would fill a narrow strip of
+ * the MMI with unreadable text, so while the phone is portrait the scaler
+ * draws a "turn the phone to landscape" card ([Notice]) instead, into the
+ * same stream (no MMI restart). The direct path can't draw it: its picture
+ * stops (the MMI holds the last one). JPEG still follows the rotation.
  *
  * [Streaming.keepScreenOn] holds a screen wake lock while streaming: the
  * activity's FLAG_KEEP_SCREEN_ON only counts while its window is visible,
@@ -146,6 +155,8 @@ class CaptureService : Service() {
     private var h264Failed = ""                       // the phone can't: why
     private var h264ScalerFailed = ""                 // GL scaler failed once: direct from then on
     private var fpsChangeAt = 0L
+    private var playingSeen = false                   // PLAYING since the last config
+    private var portrait = false                      // the notice is up instead of the screen
     private var nextH264Id = 1
     private val h264 = H264Stats()
 
@@ -308,7 +319,7 @@ class CaptureService : Service() {
         val newDisplayFrames = displayFrames - if (displayFrames < statusDisplayFrames) 0 else statusDisplayFrames
         val v = Streaming.link?.video
         AppLog.i("status: ${state()}; " +
-            (if (scaler != null) "display frames +$newDisplayFrames, " else "") +
+            (if (scaler != null) "display frames +$newDisplayFrames, drawn ${scaler?.drawn ?: 0}, " else "") +
             "encoded +${h264.frames - statusEncoded}, dropped +${h264.dropped - statusDropped}, queue ${queue.size}; " +
             "MMI sent ${v?.sent ?: 0}, shown ${v?.shown ?: 0}")
         statusDisplayFrames = displayFrames
@@ -365,7 +376,13 @@ class CaptureService : Service() {
         if (link !== configLink && sps != null) sendConfig(link, "new connection")
         if (link.h264.configWanted.getAndSet(false)) sendConfig(link, "the MMI asked")
         if (link.h264.sync.getAndSet(false)) encoder.requestSync()
+        if (!playingSeen && link.h264.playing && configLink === link) {
+            playingSeen = true
+            // frames were held back until now: start at an IDR
+            if (waitIdr) encoder.requestSync()
+        }
         followScreen()
+        followOrientation(encoder)
         pump(link)
 
         if (now - h264.windowAt >= 1000) {
@@ -381,6 +398,7 @@ class CaptureService : Service() {
             (if (queue.isNotEmpty()) ", queue ${queue.size}" else "") +
             (if (h264.dropped > 0) ", dropped ${h264.dropped} (too big ${h264.tooBig}, " +
                 "queue full ${h264.overflows})" else "") +
+            (if (portrait) "; portrait: the MMI shows \"turn the phone to landscape\"" else "") +
             if (link.h264.playing) "" else "; MMI starting"
         return H264_TICK_MS
     }
@@ -388,7 +406,10 @@ class CaptureService : Service() {
     private fun startEncoder(caps: Proto.VideoCaps, fps: Int): Boolean {
         val p = projection ?: return false
         val (w, h) = H264.pictureSize(caps.h264MaxW, caps.h264MaxH)
-        val e = HwEncoder(w, h, fps, Streaming.bitRate, handler, ::onH264Config, ::onH264Frame) { why ->
+        // behind the GL scaler the still screen is drawn on its clock: no
+        // encoder repeats on top of that
+        val viaGl = h264ScalerFailed.isEmpty()
+        val e = HwEncoder(w, h, fps, Streaming.bitRate, !viaGl, handler, ::onH264Config, ::onH264Frame) { why ->
             AppLog.w("H.264: $why")
             h264Failed = why
             Streaming.status = "H.264 failed ($why): JPEG instead"
@@ -405,9 +426,9 @@ class CaptureService : Service() {
         var input = e.surface
         var vw = w
         var vh = h
-        if (h264ScalerFailed.isEmpty()) {
+        if (viaGl) {
             val g = h264Geometry(w, h)
-            val sc = GlScaler(e.surface!!, w, h, g)
+            val sc = GlScaler(e.surface!!, w, h, g, fps)
             if (sc.start()) {
                 scaler = sc
                 input = sc.inputSurface
@@ -416,6 +437,9 @@ class CaptureService : Service() {
             } else {
                 h264ScalerFailed = sc.error
                 AppLog.w("GL scaler failed (${sc.error}): the display draws into the encoder directly")
+                // the next start is the direct one, with the encoder's repeats
+                e.release()
+                return false
             }
         }
         val dpi = resources.displayMetrics.densityDpi
@@ -431,6 +455,7 @@ class CaptureService : Service() {
         sps = null
         pps = null
         configLink = null
+        portrait = false
         queue.clear()
         waitIdr = true
         // the size the frames needed stays: from 64 KB again, the next big
@@ -458,8 +483,34 @@ class CaptureService : Service() {
         if (g == sc.geometry) return
         // a failure shows as sc.failed on the next tick: direct from then on
         if (!sc.update(g)) return
-        display?.resize(g.capW, g.capH, resources.displayMetrics.densityDpi)
+        // a new size comes with a new input surface (GlScaler.update): the
+        // display draws at the new size only into a new surface
+        display?.let { d ->
+            d.resize(g.capW, g.capH, resources.displayMetrics.densityDpi)
+            d.surface = sc.inputSurface
+        }
+        sc.dropOld()
         AppLog.i("H.264 capture now $g")
+    }
+
+    /** H.264 is landscape only: the notice instead of a portrait screen. */
+    private fun followOrientation(e: HwEncoder) {
+        readScreen()
+        val now = VideoFit.portrait(screen.w, screen.h)
+        if (now == portrait) return
+        val sc = scaler
+        if (sc != null) {
+            val card = if (now) Notice.landscapeRequired(sc.w, sc.h) else null
+            val ok = sc.showNotice(card)
+            card?.recycle()
+            // a failure shows as sc.failed on the next tick: direct from then on
+            if (!ok) return
+        } else {
+            display?.surface = if (now) null else e.surface
+        }
+        portrait = now
+        AppLog.i(if (now) "portrait: H.264 shows the landscape notice${if (sc == null) " (direct: the picture stops)" else ""}"
+                 else "landscape: H.264 shows the screen again")
     }
 
     private fun stopEncoder() {
@@ -484,7 +535,8 @@ class CaptureService : Service() {
         link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.ordinal))
         configLink = link
         configVcapMode = mode
-        // the MMI (re)starts its stream at the next IDR
+        // the MMI (re)starts its stream at the next IDR, after PLAYING
+        playingSeen = false
         queue.clear()
         waitIdr = true
         enc?.requestSync()
@@ -502,6 +554,12 @@ class CaptureService : Service() {
     private fun onH264Frame(data: ByteArray, key: Boolean) {
         val link = Streaming.link
         if (link == null || configLink !== link) return      // the MMI has no stream for it
+        if (!playingSeen) {
+            // the MMI is still setting its stream up: it would refuse it
+            h264.dropped++
+            waitIdr = true
+            return
+        }
         val idr = key && H264.isIdr(data)
         if (waitIdr && !idr) {
             h264.dropped++

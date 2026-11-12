@@ -83,7 +83,7 @@ used only by `_IO_POWER`, which isn't handled.
 - **Run:** `hello9 <sd_path> [test,test,...]`, e.g. `c5,gap,stall`. `make
   sd` puts the clips (c5, c9, c11 from `media/mkclips.sh`) on the card
   when hello9 is in `SD_APPS`.
-- **Output:**
+- **Output** (in `var/` on the card):
   - `hello9.log`: every step and every io-media event. For the live tests:
     the stream (`hw:` line: size, POC type, S, frames declared, header
     size, gap fill), the pauses and the last frame before each, the first

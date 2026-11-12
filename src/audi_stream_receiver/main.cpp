@@ -31,6 +31,9 @@
 
 #include <unistd.h>
 
+#include "camera.h"
+#include "camera_log.h"
+
 extern "C" {
 #include "cpumon.h"
 #include "log.h"
@@ -70,11 +73,11 @@ void keep(const char *dir, const char *old_name, const char *new_name)
 // run's slog snapshots behind, looking like this run's.
 void keep_previous_run(const char *sd_path)
 {
-	char var[256], name[32], prev[32];
+	const char *var = var_dir(sd_path);
+	char name[32], prev[32];
 
-	keep(sd_path, "audi_stream_receiver.log", "audi_stream_receiver.prev.log");
-	keep(sd_path, "audi_stream_perf.csv", "audi_stream_perf.prev.csv");
-	std::snprintf(var, sizeof(var), "%s/var", sd_path);
+	keep(var, "audi_stream_receiver.log", "audi_stream_receiver.prev.log");
+	keep(var, "audi_stream_perf.csv", "audi_stream_perf.prev.csv");
 	for (int n = 1; n <= aoa::kSlogSnapshots; n++) {
 		std::snprintf(name, sizeof(name), "usb_slog_%d.txt", n);
 		std::snprintf(prev, sizeof(prev), "usb_slog_prev_%d.txt", n);
@@ -99,15 +102,20 @@ int main(int argc, char *argv[])
 		if (std::strcmp(argv[i], "copy=full") == 0)
 			partial = false;
 	keep_previous_run(sd_path);
-	std::snprintf(path, sizeof(path), "%s/audi_stream_receiver.log", sd_path);
+	std::snprintf(path, sizeof(path), "%s/audi_stream_receiver.log", var_dir(sd_path));
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
 	log_msg("audi_stream_receiver start, pid=%d, copy=%s", getpid(), partial ? "changed" : "full");
 	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
-	perf::init(sd_path);
+	perf::init(var_dir(sd_path));
 	screen_set_partial(partial);
+
+	camera::start();
+	// our first show would cover the rear camera
+	while (camera::active() && quit_poll() == QUIT_NONE)
+		usleep(100 * 1000);
 
 	bool shown = screen_open() == 0;
 	if (!shown)
@@ -117,17 +125,19 @@ int main(int argc, char *argv[])
 	else
 		video::init(800, 480);
 	bool screen_up = shown;
+	camera::Takeover takeover;
 	hwvideo::start();
 	aoa::start(sd_path);
 
 	while (quit_poll() == QUIT_NONE) {
 		// the H.264 stream's video takes the screen (vout replaces what
 		// the layer manager shows); ours comes back when it ends
-		if (shown && hwvideo::active() && screen_up) {
+		// (not during the rear camera: both of these show something)
+		if (shown && hwvideo::active() && screen_up && !camera::active()) {
 			log_msg("screen: closed for the H.264 video");
 			screen_close();
 			screen_up = false;
-		} else if (shown && !hwvideo::active() && !screen_up) {
+		} else if (shown && !hwvideo::active() && !screen_up && camera::clear()) {
 			log_msg("screen: back after the H.264 video");
 			screen_up = screen_open() == 0;
 			if (!screen_up) {
@@ -135,6 +145,24 @@ int main(int argc, char *argv[])
 				shown = false;
 			}
 			last_version = ~0u;               // redraw
+		}
+
+		// The HMI's list replaces ours when the rear camera ends, too.
+		using Action = camera::Takeover::Action;
+		switch (takeover.tick(screen_up, camera::active(), camera::clear(), log_ms())) {
+		case Action::Retake:
+			log_msg("screen: the rear camera has gone: back");
+			screen_show_again();
+			break;
+		case Action::ShowAgain:
+			screen_show_again();
+			break;
+		case Action::GiveBack:
+			log_msg("screen: the rear camera started as the screen came back: the camera goes first");
+			screen_give_back_to_camera();
+			break;
+		case Action::None:
+			break;
 		}
 
 		bool fresh = video::poll();
@@ -149,7 +177,7 @@ int main(int argc, char *argv[])
 			last_version = v;
 			last_second = s;
 			unsigned t0 = log_us();
-			ui::render(screen_canvas(), sd_path);
+			ui::render(screen_canvas(), var_dir(sd_path));
 			p.render_us = log_us() - t0;
 			screen_present();
 			last_present = log_ms();
@@ -173,8 +201,12 @@ int main(int argc, char *argv[])
 
 	aoa::stop();
 	hwvideo::shutdown();
-	if (screen_up)
+	if (screen_up) {
+		if (camera::active())
+			screen_no_show_on_close();
 		screen_close();
+	}
+	camera::stop();
 	cpumon_stop();
 	perf::shutdown();
 	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));

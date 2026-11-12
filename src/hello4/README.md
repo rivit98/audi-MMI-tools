@@ -12,7 +12,7 @@ The results show top right as green/red squares. Then come the scenes:
 
 - **Run:** `hello4 <sd_path> [options]`, options below. Its `sd/apps.conf`
   line (commented out) is `hello4 <sd> step=10 trace=1`.
-- **Output:** `hello4.log` (GL limits, every probe read with its verdict,
+- **Output** (in `var/` on the card): `hello4.log` (GL limits, every probe read with its verdict,
   fps and free RAM, triangle-rate table), screenshots of cube/light/world.
 - **Status:** Steps of 16 tori and more are
   commented out in `main.c` (`opts_default`). More detail is in

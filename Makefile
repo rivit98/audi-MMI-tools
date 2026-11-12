@@ -18,6 +18,9 @@
 #                        H.264: build/aoa-host/stream.h264) and shows it in an
 #                        800x480 window like the MMI's screen
 #   make aoa-host-test   tools/aoa_host.py's and the window's tests
+#   make aa-host         android_auto's desk test: this PC is the Android Auto
+#                        head unit for the phone (build/aa-host/: video, audio,
+#                        log; a live ffplay window)
 #   make addr APP=x ADDR="0x8043270 ..."
 #                        crash address(es) in build/x -> function, file:line
 #   make clips           hello6's and hello9's test videos (build/clips/, ffmpeg
@@ -35,6 +38,21 @@ APP    ?= hello2
 FWLIBS := $(FW)/proc/boot/libc.so.2 \
           $(addprefix $(FW)/mnt/ifs-root/usr/lib/,libm.so.2 libgf.so.1 libEGL.so.6 libGLES_CM.so.6 libasound.so.2) \
           $(FWEFS)/lib/libusbdi.so.2
+
+# android_auto's third-party sources (rules further down)
+MBEDTLS_VER := 3.6.7
+MBEDTLS     := third_party/mbedtls-$(MBEDTLS_VER)
+MBEDTLS_SHA := a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
+AASDK_REV   := 9bf6adf933665dee26532201719fac14a047ccf1
+AA_CERT     := third_party/aasdk-cert
+AA_CERT_SHA := 85b5043a09b1ba9464f745e6917bdbaa2bc582fe48cb727a7787c1a832a773e4  headunit.crt\n9e837a172a1eef5b05cda9df9d086753639648a17f76c2c939bcbd094aa972f2  headunit.key
+# aasdk's .proto files (aap_protobuf/), same commit: only the tests use them
+# (tests/check_aa_proto.py checks our hand-written protobuf against them).
+AA_PROTO     := third_party/aasdk-proto
+AA_PROTO_SHA := 095c1088225c88032b1b29a415df13a0b12a87bf80e07747d872aaa4151501f4
+# mbedTLS for an app: its headers + our config (src/common/mbedtls/)
+MBEDTLS_INC := -Isrc/common/mbedtls -I$(MBEDTLS)/include '-DMBEDTLS_CONFIG_FILE="mbedtls_config.h"'
+AA_INC      := -Isrc/android_auto $(MBEDTLS_INC)
 
 RUN := docker run --rm -u $(shell id -u):$(shell id -g) \
        -v $(CURDIR):/src -v $(REPO)/builder:/toolkit-builder:ro -v $(REPO)/core:/toolkit-core:ro \
@@ -66,7 +84,13 @@ CXXFLAGS := $(CFLAGS)
 #           io-media and DM642 (hw_stream.cpp, docs/phone-mirroring.md 7.10):
 #           h264 + csmp4 + live_stream (pure, tests/test_live.cpp),
 #           stream_server (resource manager), player (io-media graph, + IOM),
-#           vout (video displayable + dev-videoctrl)
+#           vout (video displayable + dev-videoctrl), camera (is the HMI's
+#           rear camera up: slog, tests/test_camera.cpp)
+# Header-only / third-party pieces in src/common, used as they are:
+#   pb.h          our minimal protobuf writer + reader (android_auto)
+#   usb_chunk.h   bulk OUT transfer sizes (aoa_host, android_auto's desk tool)
+#   mbedtls/      our mbedTLS config + patch; the library itself is fetched
+#                 into third_party/ and built as build/mbedtls-*/ (below)
 common = $(foreach f,$(1),src/common/$(f).c src/common/$(f).h)
 commonxx = $(foreach f,$(1),src/common/$(f).cpp src/common/$(f).h)
 BASE   := $(call common,log quit lmgr)
@@ -78,7 +102,7 @@ PROC   := $(call common,proc)
 IMGDEC := $(call common,imgdec) src/common/stb_image.h
 CPUMON := $(call common,cpumon cpustat)
 IOM    := $(call common,iom)
-LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_stream) $(IOM)
+LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vout hw_stream) src/common/camera_log.h $(IOM)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
 # APPS is everything `make` builds; TESTS are what run.sh executes by
@@ -126,18 +150,23 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # audi_stream_receiver runs until the SD card is pulled, so it is always
 # last: pulling the card ends it and the whole run (no final "done" screen;
 # everything before it is already on the card).
-APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver
-CXX_APPS := hello8 hello9 audi_stream_receiver
+#
+# android_auto (an Android Auto head unit, proof of connectivity) runs
+# until the SD card is pulled, like audi_stream_receiver. Both are on the
+# card; run.sh's APPS line picks which one runs.
+APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 audi_stream_receiver \
+           android_auto
+CXX_APPS := hello8 hello9 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := audi_stream_receiver
+TESTS   := android_auto audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
 PRE_S   := 5
 POST_S  := 8
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test clips gusa-scan
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -192,9 +221,22 @@ CXXFLAGS_hello9 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
 # phone's pictures are JPEGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
+
+# android_auto: C++. An Android Auto head unit over USB (AOA), a proof of
+# connectivity: protocol, TLS, services, video frames written to the card
+# (src/android_auto/README.md). The protocol (session, frame, tls; pb.h) is
+# plain C++ shared with the host tests and the desk tool (aa-host); USB is
+# common/aoa_host.cpp. TLS: mbedTLS, built below.
+AA_CORE := $(wildcard src/android_auto/*.h) src/android_auto/session.cpp src/android_auto/tls.cpp \
+           src/common/usb_chunk.h src/common/pb.h
+build/android_auto: src/android_auto/main.cpp $(AA_CORE) $(call commonxx,aoa_host camera) \
+    src/common/camera_log.h src/common/mono_cond.h $(BASE) $(SCREEN) $(CPUMON) \
+    build/mbedtls-sh4/libmbedtls.a $(AA_CERT)/.done
+LIBS_android_auto := -Lbuild/mbedtls-sh4 -lmbedtls -lusbdi -lgf
+CXXFLAGS_android_auto := -Wno-ignored-attributes $(AA_INC)
 
 # pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
 # status screens. Text drawing + PNG writer, no device libraries.
@@ -206,6 +248,49 @@ build/gen/font_big.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold32x16.psf.gz
 build/gen/font_small.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold16.psf.gz
 	mkdir -p build/gen
 	$(RUN) python3 -I sdk/mkfont.py sdk/fonts/Uni2-TerminusBold16.psf.gz font_small $@
+
+# --- third-party sources for android_auto, fetched once into third_party/
+# (gitignored), checked against pinned SHA-256s.
+#   mbedTLS 3.6 LTS (Apache-2.0): TLS for the Android Auto session.
+#   aasdk's head unit certificate + key (opencardev/aasdk cert/, "not a
+#   secret", the one open-source head units use): the phone checks it in
+#   the TLS handshake. Not in the repo; copied to the card by make sd.
+$(MBEDTLS)/.done: src/common/mbedtls/utctime-offset.patch
+	rm -rf $(MBEDTLS)
+	mkdir -p third_party
+	curl -fsSL -o third_party/mbedtls.tar.bz2.part \
+	    https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$(MBEDTLS_VER)/mbedtls-$(MBEDTLS_VER).tar.bz2
+	echo "$(MBEDTLS_SHA)  third_party/mbedtls.tar.bz2.part" | sha256sum -c -
+	tar -xjf third_party/mbedtls.tar.bz2.part -C third_party
+	rm third_party/mbedtls.tar.bz2.part
+	patch -p1 -d $(MBEDTLS) < src/common/mbedtls/utctime-offset.patch
+	touch $@
+$(AA_CERT)/.done:
+	mkdir -p $(AA_CERT)
+	for f in headunit.crt headunit.key; do \
+	    curl -fsSL -o $(AA_CERT)/$$f https://raw.githubusercontent.com/opencardev/aasdk/$(AASDK_REV)/cert/$$f || exit 1; \
+	done
+	cd $(AA_CERT) && printf '$(AA_CERT_SHA)\n' | sha256sum -c -
+	touch $@
+
+$(AA_PROTO)/.done:
+	rm -rf $(AA_PROTO) && mkdir -p $(AA_PROTO)
+	curl -fsSL -o third_party/aasdk.tar.gz.part https://codeload.github.com/opencardev/aasdk/tar.gz/$(AASDK_REV)
+	echo "$(AA_PROTO_SHA)  third_party/aasdk.tar.gz.part" | sha256sum -c -
+	tar -xzf third_party/aasdk.tar.gz.part -C $(AA_PROTO) --strip-components=2 aasdk-$(AASDK_REV)/protobuf/aap_protobuf
+	rm third_party/aasdk.tar.gz.part
+	touch $@
+
+# The library, one build per target, with src/common/mbedtls/mbedtls_config.h
+# (net_sockets.c is left out: no sockets). Compiled 8 files at a time.
+MBEDTLS_BUILD = rm -rf $(@D) && mkdir -p $(@D) && $(RUN) sh -c 'cd $(@D) && \
+    ls /src/$(MBEDTLS)/library/*.c | grep -v /net_sockets.c | \
+    xargs -P8 -n1 $(1) -O2 -g -Wall -I/src/src/common/mbedtls -I/src/$(MBEDTLS)/include \
+        "-DMBEDTLS_CONFIG_FILE=\"mbedtls_config.h\"" -c && $(2) rcs $(@F) *.o && rm *.o'
+build/mbedtls-sh4/libmbedtls.a: $(MBEDTLS)/.done src/common/mbedtls/mbedtls_config.h
+	$(call MBEDTLS_BUILD,shle-nto-gcc,sh4-linux-gnu-ar)
+build/mbedtls-host/libmbedtls.a: $(MBEDTLS)/.done src/common/mbedtls/mbedtls_config.h
+	$(call MBEDTLS_BUILD,gcc,ar)
 
 sdk:
 	rm -rf build/fwlibs && mkdir -p build/fwlibs && cp $(FWLIBS) build/fwlibs/
@@ -282,6 +367,7 @@ sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/c
 	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
 	cp sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
+	$(if $(filter android_auto,$(SD_APPS)),mkdir -p build/sd/aa && cp $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/)
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
 	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
@@ -312,17 +398,31 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate
+           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_camera build/test_android_auto
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
 MEDIA_RUN = docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src $(MEDIA_IMAGE)
-test: $(TESTBIN) build/.media-image
+# test_android_auto also runs against Google's protobuf: check_aa_proto.py
+# (mmi-aa-proto: protobuf + protoc, versions and hashes locked in
+# tests/aa_proto/) encodes the phone's messages from aasdk's .proto files
+# first, and decodes every message the head unit sent afterwards.
+AA_PROTO_IMAGE := mmi-aa-proto
+AA_PROTO_RUN = docker run --rm -u $(shell id -u):$(shell id -g) -e UV_CACHE_DIR=/tmp/uv -v $(CURDIR):/src \
+    -w /src $(AA_PROTO_IMAGE) uv run --no-project python -I tests/check_aa_proto.py
+build/.aa-proto-image: tests/aa_proto/Dockerfile tests/aa_proto/requirements.txt
+	docker build -q -t $(AA_PROTO_IMAGE) tests/aa_proto
+	mkdir -p build && touch $@
+test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
 	rm -rf build/test_live.d && mkdir -p build/test_live.d
 	$(MEDIA_RUN) python3 -I tests/check_live.py prepare build/test_live.d
+	rm -rf build/test_aa_proto.d && mkdir -p build/test_aa_proto.d/hu
+	$(AA_PROTO_RUN) prepare build/test_aa_proto.d $(AA_PROTO)
 	@for t in $(TESTBIN); do $(RUN) ./$$t || exit 1; done
+	$(RUN) ./build/test_android_auto --pb build/test_aa_proto.d
 	$(RUN) python3 -I tests/check_png.py build/test_png.d
 	$(MEDIA_RUN) python3 -I tests/check_live.py check build/test_live.d
+	$(AA_PROTO_RUN) check build/test_aa_proto.d $(AA_PROTO)
 # audi_stream_receiver's wire protocol, picture reassembly and ack batches (C++, below)
 build/test_proto: tests/test_proto.cpp tests/check.h src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.h src/audi_stream_receiver/ack_batch.h
@@ -362,11 +462,19 @@ build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 li
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
 # audi_stream_receiver: which H264_CONFIGs restart the stream
 build/test_config_gate: tests/test_config_gate.cpp tests/check.h src/audi_stream_receiver/config_gate.h
-build/test_proto build/test_config_gate:
+# android_auto's protocol core against a fake phone (TLS server included)
+build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(call common,log) \
+    build/mbedtls-host/libmbedtls.a $(AA_CERT)/.done
 	mkdir -p build
-	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
+	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common $(AA_INC) \
+	    -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^) -Lbuild/mbedtls-host -lmbedtls
+# the HMI's rear camera, from dev-videoctrl's slog lines
+build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
+build/test_proto build/test_config_gate build/test_camera:
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_proto,$(TESTBIN)):
+$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
@@ -408,6 +516,28 @@ aoa-host-test:
 	    -v $(CURDIR)/tools:/tools:ro -w /tools --entrypoint uv mmi-aoa-host run --no-project \
 	    --with pyusb==1.3.1 --with av==19.0.2 --with pygame==2.6.1 --with pytest==9.2.0 \
 	    pytest -q -p no:cacheprovider tests
+
+# android_auto's desk test: this PC plays the head unit for the phone
+# (src/android_auto/README.md). Stop adb first. Writes the video, audio and
+# log to build/aa-host/; AA_HOST_ARGS="--play" also shows the video live.
+AA_HOST_IMAGE := mmi-aa-host
+AA_HOST_ARGS  ?= --play
+build/.aa-host-image: tools/Dockerfile.aa-host
+	docker build -q -t $(AA_HOST_IMAGE) -f tools/Dockerfile.aa-host tools
+	mkdir -p build && touch $@
+build/aa_host: src/android_auto/host/main.cpp $(AA_CORE) $(call common,log) src/common/mono_cond.h \
+    build/mbedtls-host/libmbedtls.a $(AA_CERT)/.done build/.aa-host-image
+	docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src $(AA_HOST_IMAGE) \
+	    g++ -O2 -g -Wall -Wextra -Isrc/common $(AA_INC) -o $@ -x c src/common/log.c -x none \
+	    src/android_auto/host/main.cpp src/android_auto/session.cpp src/android_auto/tls.cpp \
+	    -Lbuild/mbedtls-host -lmbedtls -lusb-1.0 -lpthread
+aa-host: build/aa_host
+	mkdir -p build/aa-host
+	-xhost +si:localuser:root >/dev/null 2>&1
+	docker run --rm -it --privileged -v /dev/bus/usb:/dev/bus/usb \
+	    -e DISPLAY=$(DISPLAY) -v /tmp/.X11-unix:/tmp/.X11-unix \
+	    -v $(CURDIR):/src -w /src $(AA_HOST_IMAGE) \
+	    ./build/aa_host --out build/aa-host --cert $(AA_CERT) $(AA_HOST_ARGS)
 
 shell:
 	docker run --rm -it -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src $(IMAGE) bash

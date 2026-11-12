@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 	}
 	if (argc > 2 && atoi(argv[2]) > 0)
 		seconds = (unsigned)atoi(argv[2]);
-	snprintf(logpath, sizeof(logpath), "%s/hello7.log", argv[1]);
+	snprintf(logpath, sizeof(logpath), "%s/hello7.log", var_dir(argv[1]));
 	if (log_open(logpath) != 0)
 		fprintf(stderr, "hello7: cannot open %s, logging to stdout only\n", logpath);
 	log_msg("hello7 start, pid=%d, %u s", getpid(), seconds);

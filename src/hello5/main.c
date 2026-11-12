@@ -177,6 +177,7 @@ static unsigned clip_ms;
 static const char *wav;         /* beep's path, for testapp-file */
 static const char *player;      /* testapp-file, NULL if not found */
 static const char *sd_path;
+static const char *out_dir;    /* <sd_path>/var: everything written */
 
 /* io-media mixer outputs: every DSPOUT_TDM* name io-media-nvidia's mixer
  * knows (its table at 0x237ed4, P1001 efs-system). m0, m5 and m7 are also
@@ -559,7 +560,7 @@ static void mixer_chimes(struct group *g)
 	unsigned k, shown, screen_ms;
 	struct play p;
 
-	snprintf(log_file, sizeof(log_file), "%s/hello5_m%d.log", sd_path, g->mixer);
+	snprintf(log_file, sizeof(log_file), "%s/hello5_m%d.log", out_dir, g->mixer);
 	g->opened = player != NULL;
 	if (player == NULL)
 		log_msg("group %d: no testapp-file, nothing to play %s with", g->index,
@@ -764,14 +765,14 @@ static int pulse_file(unsigned n, char *buf, size_t size)
 	snprintf(buf, size, "%s/hello5_pulse%u.wav", pulse_dir, n);
 	if (pulse_write_wav(buf, n) != 0) {
 		log_msg("pulse: cannot write %s: %s", buf, strerror(errno));
-		if (pulse_dir == sd_path)
+		if (pulse_dir == out_dir)
 			return -1;
-		pulse_dir = sd_path;
+		pulse_dir = out_dir;
 		return pulse_file(n, buf, size);
 	}
 	log_msg("pulse: %s = %u pings (%u ms) rendered in %u ms", buf, n,
 	        n * PULSE_PERIOD_MS, log_ms() - t0);
-	if (pulse_dir != sd_path && n < sizeof(pulse_made) * 8)
+	if (pulse_dir != out_dir && n < sizeof(pulse_made) * 8)
 		pulse_made |= 1u << n;
 	return 0;
 }
@@ -1113,7 +1114,7 @@ static void run_step(const struct step *s, int index, int count)
 	log_msg("step %d/%d %c (%s): %u s to get ready, then %u pings on %s",
 	        index, count, s->key, s->title, s->intro_s, s->pings + s->chain,
 	        mixers[STEP_MIXER].name);
-	snprintf(log_file, sizeof(log_file), "%s/hello5_%c.log", sd_path, s->key);
+	snprintf(log_file, sizeof(log_file), "%s/hello5_%c.log", out_dir, s->key);
 	for (i = s->intro_s; i > 0; i--) {
 		snprintf(big, sizeof(big), "pings in %u s", i);
 		ui_step(index, count, s->title, s->todo, s->listen, big, 0, NULL);
@@ -1130,10 +1131,10 @@ static void run_step(const struct step *s, int index, int count)
 	memset(&p, 0, sizeof(p));
 	rc = s->play(s, log_file, &p);
 	/* not played and not refused: maybe io-media cannot read /tmp */
-	if (rc == 0 && !p.eof && !p.refused && !p.stopped && pulse_dir != sd_path) {
+	if (rc == 0 && !p.eof && !p.refused && !p.stopped && pulse_dir != out_dir) {
 		log_msg("step %c: nothing played from %s, retrying from the card",
 		        s->key, pulse_dir);
-		pulse_dir = sd_path;
+		pulse_dir = out_dir;
 		rc = s->play(s, log_file, &p);
 	}
 	if (quit_poll() != QUIT_NONE)
@@ -1224,6 +1225,7 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	out_dir = var_dir(sd_path);
 	if (argc > 2)
 		steps = argv[2];
 	if (argc > 3)
@@ -1231,7 +1233,7 @@ int main(int argc, char *argv[])
 	snprintf(wavpath, sizeof(wavpath), "%s/beep.wav", sd_path);
 	wav = wavpath;
 
-	snprintf(logpath, sizeof(logpath), "%s/hello5.log", sd_path);
+	snprintf(logpath, sizeof(logpath), "%s/hello5.log", out_dir);
 	if (log_open(logpath) != 0)
 		fprintf(stderr, "hello5: cannot open %s, logging to stdout only\n", logpath);
 	player = find_player(argv[0], playerpath, sizeof(playerpath));

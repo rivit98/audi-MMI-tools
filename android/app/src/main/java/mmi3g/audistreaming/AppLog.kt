@@ -21,13 +21,16 @@ object AppLog {
     private const val EXIT_REASONS = 3
 
     @Volatile private var file: FileLog? = null
+    /** The app's versionName (build time included), once [init] ran. */
+    @Volatile var version = "?"
+        private set
 
     @Synchronized
     fun init(context: Context) {
         if (file != null) return
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         file = FileLog(File(dir, FILE_NAME), MAX_BYTES)
-        val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        version = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
         i("--- app start: build $version, ${Build.MANUFACTURER} ${Build.MODEL}, " +
             "Android ${Build.VERSION.RELEASE} (${Build.DISPLAY})")
         if (Build.VERSION.SDK_INT >= 30) {

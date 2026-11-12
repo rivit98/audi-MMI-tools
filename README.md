@@ -17,8 +17,9 @@ make test                       # host unit tests
 
 Copy the **contents** of `build/sd/` to the root of an empty FAT32 card,
 boot the MMI fully, insert the card in SD slot 1. The apps run one after
-another, each followed by a result screen; logs come back in `var/` and in
-each app's own files on the card. If the screen freezes, reboot the MMI:
+another, each followed by a result screen; everything the run writes
+(logs, screenshots, recordings) comes back in `var/` on the card, so
+copying that one folder gets all of it. If the screen freezes, reboot the MMI:
 hold **MENU + rotary knob + top-right soft key**. Details:
 [docs/native-apps.md §4–5](docs/native-apps.md#4-build-system).
 
@@ -40,6 +41,7 @@ what it showed on the car). Shared code is in [src/common/](src/common/).
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP | works |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/) | works |
+| [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video saved to the card | connects; video not shown |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens | tool |
 
 Which apps a card gets by default, their timeouts and arguments:

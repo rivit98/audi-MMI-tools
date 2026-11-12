@@ -16,7 +16,7 @@ own menus for the rest of hello7's run.
 
 - **Run:** `hello7 <sd_path> [seconds]` (default 60), or
   `make sd SD_APPS="hello7 ..."`.
-- **Output:** `hello7.log`: every message in full (27 bytes) with its
+- **Output** (in `var/` on the card): `hello7.log`: every message in full (27 bytes) with its
   decoding and the time since the previous one, then `RESULT` counts.
 - **Status:** ran on the car once (60 s, 44 messages). Some facts below
   come from the same ch8 log in hello5.

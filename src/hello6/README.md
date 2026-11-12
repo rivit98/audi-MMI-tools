@@ -20,7 +20,7 @@ at the end.
 
 - **Run:** `hello6 <sd_path> [phases]` (default `v`, about 6 min). The
   clips (its 8 of them) go on the card when hello6 is in `SD_APPS`.
-- **Output:** `hello6.log` (`RESULT` lines, summary) and `hello6/`
+- **Output** (in `var/` on the card): `hello6.log` (`RESULT` lines, summary) and `hello6/`
   (sysinfo, per-clip player logs, io-media queries, CPU load, system log).
 
 Each capture attempt is 7 s: the driver sees the picture and turns the

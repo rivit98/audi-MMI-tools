@@ -188,7 +188,7 @@ void blit(canvas *c, const canvas *src, int x, int y)
 
 // The status panel in [x0, x0 + pw): status bar, detail, body, footer.
 // The body is the video stats with a picture, else what to do next.
-void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *sd_path,
+void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *out_dir,
                 const video::View *v)
 {
 	char line[160], cpu[48];
@@ -215,7 +215,7 @@ void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *sd
 	else
 		std::snprintf(line, sizeof(line), "up %02u:%02u:%02u  %s  log "
 		              "%s/audi_stream_receiver.log  pull SD to exit", up / 3600,
-		              up / 60 % 60, up % 60, cpu, sd_path);
+		              up / 60 % 60, up % 60, cpu, out_dir);
 	text_draw(c, &font_small, x0 + kMargin,
 	          c->h - kFooterH + (kFooterH - font_small.h) / 2, line, -1, kDim);
 }
@@ -238,28 +238,28 @@ void render_landscape(canvas *c, const model::Model &m, const video::View *v)
 	text_draw(c, &font_small, x, (video::kTopbarH - font_small.h) / 2, line, -1, kText);
 }
 
-void render_portrait(canvas *c, const model::Model &m, const char *sd_path, const video::View *v)
+void render_portrait(canvas *c, const model::Model &m, const char *out_dir, const video::View *v)
 {
 	int col = v->frame.w;
 
 	canvas_fill(c, 0, 0, col, c->h, kVideoBg);
 	blit(c, &v->frame, 0, (c->h - v->frame.h) / 2);
 	canvas_fill(c, col, 0, 1, c->h, kRule);
-	draw_panel(c, m, col + 1, c->w - col - 1, sd_path, v);
+	draw_panel(c, m, col + 1, c->w - col - 1, out_dir, v);
 }
 
 } // namespace
 
-void render(canvas *c, const char *sd_path)
+void render(canvas *c, const char *out_dir)
 {
 	const video::View *v = video::view();
 	model::Model m = model::get();
 
 	canvas_fill(c, 0, 0, c->w, c->h, kBg);
 	if (v == nullptr)
-		draw_panel(c, m, 0, c->w, sd_path, nullptr);
+		draw_panel(c, m, 0, c->w, out_dir, nullptr);
 	else if (v->portrait)
-		render_portrait(c, m, sd_path, v);
+		render_portrait(c, m, out_dir, v);
 	else
 		render_landscape(c, m, v);
 }

@@ -742,6 +742,78 @@ void test_fill()
 	CHECK_EQ(drop.fill(1000), 0);
 }
 
+// the clock cap: a 26 fps sender against a 25 fps stream (the 10.11 car
+// run's drift), and a burst after a stall
+void test_shed()
+{
+	h264::Sps s;
+	h264::parse_sps(kSps.data(), kSps.size(), s);
+	std::vector<uint8_t> f;
+
+	// off (0): the stream just gets further ahead
+	live::Stream off;
+	off.configure(cfg(8192, 0, true, 128));
+	for (unsigned k = 0; k < 26 * 60; k++) {
+		f = k == 0 ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
+		off.push(f.data(), f.size(), k * 1000 / 26);
+	}
+	CHECK(off.stats().ahead_ms_max > 2000);
+	CHECK_EQ(off.stats().shed, 0);
+
+	// on: never more than the cap (+ a frame) ahead; each time it sheds,
+	// an IDR is asked for once it is back on the clock, and the stream
+	// goes on from it
+	live::Config c = cfg(8192, 0, true, 128);
+	c.shed_ahead_ms = 500;
+	live::Stream on;
+	CHECK_OK(on.configure(c));
+	unsigned sync_asks = 0, idr_sent = 0, max_ahead = 0;
+	bool want_idr = false;
+	for (unsigned k = 0; k < 26 * 60; k++) {
+		uint64_t t = k * 1000 / 26;
+		bool idr = k == 0 || want_idr;
+		f = idr ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
+		live::Push p = on.push(f.data(), f.size(), t);
+		if (idr && p == live::Push::Ok) {
+			want_idr = false;
+			idr_sent++;
+		}
+		CHECK(p == live::Push::Ok || p == live::Push::Shed || p == live::Push::WaitIdr);
+		if (on.sync_wanted()) {
+			sync_asks++;
+			want_idr = true;                 // the phone's next frame is an IDR
+		}
+		on.fill(t + 1);
+		int64_t ahead = (int64_t)(on.frames() * 40) - (int64_t)t;
+		if (ahead > (int64_t)max_ahead)
+			max_ahead = (unsigned)ahead;
+	}
+	live::Stats st = on.stats();
+	CHECK(st.ahead_ms_max <= 540);
+	CHECK(max_ahead <= 580);
+	CHECK(st.sheds >= 2 && st.sheds <= 4);  // ~1 frame/s too many: every ~13 s
+	CHECK_EQ(sync_asks, st.sheds);
+	CHECK_EQ(idr_sent, st.sheds + 1);
+	CHECK(st.shed >= 12 * st.sheds);         // down from 500 ms ahead to on time
+
+	// a 1 s stall, then the 25 queued frames at once: shed, not played late
+	live::Stream burst;
+	burst.configure(c);
+	unsigned k = 0;
+	for (; k < 25; k++) {
+		f = k == 0 ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
+		burst.push(f.data(), f.size(), k * 40);
+	}
+	burst.fill(1990);                                // the stall: filled up to the clock
+	for (unsigned j = 0; j < 25; j++, k++) {
+		f = p_au(s, k % 16);
+		burst.push(f.data(), f.size(), 2000);
+	}
+	CHECK_EQ(burst.stats().sheds, 1);
+	CHECK(burst.stats().shed >= 10);
+	CHECK(burst.stats().ahead_ms_max <= 540);
+}
+
 void test_burst()
 {
 	plan::Schedule b(25.0, {}, 5);
@@ -904,6 +976,7 @@ int main()
 	test_sample();
 	test_stream();
 	test_fill();
+	test_shed();
 	test_burst();
 	test_with_clip();
 	CHECK_DONE();

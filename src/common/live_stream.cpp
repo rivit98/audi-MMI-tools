@@ -25,6 +25,7 @@ const char *push_name(Push p)
 	case Push::Bad: return "bad";
 	case Push::ConfigChanged: return "SPS/PPS changed";
 	case Push::Full: return "stream full";
+	case Push::Shed: return "ahead of the clock";
 	case Push::NotConfigured: return "not configured";
 	}
 	return "?";
@@ -57,7 +58,7 @@ std::string Stream::configure(const Config &c)
 	ring_.clear();
 	ring_ms_.clear();
 	frames_ = 0;
-	started_ = need_idr_ = finished_ = sync_ = filling_ = false;
+	started_ = need_idr_ = finished_ = sync_ = filling_ = shedding_ = false;
 	t0_ms_ = last_push_ms_ = 0;
 	prev_ref_frame_num_ = last_poc_lsb_ = 0;
 	st_ = Stats();
@@ -142,9 +143,27 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 		st_.bad++;
 		return fail(Push::Bad, err);
 	}
+	// ahead of the frame clock (frame k due k / fps after the first): drop
+	// until it is back on it, then go on from an IDR
+	if (started_ && cfg_.shed_ahead_ms != 0) {
+		int64_t ahead = (int64_t)(frames_ * 1000 / cfg_.fps) - (int64_t)(now_ms - t0_ms_);
+		if (!shedding_ && ahead > (int64_t)cfg_.shed_ahead_ms) {
+			shedding_ = true;
+			st_.sheds++;
+		}
+		if (shedding_) {
+			if (ahead > 0) {
+				st_.shed++;
+				need_idr_ = true;
+				return fail(Push::Shed, std::to_string(ahead) + " ms ahead");
+			}
+			shedding_ = false;
+			sync_ = true;
+		}
+	}
 	if ((!started_ || need_idr_) && !s.idr()) {
 		st_.wait_idr++;
-		return fail(Push::WaitIdr, started_ ? "after a dropped frame" : "before the first");
+		return fail(Push::WaitIdr, started_ ? "after dropped frames" : "before the first");
 	}
 
 	std::vector<std::pair<const uint8_t *, size_t>> parts;
@@ -171,6 +190,11 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 		t0_ms_ = now_ms;
 	}
 	need_idr_ = false;
+	if (started_) {
+		int64_t ahead = (int64_t)(frames_ * 1000 / cfg_.fps) - (int64_t)(now_ms - t0_ms_);
+		if (ahead > st_.ahead_ms_max)
+			st_.ahead_ms_max = ahead;
+	}
 	if (ref)
 		prev_ref_frame_num_ = s.frame_num;
 	last_poc_lsb_ = s.poc_lsb;

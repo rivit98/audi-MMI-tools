@@ -6,6 +6,8 @@
 // VP 1 = VCAP 0, whose input 1 is the DM642's video port.
 #include "vout.h"
 
+#include "camera.h"
+
 extern "C" {
 #include "lmgr.h"
 #include "log.h"
@@ -26,6 +28,7 @@ constexpr int kCid = 41;
 constexpr int kWidth = 800, kHeight = 480;
 constexpr int kFlags = 0x101;           // LMGR_VIDEO | VCAP 0
 constexpr int kVp = 1, kSource = 1;
+constexpr int kHmiCid = 0x10, kCameraCid = 0x11;  // docs/rear-camera.md §6
 
 constexpr unsigned kSetSource = 0x80080501u;
 constexpr unsigned kUpdate = 0x80040507u;
@@ -87,6 +90,11 @@ int set_mode(Mode m)
 {
 	if (m == mode_now)
 		return 0;
+	if (camera::active()) {
+		log_msg("  videoctrl VP %d: mode %s not set, the camera is up", kVp, mode_name(m));
+		mode_now = Mode::Keep;
+		return 0;
+	}
 	if (!vc_open())
 		return -1;
 	Mode to = m == Mode::Keep ? Mode::Weave : m;
@@ -125,7 +133,7 @@ int show(Mode mode)
 void hide(bool restore_vcap)
 {
 	set_mode(Mode::Keep);
-	if (restore_vcap)
+	if (restore_vcap && !camera::active())
 		capture(false);
 	else
 		log_msg("  videoctrl left alone (VCAP 0 may be the HMI's now)");
@@ -134,6 +142,59 @@ void hide(bool restore_vcap)
 	log_msg("  unregister video displayable %d: rc=%d", kCid, lm_unregister_displayable(kCid));
 	lm_close();
 	lm_is_open = false;
+}
+
+int retake(Mode mode)
+{
+	if (!lm_is_open) {
+		int rc = lm_open();
+		if (rc != 0) {
+			log_msg("  lm_open: %s", std::strerror(rc));
+			return rc;
+		}
+		lm_is_open = true;
+	}
+	int cid = kCid;
+	int rc = lm_show_displayables(0, &cid, 1);
+	log_msg("  lm_show_displayables(0, {%d}): rc=%d", kCid, rc);
+	if (rc != 0)
+		return rc;
+	usleep(500 * 1000);                     // as in show()
+	if (camera::active()) {
+		log_msg("  the camera is back: capture left alone");
+		return -1;
+	}
+	mode_now = Mode::Keep;                  // the camera set WEAVE
+	int rc_mode = set_mode(mode);
+	rc = capture(true);
+	return rc ? rc : rc_mode;
+}
+
+void show_again()
+{
+	if (!lm_is_open)
+		return;
+	int cid = kCid;
+	log_msg("  lm_show_displayables(0, {%d}) again: rc=%d", kCid,
+	        lm_show_displayables(0, &cid, 1));
+}
+
+void give_back()
+{
+	if (vc_open()) {
+		int rc_src = vc_set(kSetSource, 0);
+		int rc_en = vc_set(kEnable, 1);
+		int rc_mode = vc_set(kSetMode, 1);  // WEAVE
+		int rc_up = vc_update();
+		log_msg("  videoctrl VP %d: source 0 rc=%d, enable rc=%d, WEAVE rc=%d, update rc=%d", kVp,
+		        rc_src, rc_en, rc_mode, rc_up);
+		mode_now = Mode::Keep;
+	}
+	if (!lm_is_open && lm_open() == 0)
+		lm_is_open = true;
+	int cids[2] = {kHmiCid, kCameraCid};
+	log_msg("  lm_show_displayables(0, {%d,%d}): rc=%d", kHmiCid, kCameraCid,
+	        lm_show_displayables(0, cids, 2));
 }
 
 void close_all()

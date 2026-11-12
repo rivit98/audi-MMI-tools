@@ -412,7 +412,7 @@ Two test apps on the car, both run outside the HMI:
 - **hello6** (`src/hello6`, `make sd SD_APPS=hello6`, ~6 min, parked):
   plays clips from `media/mkclips.sh` through the unit's own
   `testapp-file`, and runs throughput benchmarks. Results: `hello6.log`
-  (`RESULT` lines and a summary) and `hello6/` on the card.
+  (`RESULT` lines and a summary) and `hello6/`, in `var/` on the card.
 - **hello9** ([src/hello9/README.md](../src/hello9/README.md)): its own
   io-media client and resource manager, for CS-MP4 files and live streams
   (§7.8, §7.10).
@@ -564,7 +564,11 @@ The HMI's own sequence for VP 1 (slog at boot) also sets an input viewport
 deinterlacing before enabling. None of these are needed for a correct
 picture. Those devctls are available if a stream needs them (§7.3 table).
 The phone's *Capture mode* drop-down picks the deinterlacing for a stream
-(`H264_CONFIG`'s `vcap_mode`); "Unchanged" leaves what the HMI last set.
+(`H264_CONFIG`'s `vcap_mode`); "Unchanged" leaves what the HMI last set
+(`WEAVE`, from boot and every camera session). On the phone's progressive
+picture **`WEAVE`, `ODD ONLY` and Unchanged give sharp, still text; `BOB`
+makes text flicker up and down** [confirmed]: it line-doubles each field in
+turn, and the two fields sit one line apart. `BOB` is of no use here.
 
 **Conclusions**
 
@@ -875,8 +879,7 @@ and a stream at 30 fps cuts only 31–58 ms (§7.12).
 **Open questions:**
 
 - **Robustness:** a session of 10+ minutes; the HMI starting its own
-  media or video (MMI3GMedia owns the video lock); reverse gear (the
-  camera is VCAP 0 input 0); unplugging mid-stream; a graph restart.
+  media or video (MMI3GMedia owns the video lock); unplugging mid-stream; a graph restart.
 
 ### 7.11 The MMI side: shared stream code and gap fill
 
@@ -935,9 +938,18 @@ arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
   (`H264.pictureSize`: as wide as the MMI allows, the screen's 5:3).
   Baseline 3.0, CBR where offered, an IDR every 10 s at most (they are the
   big frames; the MMI asks for one when it needs it). The **Max fps
-  slider** (1–25) sets the encoder's rate: `KEY_MAX_FPS_TO_ENCODER` caps
-  it and `KEY_REPEAT_PREVIOUS_FRAME_AFTER` (1/fps) keeps it up on a still
-  screen. The `H264_CONFIG` always says 25 fps, the MMI's clock: timing
+  slider** (1–25) sets the rate. Through the GPU step (§7.13) frames are
+  drawn on a fixed clock (`FrameClock.kt`): exactly one per 1/fps, a still
+  screen drawn again, the tick's time as the frame's. Without it (direct
+  path) `KEY_MAX_FPS_TO_ENCODER` caps the rate and
+  `KEY_REPEAT_PREVIOUS_FRAME_AFTER` (1/fps) keeps it up on a still screen;
+  the two together let ~26 fps through on a Redmi Note 8 Pro, and every
+  frame over the MMI's 25 a second stays in its stream as lag (+~40 ms a
+  second: 0.5 s → 3.3 s in 3 minutes) [confirmed]. The MMI caps that
+  (`live_stream.h`, clock cap): a stream more than 500 ms ahead of its frame
+  clock drops what comes until it is on time again, then goes on from an
+  IDR it asks for; the picture jumps to the present once. The
+  `H264_CONFIG` always says 25 fps, the MMI's clock: timing
   the stream at the slider's rate would make io-media's ~9-frame queue
   cost 9/fps seconds (1.8 s at 5 fps), while at 25 the MMI's skip frames
   make up the difference (hello9 `slow`). The capture path into the
@@ -949,14 +961,14 @@ arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
   it (×2 or ×1.5 the frame, 16 KB steps, at most the MMI's 256 KB) with a
   new config - the MMI restarts its stream, ~1-2 s black, once. In-band
   SPS/PPS that differ from the codec config's become the config.
-- **MMI** (`hwvideo.cpp`): keeps 8 MB of frames (16-128). Because the
-  rear camera shares VCAP 0 and an app can't tell whether it is on
-  (docs/rear-camera.md §9, §11), `/dev/videoctrl` is touched only when
-  the user starts or stops a stream: restarts (new config, stream full)
+- **MMI** (`hwvideo.cpp`): keeps 8 MB of frames (16-128). The rear camera shares VCAP 0, so while it is up (known from
+  dev-videoctrl's slog lines, docs/rear-camera.md §9.1) the app leaves VP1
+  alone, and it retakes the screen after the camera ends. Otherwise
+  `/dev/videoctrl` is touched only when the user starts or stops a stream:
+  restarts (new config, stream full)
   keep the picture and swap only the graph; an io-media ERROR ends the
   stream without touching VCAP and sends the phone back to pictures
-  (`REFUSED`). Starting or stopping H.264 while reversing still hides the
-  camera until its next session.
+  (`REFUSED`).
 - **Desk:** `make aoa-host` speaks H.264 like the MMI (limits, config,
   the same frame checks and statuses) and writes
   `build/aoa-host/stream.h264`.
@@ -978,19 +990,26 @@ the slider's rate on this phone, and the robustness list (§7.10).
 ### 7.13 Phone H.264 on the car; text sharpness
 
 **On the car [confirmed]:** the phone's H.264 plays on the MMI, and works
-well in use: 720×432 Baseline, POC type 0, sharp text, rotation follows the
-phone.
+well in use: 720×432 Baseline, POC type 0, sharp text.
+- **Start:** after an `H264_CONFIG` the phone sends nothing until the MMI's
+  `PLAYING`, then starts at an IDR: the first IDR is in 30–60 ms after
+  `PLAYING`, with nothing refused. Frames sent before `PLAYING` would be
+  refused (`the stream is starting`) and cost USB and acks for nothing.
 
-- **Frame rate:** 22–25 fps of real frames on a moving screen. A still
-  screen sends fewer (8.5–13.5 a second), and skip frames fill up to 25.
-- **Lag:** ~500 ms (300–530 ms across streams), but ~1.1 s on the first
-  stream of a session, falling to ~835 ms where that stream lasts; the graph
-  starts ~1 s after the first frames there [inferred cause].
+- **Frame rate:** through the GPU step exactly the Max fps slider's rate
+  (13.0, 15.0, 25.0 a second, steady for minutes); skip frames fill up to 25.
+- **Lag (MMI side):** medians 300–355 ms on every stream, the first one of a
+  session included, and flat over a 3.5-minute stream at 15 fps and a
+  7.5-minute session (25 fps only for ~40 s); the clock cap never fires. This `lag` starts when a frame reaches
+  the MMI: the phone's capture, encoder, queue (up to 12 frames in flight
+  plus 25 queued, ~1.5 s at 25 fps) and USB are not in it, so lag that grows
+  over a long session would be on the phone side and needs the Latency clock
+  (§7.12) to see.
 - **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
   160 KB, against ~45 % for JPEG).
 
 **Restarts cost a short break in the picture.** An `H264_CONFIG` with other
-contents restarts the graph. Keeping them rare **[built, not yet on the car]**:
+contents restarts the graph. Keeping them rare [confirmed]:
 
 - IDRs go over 64 KB, so the phone grows the frame size to 128–160 KB. The
   size stays when its encoder restarts, so a later big IDR causes no restart.
@@ -1012,17 +1031,23 @@ screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
 frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
 **k× capture + GPU box filter, 4 Mbit/s default:** text is sharp on the car.
-The *Sharp H.264* switch alone makes little visible difference, so the higher
-rate may matter as much as the filter:
+Neither the *Sharp H.264* switch alone nor the rate (2.5 to 8 Mbit/s) makes a
+visible difference. The higher rates are applied (at 6–8 Mbit/s IDRs pass
+64 KB and the frame size grows to 144 KB), but a phone UI at 720×432 is
+mostly still, and its P-frames need a fraction of 2.5 Mbit/s whatever the
+target, so the extra bits go nowhere; the encoder is not what limits the
+picture. What would show is fast motion (map scrolling, video). The cost of a
+high rate: bigger IDRs, frames padded to 144 KB (more MMI CPU) and a stream
+declared for 19 instead of 41 minutes. The phone's status line shows the
+real rate (`N of M kbit/s`).
 
 - `GlScaler.kt` / `GlBox.kt`: the virtual display renders at the screen's
   shape into a SurfaceTexture, sized so the part kept is k× the picture
   (k = the largest ≤ 4 that stays within the screen: ×3 landscape, ×4
   portrait). A GLES2 pass box-filters it k:1 into the
-  encoder's input surface (EGL_RECORDABLE_ANDROID, the capture's
-  timestamps): even k with (k/2)² bilinear taps at 2×2 corners, odd k
-  with k² nearest taps, highp coordinates. The encoder's rate limit and
-  repeat-previous-frame are unchanged. GL setup failing (or drawing
+  encoder's input surface (EGL_RECORDABLE_ANDROID) on the frame clock
+  (§7.12): even k with (k/2)² bilinear taps at 2×2 corners, odd k
+  with k² nearest taps, highp coordinates. GL setup failing (or drawing
   failing later) falls back to the direct path for the rest of the
   session. Shaders checked with glslang; `GlBoxTest` covers the taps.
 - Switch **Sharp H.264** (default on, off = k 1) for an A/B; drop-down
@@ -1030,7 +1055,15 @@ rate may matter as much as the filter:
   encoder like the fps slider; the switch doesn't. The status line shows
   `(x3)` or `(direct)` and the rate.
 
-**The navigation bar stays off the MMI [built, not yet on the car]**
+**H.264 is landscape only [built, not yet on the car]:** a portrait screen
+fills only a narrow strip of the MMI (table below) with unreadable text. While
+the phone is portrait the GPU step draws a "Turn the phone to landscape" card
+(`Notice.kt`) into the same stream instead, so the MMI doesn't restart, and
+the screen comes back on turning the phone. The direct path can't draw it:
+its picture stops (the MMI holds the last frame). JPEG still follows the
+rotation.
+
+**The navigation bar stays off the MMI [confirmed]**
 (`ScreenCrop.kt`, checkbox *Hide navigation buttons*, default on, Android 11+):
 the bar's edge comes from `WindowMetrics` (it follows the rotation), and only
 the rest of the capture reaches the picture, in both H.264 and JPEG. A rotation
@@ -1050,7 +1083,6 @@ game loses the same strip.
 
 **Open questions:**
 
-- IDR sizes at the higher rates (frames over 256 KB can't be sent at all)
-  and the MMI's `h264:` lag at those rates.
+- Whether lag grows on the phone side over long sessions (Latency clock).
 - Whether the video displayable can be shown 1:1 (720×432 centred, no
   VCAP resample) instead of scaled to 800×480.

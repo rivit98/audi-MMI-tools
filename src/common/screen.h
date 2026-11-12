@@ -33,6 +33,15 @@ void screen_set_partial(int on);
  * timer. */
 void screen_set_reshow(unsigned ms);
 
+/* Show our displayable again now (after the rear camera: the HMI shows its
+ * own list when the camera ends and the layer manager won't say so). */
+void screen_show_again(void);
+/* The camera started as we showed again: its displayables back on screen. */
+void screen_give_back_to_camera(void);
+/* screen_close() normally shows {40,16,19}; for the next close, don't: the
+ * rear camera is on screen and must stay. */
+void screen_no_show_on_close(void);
+
 /* What the last screen_present() did. */
 struct screen_stats {
 	unsigned copy_us;   /* compare + copy into the VFB */

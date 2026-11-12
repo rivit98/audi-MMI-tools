@@ -65,7 +65,7 @@ const char *sd_card_path(void)
 
 void out_path(char *buf, size_t n, const char *name)
 {
-	snprintf(buf, n, "%s/hello6/%s", sd_path, name);
+	snprintf(buf, n, "%s/hello6/%s", var_dir(sd_path), name);
 }
 
 void summary_add(const char *fmt, ...)
@@ -195,9 +195,9 @@ int main(int argc, char *argv[])
 	else
 		snprintf(bin_dir, sizeof(bin_dir), ".");
 
-	snprintf(path, sizeof(path), "%s/hello6", sd_path);
+	snprintf(path, sizeof(path), "%s/hello6", var_dir(sd_path));
 	mkdir(path, 0777);
-	snprintf(path, sizeof(path), "%s/hello6.log", sd_path);
+	snprintf(path, sizeof(path), "%s/hello6.log", var_dir(sd_path));
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello6: cannot open %s, logging to stdout only\n", path);
 	log_msg("hello6 start, pid=%d, phases=%s", getpid(), phases);

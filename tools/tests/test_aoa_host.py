@@ -141,3 +141,34 @@ def test_an_ack_counts_one_picture(status, counts):
     # proto.h VIDEO_ACKS: shown u16, bad u16, dropped u16
     shown, bad, dropped = counts
     assert aoa_host.ack_frame(status) == bytes([0x0D, 6, 0, shown, 0, bad, 0, dropped, 0])
+
+
+def peer_sees(data):
+    dec, peer = aoa_host.Decoder(), aoa_host.Peer()
+    frames = dec.feed(data)
+    return peer.foreign(dec.oversized, frames)
+
+
+def test_android_auto_on_the_accessory_is_foreign():
+    # an encrypted single-frame message on AA's control channel: 00 0b 00 + ...
+    assert peer_sees(bytes([0x00, 0x0B, 0x00]) + bytes(11))
+
+
+def test_an_oversized_first_frame_is_foreign():
+    assert peer_sees(bytes([0x17, 0x11, 0x17]) + bytes(100))
+
+
+def test_the_phone_apps_hello_is_ours_and_stays_so():
+    dec, peer = aoa_host.Decoder(), aoa_host.Peer()
+    assert not peer.foreign(0, dec.feed(aoa_host.frame(aoa_host.HELLO, b"phone")))
+    assert not peer.foreign(1, [(0, b"")])
+
+
+def test_a_stream_joined_midway_is_ours():
+    assert not peer_sees(aoa_host.frame(aoa_host.VIDEO_DATA, b"\1\0" + bytes(100)))
+
+
+def test_no_data_yet_decides_nothing():
+    peer = aoa_host.Peer()
+    assert not peer.foreign(0, [])
+    assert peer.foreign(0, [(0, b"")])

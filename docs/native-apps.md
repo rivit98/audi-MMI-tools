@@ -27,7 +27,7 @@ make sd SD_APPS="hello7"          # build + lay out an SD card in build/sd/
 ```
 
 The card shows a start screen, then runs the apps one after another, each
-followed by its result screen. Logs come back in `var/` on the card. If the screen
+followed by its result screen. Everything the run writes comes back in `var/` on the card. If the screen
 freezes, reboot the MMI: hold **MENU + rotary knob + top-right soft key**.
 
 ## 2. The platform
@@ -223,7 +223,12 @@ planning. A FAIL on the car is then the car, not the code.
   `WARN` (exit 0 with `FAIL` lines), `FAIL`, `CRASH` (signal = exit −
   128), `TIMEOUT`, `MISSING`.
 
-Apps get the card path as `argv[1]` and write their own logs there.
+Apps get the card path as `argv[1]`: inputs (`clips/`, `beep.wav`, `aa/`)
+are read from there, and everything they write goes to `<card>/var/`
+(`var_dir()` in `src/common/log.c`): logs, screenshots, recordings, their
+`hello6/` / `hello9/` folders. `run.sh` runs them with `var/` as the
+working directory, so files the unit's tools drop there (e.g.
+`testapp-cmdline.history`) land in `var/` too.
 `sd/apps.conf` holds each app's timeout, arguments and title; the start
 and result screens last `PRE_S`/`POST_S` (Makefile). Screen rendering time
 counts towards them, and if pngondemand or showScreen fails, `run.sh`

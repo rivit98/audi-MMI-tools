@@ -43,9 +43,9 @@ struct Pic {
 	unsigned latency_us = 0;  // VIDEO_START in -> on screen
 };
 
-// Opens <sd>/audi_stream_perf.csv, starts the writer. Logs the clock's
-// resolution.
-void init(const char *sd_path);
+// Opens <out_dir>/audi_stream_perf.csv (out_dir = <sd>/var), starts the
+// writer. Logs the clock's resolution.
+void init(const char *out_dir);
 // Writes out what is left and ends the writer; bounded by quit.c's hard alarm.
 void shutdown();
 // Any thread; never blocks on the card.

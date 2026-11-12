@@ -164,7 +164,7 @@ std::vector<unsigned> knobs_since(unsigned t0)
 
 std::string out_path(const char *name)
 {
-	return std::string(sd_path) + "/hello9/" + name;
+	return std::string(var_dir(sd_path)) + "/hello9/" + name;
 }
 
 std::string clip_path(const char *clip)
@@ -647,7 +647,7 @@ int main(int argc, char *argv[])
 		std::snprintf(bin_dir, sizeof(bin_dir), ".");
 
 	mkdir(out_path("").c_str(), 0777);
-	std::string logpath = std::string(sd_path) + "/hello9.log";
+	std::string logpath = std::string(var_dir(sd_path)) + "/hello9.log";
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello9: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello9 start, pid=%d%s%s", (int)getpid(), only ? ", only: " : "", only ? only : "");

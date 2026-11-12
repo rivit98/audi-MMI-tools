@@ -1,6 +1,6 @@
 /*
  * hello.c - first native binary for the MMI 3G+: write "hello world" to a
- * file on the SD card.
+ * file on the SD card (var/hello.txt, where all the apps' output goes).
  *
  * run.sh passes the SD card mount point as argv[1]. If it is missing we
  * probe the usual MMI mount points (slot 1/2, partition t12/t11).
@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static const char *const sd_mounts[] = {
@@ -35,7 +36,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "hello: no writable SD card found\n");
 		return 1;
 	}
-	snprintf(path, sizeof(path), "%s/hello.txt", sd);
+	snprintf(path, sizeof(path), "%s/var", sd);
+	mkdir(path, 0777);
+	snprintf(path, sizeof(path), "%s/var/hello.txt", sd);
 
 	f = fopen(path, "w");
 	if (f == NULL) {

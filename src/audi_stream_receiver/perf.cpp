@@ -266,14 +266,14 @@ void writer()
 
 } // namespace
 
-void init(const char *sd_path)
+void init(const char *out_dir)
 {
 	struct timespec res;
 	char path[256];
 
 	if (clock_getres(CLOCK_MONOTONIC, &res) == 0)
 		log_msg("perf: clock resolution %ld us", res.tv_nsec / 1000 + res.tv_sec * 1000000);
-	std::snprintf(path, sizeof(path), "%s/audi_stream_perf.csv", sd_path);
+	std::snprintf(path, sizeof(path), "%s/audi_stream_perf.csv", out_dir);
 	csv = fopen(path, "w");
 	if (csv == nullptr) {
 		log_msg("perf: cannot open %s: %s (summaries only)", path, strerror(errno));

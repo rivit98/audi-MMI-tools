@@ -3,8 +3,8 @@
 // std::condition_variable's timed waits end up on CLOCK_REALTIME here (QNX 6.3
 // has no pthread_cond_clockwait), and the unit's wall clock starts at 1970 and
 // jumps when something sets it: a wait across a jump backwards would not end.
-#ifndef AUDI_STREAM_MONO_COND_H
-#define AUDI_STREAM_MONO_COND_H
+#ifndef COMMON_MONO_COND_H
+#define COMMON_MONO_COND_H
 
 #include <cerrno>
 #include <mutex>

@@ -11,7 +11,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
 - **Run:** `audi_stream_receiver <sd_path>`. It runs until the SD card is pulled or
   it gets SIGTERM/INT/HUP, so it is always the last app of a run.
-- **Output:** `audi_stream_receiver.log` on the card (every USBDI result, state
+- **Output:** `audi_stream_receiver.log` in `var/` on the card (every USBDI result, state
   change, frame and picture; a `cpu:` line every 10 s with the app's own
   and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake or a removal also saves
   the system log to `var/usb_slog_<n>.txt`. The previous run's files are
@@ -180,7 +180,10 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   thread: the CS-MP4 header from the phone's SPS/PPS, frames padded to the
   config's size (in 4 KB steps), a resource manager at
   `/dev/audi_stream/live.mp4`, the io-media graph once the first IDR is
-  in, the picture 1 s later. Gaps are filled with skip frames. A new
+  in, the picture 1 s later. Gaps are filled with skip frames. A stream
+  more than 500 ms ahead of its frame clock (a phone faster than 25 fps, a
+  burst after a stall) drops frames until it is on time, then goes on from
+  an IDR (`live_stream.h`, clock cap): the lag can't grow. A new
   config restarts the stream; the same config again changes nothing. The
   stream ends on `VIDEO_STOP`, a JPEG picture, unplugging, or when
   its declared frames run out (the 4 GB limit: ~1.6 h at 28 KB frames,
@@ -188,21 +191,18 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   8 MB of frames are kept for io-media (16-128 frames).
 - **The rear camera shares VCAP 0** (docs/rear-camera.md §9): an app that
   sets VP1, or disables it, while the camera is up hides the camera from
-  the driver, and nothing tells an app whether it is up. So
-  `/dev/videoctrl` is touched only when the user starts or stops
-  streaming. A restart (new config, stream full) keeps the picture and
+  the driver. `common/camera.cpp` follows the camera from dev-videoctrl's
+  slog lines. While it is up the app writes nothing to VP1 and shows nothing,
+  and the stream runs on unseen. A second after it ends the picture comes
+  back (the CPU-drawn screen too), and if the camera starts just then it gets
+  its path back. Otherwise `/dev/videoctrl` is touched only when the user
+  starts or stops streaming. A restart (new config, stream full) keeps the picture and
   VCAP as they are and swaps only the io-media graph and the server.
   **When io-media reports an error** (perhaps the HMI took the video for
   its media or the camera), the stream ends without touching
   `/dev/videoctrl`, and the phone is told `REFUSED` (pictures for the rest
   of the connection). If no new stream follows a restart within 5 s, the
   CPU-drawn screen comes back.
-- **Still a risk:** starting H.264 *while reversing* switches VCAP 0 to
-  the DSP (the camera picture goes until the next camera session), and
-  stopping it while reversing disables VCAP 0. Don't start or stop
-  streaming in reverse. Reopening the CPU-drawn screen shows displayables
-  {40, 16, 19}; whether that covers the camera's (0x11) is a question for
-  every app, not only this one.
 - **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
   MediaCodec, Baseline 3.0, CBR at the *H.264 rate* drop-down (2.5, 4
   (default), 6 or 8 Mbit/s). With *Sharp H.264* (default on) the screen
@@ -231,7 +231,9 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   CPU-drawn screen (the video displayable replaces it) and opens it again
   afterwards.
 - **Log:** `h264:` lines: the config, the stream's start and end with its
-  totals, refused frames (the first 5), and every 10 s frames in, skips,
+  totals (`ahead of the clock`: frames the cap dropped, how often, the
+  furthest ahead), refused frames (the first 5), `over 500 ms ahead of the
+  frame clock` each time the cap starts, and every 10 s frames in, skips,
   io-media's reads and the lag.
 - **Tests:** on the build host, `make test` (header, padding, push / fill
   / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
@@ -304,8 +306,8 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
   `display frames` means a frozen picture; gaps between lines mean the CPU
   slept.
 
-**H.264.** Works well on the MMI: 720×432 Baseline, text sharp, rotation
-follows the phone, 22–25 fps on a moving screen (a still screen sends fewer
+**H.264.** Works well on the MMI: 720×432 Baseline, text sharp, landscape
+only (a portrait phone shows a "turn the phone to landscape" card), 22–25 fps on a moving screen (a still screen sends fewer
 real frames, and skip frames fill up to 25). Lag is ~500 ms, ~1.1 s on the
 first stream of a session. MMI CPU ~30 % (receiver 6–9 %, up to 15 % with big
 frames, against ~45 % for JPEG). Every rotation or frame-size growth restarts

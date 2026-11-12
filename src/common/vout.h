@@ -14,7 +14,8 @@ const char *mode_name(Mode m);
 
 // Set the mode, if it isn't that already. Keep after another mode goes back
 // to WEAVE, the HMI's value for the rear camera: the HMI trusts its cache and
-// may not send it again (docs/rear-camera.md).
+// may not send it again (docs/rear-camera.md). Not while camera::active():
+// the camera has just set WEAVE itself.
 int set_mode(Mode m);
 
 // Register + show the video displayable (cid 41, flags 0x101), set the mode
@@ -25,8 +26,18 @@ int show(Mode mode = Mode::Keep);
 // boot), mode as in set_mode(Keep), displayable gone. restore_vcap false:
 // source and capture are left as they are - for when something else (the
 // HMI's rear camera, docs/rear-camera.md §9) may own VCAP 0 by now: writing
-// ENABLE 0 then would hide the camera. The mode still goes back.
+// ENABLE 0 then would hide the camera, so camera::active() has the same
+// effect. The mode still goes back.
 void hide(bool restore_vcap = true);
+// The rear camera is gone and left its path behind (capture off, VCAP 0 on
+// input 0, the HMI's displayables shown): our displayable is still registered,
+// so show it, set the mode and switch capture back on. -1 if the camera came
+// back before capture was touched.
+int retake(Mode mode);
+// show() once more, for a late show of the HMI.
+void show_again();
+// The camera started as we retook: its path back, and its displayables.
+void give_back();
 // Close /dev/videoctrl (end of the run).
 void close_all();
 

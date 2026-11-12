@@ -6,7 +6,7 @@ appears on screen.
 
 - **Run:** `hello <sd_path>`. If the path is missing, it tries the usual SD
   mount points.
-- **Output:** `hello.txt` on the card.
+- **Output:** `var/hello.txt` on the card.
 
 ## On the car
 

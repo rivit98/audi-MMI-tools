@@ -259,6 +259,21 @@ video is requested") calls `requestVideoFocus(…, 0)` → `FUN_0813a428` →
   SET_SOURCE is sent**, so VCAP 0 stays on input 0 and the ADV7180 stays
   on camera A.
 
+**Order at the end of a session** [confirmed: `FUN_08214030`, then
+`FUN_08213f68` "Part 3 … VideoRoutingCheck"]: the video connection goes first
+(`vcap disabled` in slog), DispMgmt waits for the video manager ("Still
+waiting for videomanagement"), and only then calls `lmgrShowDisplayables` with
+the new context. So the HMI's show comes *after* the slog line.
+
+**Nothing is resumed.** Java ends the popup with a plain context switch
+("ParkingProcessor.cancelPopup(): set display context --> CONTEXT_HMI") [confirmed:
+lsd.jxe strings]. DispMgmt has no stack of earlier contexts, and
+CVideoManager's queue of delayed connections (`FUN_0813a5ac`, resumed by
+`FUN_0813a308`) needs the priority flag 0x088a7650, which is 0 in the image
+[confirmed]; without it, the mode is "First Wins" (flag 0x088a7644 = 1). The
+HMI's own video comes back only because the HMI's next context contains a video
+displayable, which requests focus and sends the whole path again (§4.1).
+
 ---
 
 ## 5. Geometry: why there are no black bars
@@ -423,11 +438,15 @@ hello9, live streaming) uses input 1. These HMI facts matter
   source or enable while the camera is up does exactly that. The next
   camera session repairs it, because the HMI's stop path clears its cache
   and the next start sends SET_SOURCE again.
+- **The camera takes an app's picture, and nothing gives it back.** The
+  camera's show replaces the app's displayables; at the end of the session the
+  HMI shows its own list, and VCAP 0 is left disabled on input 0 (§4.3). An app
+  has to retake the screen itself (§9.1).
 - **Rules for apps.**
   - Don't touch `/dev/videoctrl` VP0 at all: it is camera-only in
     practice.
-  - Before switching VP1, make sure the camera is not active (see the
-    first open question below).
+  - Before switching VP1 or showing anything, make sure the camera is not
+    active (§9.1).
   - On exit, **restore VP1 source 0** as well as ENABLE 0. Our teardown
     already does this, and it leaves the HMI's assumption (VCAP 0 on
     input 0) true.
@@ -441,6 +460,63 @@ hello9, live streaming) uses input 1. These HMI facts matter
   The UPDATE takes about 130 ms, because the driver runs a fixed ADI
   input-switch script with sleeps [confirmed: dev-videoctrl]. Poll
   `GET_STATUS {0, 1}`: `0x08000200` = no signal, bit 0x10 = locked.
+
+### 9.1 Knowing the camera is up, and getting the screen back
+
+**What can be read.** Nothing answers "is the camera up" directly:
+
+| Source | Why not |
+|---|---|
+| layermanagerV2 devctls (`CMsgHandler::devctl`, 0x08045838) | setters only: register, show, viewports, opacity, version, dimension. No "what is shown" and no notification [confirmed] |
+| dev-videoctrl | every devctl stores a value for the next UPDATE; only `GET_STATUS` reads, and that is the signal, not who owns the path [confirmed] |
+| `GET_STATUS` on VP0 | ADV7180 lock, whether or not the HMI shows it; each call also logs |
+| `/dev/ndr` `sensor/ReverseGear` | the gear, but the session is the ECU's and outlives it by its follow-up time (§3.1) |
+| **dev-videoctrl's lines in `/dev/slog`** | what was really written, in order, with `-v` on every boot. Used |
+
+**The signal** (`src/common/camera.cpp`, `camera_log.h`): a thread keeps
+`/dev/slog` open with `O_NONBLOCK` and reads it every 250 ms. Reading doesn't
+disturb anything: each open has its own position in slogger's ring, and the
+first read starts at the oldest event, so an app started mid-session sees the
+session. The cost is small: each read returns only the events since the last
+one (a few lines a second, usually none: `EAGAIN`), so it is 4 message passes
+a second and a short text scan, far below the `cpu:` lines' 1 % step. A
+blocking read would wake only on new lines, but needs a way to unblock the
+thread on exit; at 250 ms that saves nothing measurable. The 250 ms adds at
+most that much to the 1 s wait below.
+
+- **Up:** `VP0: source changed to N`. Only the HMI writes VP0, and the stop
+  path clears its cache, so it sends this on every session (§10).
+- **Off:** `VP1: vcap disabled` while up. An app that keeps off VP1 during the
+  session can't cause this line itself.
+
+Over the unit's slogs, this gives sessions of 8–97 s with every start paired
+with an end [confirmed]. Limits: other HMI paths through the
+ADV7180 (TV, AUX) count as "up" too, which is the right answer for an app; the
+HMI's own DSP video (`VP1: source changed to 1`, no VP0) does not, and can't be
+told from an app's writes.
+
+**Getting the screen back** (`camera::Takeover`):
+
+1. While up: write nothing to VP1, show nothing. `vout` and the CPU screen
+   skip those calls. The DSP keeps decoding, since its output port doesn't care
+   whether VCAP 0 reads it.
+2. After the off line, wait 1 s. A show before the HMI's show (§4.3) would be
+   replaced.
+3. Do what the HMI does on the way back to a video context (§4.1): show the
+   displayable, then VP1 SET_SOURCE, ENABLE and UPDATE. The camera forced
+   `WEAVE`, so set another capture mode again. The viewport and input dimension
+   are the values the HMI sets at boot too, so they need nothing.
+4. 2 s later show once more, for a late show of the HMI: nothing reports one.
+5. If the camera shows up within 2 s of step 3, either writer may have gone
+   first. Put the camera's path back: VP1 source 0, ENABLE 1, WEAVE, UPDATE, show
+   {0x10, 0x11}. It is harmless if the HMI was last.
+
+Steps 1–4 work on the car [confirmed]: reverse while a hardware H.264 stream
+plays shows the camera, and the stream comes back ~1 s after it, twice in a
+row (R-D-R-D, the second camera session under 1 s), with the stream's own
+capture mode (`BOB`) set again. The phone keeps streaming meanwhile and the DSP
+keeps decoding. Step 5 (a camera within 2 s of a retake) is still [inferred].
+A CPU-drawn screen does the same without the VP1 writes.
 
 ---
 
@@ -474,9 +550,6 @@ scopes (`project_presctrl_onoff_COnOffPresCtrl_*`).
 
 ## 11. Open questions
 
-- Is the camera active right now? An app needs a way to read this before
-  touching VP1. Candidates: GET_STATUS on VP0 (only shows signal, not
-  intent), the slog lines, or a DSI/BAP attribute.
 - What the 0x100 bit in the ADV7180 status means (§7).
 - Whether Java ever positions displayable 0x11 (`requestSetPosition`), for
   example in a split OPS/RVC view.

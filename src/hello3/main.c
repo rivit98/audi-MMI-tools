@@ -61,6 +61,7 @@ static const unsigned fill_layers[] = { 1, 2, 4, 8, 16, 32 };
 #define NFILL   (sizeof(fill_layers) / sizeof(fill_layers[0]))
 
 static const char *sd_path;
+static const char *out_dir;    /* <sd_path>/var: everything written */
 static GLuint noise_tex, plasma_tex;
 static unsigned rng_state;
 
@@ -271,7 +272,7 @@ static void screenshot(const char *scene)
 	char cmd[320];
 	int rc;
 
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello3_%s.png", sd_path, scene);
+	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello3_%s.png", out_dir, scene);
 	rc = lm_text_command(cmd);
 	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
 }
@@ -418,10 +419,11 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	out_dir = var_dir(sd_path);
 	if (argc > 2 && atoi(argv[2]) > 0)
 		scene_s = (unsigned)atoi(argv[2]);
 
-	snprintf(path, sizeof(path), "%s/hello3.log", sd_path);
+	snprintf(path, sizeof(path), "%s/hello3.log", out_dir);
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello3: cannot open %s, logging to stdout only\n", path);
 	rng_state = (0x9e3779b9u ^ ((unsigned)getpid() << 8) ^ log_ms()) | 1;

@@ -114,6 +114,7 @@ static const GLfloat black[4] = { 0.04f, 0.04f, 0.06f, 1.0f };
 static const GLfloat grey[4]  = { 0.10f, 0.10f, 0.12f, 1.0f };
 
 static const char *sd_path;
+static const char *out_dir;    /* <sd_path>/var: everything written */
 static struct mesh cube, torus, ground;
 static GLuint checker_tex, crate_tex;
 static unsigned char probe_state[PROBE_MAX];
@@ -467,7 +468,7 @@ static void screenshot(const char *scene)
 	char cmd[320];
 	int rc;
 
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello4_%s.png", sd_path, scene);
+	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello4_%s.png", out_dir, scene);
 	rc = lm_text_command(cmd);
 	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
 }
@@ -830,8 +831,9 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	out_dir = var_dir(sd_path);
 
-	snprintf(path, sizeof(path), "%s/hello4.log", sd_path);
+	snprintf(path, sizeof(path), "%s/hello4.log", out_dir);
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello4: cannot open %s, logging to stdout only\n", path);
 	log_msg("hello4 start, pid=%d", getpid());

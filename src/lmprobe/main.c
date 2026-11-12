@@ -36,6 +36,7 @@
 #define WATCHDOG_SLACK 30
 
 static const char *sd_path;
+static const char *out_dir;    /* <sd_path>/var: everything written */
 
 static void lm_connect(void)
 {
@@ -94,10 +95,10 @@ static void screenshots(void)
 	char cmd[300];
 	int rc;
 
-	snprintf(cmd, sizeof(cmd), "d-shot %d %s/lmprobe_dshot.png", CID, sd_path);
+	snprintf(cmd, sizeof(cmd), "d-shot %d %s/lmprobe_dshot.png", CID, out_dir);
 	rc = lm_text_command(cmd);
 	log_msg("  layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/lmprobe_sshot.png", sd_path);
+	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/lmprobe_sshot.png", out_dir);
 	rc = lm_text_command(cmd);
 	log_msg("  layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
 }
@@ -181,10 +182,11 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	out_dir = var_dir(sd_path);
 	if (argc > 2 && atoi(argv[2]) > 0)
 		seconds = (unsigned)atoi(argv[2]);
 
-	snprintf(path, sizeof(path), "%s/lmprobe.log", sd_path);
+	snprintf(path, sizeof(path), "%s/lmprobe.log", out_dir);
 	if (log_open(path) != 0)
 		fprintf(stderr, "lmprobe: cannot open %s, logging to stdout only\n", path);
 	log_msg("lmprobe start, pid=%d, show=%u s", getpid(), seconds);

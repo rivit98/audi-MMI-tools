@@ -22,6 +22,15 @@
 // stream's rate, and a pause is filled at the stream's rate. Skips never
 // put the stream ahead of the clock, so they add no latency.
 //
+// Clock cap (Config::shed_ahead_ms, 0 = off): io-media plays exactly fps,
+// so a sender faster than that (26 fps against 25), or a burst after a
+// stall, puts the stream ahead of its frame clock and every frame after it
+// plays that much later - the lag only grows. When the stream gets more
+// than shed_ahead_ms ahead, the frames pushed are dropped (Push::Shed)
+// until it is back on the clock, then an IDR is wanted (sync_wanted()) and
+// the stream goes on from it. On screen: the picture plays the backlog,
+// then jumps to the present.
+//
 // Thread-safe: push() from the receiving thread, fill() and read() from the
 // server's.
 #ifndef COMMON_LIVE_STREAM_H
@@ -46,6 +55,8 @@ struct Config {
 	unsigned fill_after_ms = 0;      // nothing pushed for this long (0: one frame
 	                                 // period) and 2+ frames behind: fill
 	unsigned ring_frames = 128;      // frames kept for io-media to read (S each)
+	unsigned shed_ahead_ms = 0;      // more ahead of the frame clock: drop up to
+	                                 // it, then wait for an IDR (0: never)
 };
 
 enum class Push {
@@ -55,6 +66,7 @@ enum class Push {
 	Bad,              // dropped: no slice, unparsable, another PPS
 	ConfigChanged,    // dropped: in-band SPS/PPS differ: restart with them
 	Full,             // dropped: the declared frames are all used: restart
+	Shed,             // dropped: the stream is too far ahead of its clock
 	NotConfigured,
 };
 const char *push_name(Push p);
@@ -72,6 +84,9 @@ struct Stats {
 	uint32_t evicted_reads = 0; // reads of frames no longer kept (got filler)
 	uint32_t max_frame = 0;     // largest frame pushed (bytes, before padding)
 	uint32_t gaps = 0;          // times fill() started filling
+	uint32_t shed = 0;          // frames dropped ahead of the clock
+	uint32_t sheds = 0;         // times the stream got too far ahead
+	int64_t ahead_ms_max = 0;   // furthest ahead of the clock a frame was pushed
 };
 
 class Stream {
@@ -126,7 +141,7 @@ private:
 	uint64_t frames_ = 0;
 	bool started_ = false, need_idr_ = false, finished_ = false, sync_ = false;
 	uint64_t t0_ms_ = 0, last_push_ms_ = 0;
-	bool filling_ = false;
+	bool filling_ = false, shedding_ = false;
 	unsigned prev_ref_frame_num_ = 0, last_poc_lsb_ = 0;
 	std::vector<uint8_t> sample_, filler_;
 	Stats st_;

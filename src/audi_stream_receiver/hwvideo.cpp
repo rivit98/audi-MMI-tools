@@ -3,6 +3,8 @@
 // code hello9 runs on the car with a clip instead of the phone.
 #include "hwvideo.h"
 
+#include "camera.h"
+#include "camera_log.h"
 #include "config_gate.h"
 #include "hw_stream.h"
 #include "live_stream.h"
@@ -37,9 +39,13 @@ constexpr unsigned kWindowMs = 10000;   // an "h264:" summary line per window
 constexpr unsigned kSyncEveryMs = 500;  // at most one SYNC per this
 constexpr unsigned kLogRefusals = 5;    // refused frames logged one by one
 constexpr uint32_t kRingBytes = 8u << 20; // frames kept for io-media: 8 MB (>= 16 frames)
+// more ahead of the frame clock than this: frames dropped up to it, then an
+// IDR (live_stream.h, clock cap). A phone at 26 fps against the stream's 25
+// took the lag from 0.5 s to 3.3 s in 3 minutes; this keeps it under ~1 s.
+constexpr unsigned kShedAheadMs = 500;
 
 struct Window {
-	uint32_t real = 0, skips = 0, refused = 0;
+	uint32_t real = 0, skips = 0, refused = 0, sheds = 0;
 	unsigned reads = 0, waited = 0;
 	std::vector<int64_t> lags;
 };
@@ -64,12 +70,15 @@ unsigned graphs = 0;
 unsigned kept_since = 0;                // hw thread: screen kept for a stream that may follow
 bool video_held = false;                // hw thread: the picture left on for the next stream
 constexpr unsigned kKeepScreenMs = 5000;
+camera::Takeover takeover;              // hw thread: the rear camera took the picture
+vout::Mode picture_mode = vout::Mode::Keep; // hw thread: the mode of the newest stream
 
 // How a stream ends. /dev/videoctrl (VCAP 0) is shared with the HMI's rear
-// camera and nothing says whether the camera is on (docs/rear-camera.md §9,
-// §11): an app that sets VP1, or disables it, while the camera is up hides
-// the camera from the driver. So the picture is switched only when the
-// user starts / stops streaming - never by a restart, never after an error.
+// camera (docs/rear-camera.md §9): an app that sets VP1, or disables it, while
+// the camera is up hides the camera from the driver. So the picture is
+// switched only when the user starts / stops streaming and when the camera
+// has gone (follow_camera) - never by a restart, never after an error. vout
+// itself leaves VP1 alone while camera::active().
 enum class End {
 	Stop,        // the user's end (VIDEO_STOP, a picture, unplugged, app exit): picture off, VCAP restored
 	Restart,     // another stream follows at once: picture and VCAP stay for it
@@ -125,6 +134,34 @@ void forget_config()
 		gate.forget();
 }
 
+// hw thread: the HMI replaces our picture with the camera's and, when the camera
+// ends, with its own, and doesn't bring anything back. The stream runs on
+// meanwhile (the DSP doesn't care where its output goes), so the picture is
+// right as soon as it is back on screen.
+void follow_camera(bool have_picture)
+{
+	using Action = camera::Takeover::Action;
+	bool was_taken = takeover.taken();
+	Action a = takeover.tick(have_picture, camera::active(), camera::clear(), log_ms());
+	if (takeover.taken() && !was_taken)
+		log_msg("h264: the rear camera took the picture; the stream goes on");
+	switch (a) {
+	case Action::Retake:
+		log_msg("h264: the rear camera has gone: the picture comes back");
+		vout::retake(picture_mode);
+		break;
+	case Action::ShowAgain:
+		vout::show_again();
+		break;
+	case Action::GiveBack:
+		log_msg("h264: the rear camera started as the picture came back: the camera goes first");
+		vout::give_back();
+		break;
+	case Action::None:
+		break;
+	}
+}
+
 // hw thread: end the stream (if any) and log what it did.
 void teardown(const char *why, End how = End::Stop)
 {
@@ -150,10 +187,11 @@ void teardown(const char *why, End how = End::Stop)
 	StreamStats ss = h->server().stats();
 	const PlayStats &ps = h->player().stats();
 	log_msg("h264: stream ended (%s): %u frames in (%u IDR), %u skips in %u gaps, refused: %u "
-	        "too big, %u waiting for an IDR, %u bad, %u SPS/PPS changed; io-media: %u reads, %u "
+	        "too big, %u waiting for an IDR, %u bad, %u SPS/PPS changed, %u ahead of the clock "
+	        "(%u times, max %lld ms ahead); io-media: %u reads, %u "
 	        "waited (max %u ms), %u unblocked; %u TIME events, position %.1f s, %u errors%s%s",
 	        why, ls.real, ls.idr, ls.skips, ls.gaps, ls.too_big, ls.wait_idr, ls.bad,
-	        ls.config_changed, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked, ps.time_events,
+	        ls.config_changed, ls.shed, ls.sheds, (long long)ls.ahead_ms_max, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked, ps.time_events,
 	        ps.max_pos_ms < 0 ? 0.0 : ps.max_pos_ms / 1000.0, ps.error_events,
 	        ps.error_events ? ": " : "", ps.first_error.c_str());
 	if (how != End::Restart)
@@ -184,6 +222,7 @@ void setup(const std::vector<uint8_t> &payload)
 	o.cfg.declared = 0;                  // as many as fit: ~1.6 h at 28 KB x 25 fps
 	o.cfg.fill = true;
 	o.cfg.ring_frames = std::min<uint32_t>(128, std::max<uint32_t>(16, kRingBytes / o.cfg.sample_size));
+	o.cfg.shed_ahead_ms = kShedAheadMs;
 	o.path = kPath;
 	char g[48];
 	std::snprintf(g, sizeof(g), "audi_stream_%d_%u", (int)getpid(), ++graphs);
@@ -193,6 +232,7 @@ void setup(const std::vector<uint8_t> &payload)
 	            : c.vcap_mode == proto::kVcapWeave ? vout::Mode::Weave
 	            : c.vcap_mode == proto::kVcapOddOnly ? vout::Mode::OddOnly
 	            : vout::Mode::Keep;
+	picture_mode = o.vcap_mode;
 
 	h264::Sps sps;
 	std::string err = h264::parse_sps(o.cfg.sps.data(), o.cfg.sps.size(), sps);
@@ -308,6 +348,7 @@ void run()
 		}
 
 		HwStream *h = hw.get();          // only this thread changes hw
+		follow_camera(h != nullptr ? h->video_on() : video_held);
 		if (h == nullptr && is_active && log_ms() - kept_since > kKeepScreenMs) {
 			log_msg("h264: no new stream after %u s: the screen goes back", kKeepScreenMs / 1000);
 			release_held_video(true);
@@ -340,8 +381,15 @@ void run()
 				was_playing = true;
 				log_msg("h264: first IDR in, graph playing");
 			}
+			live::Stats now = h->stream().stats();
+			if (now.sheds != w.sheds) {
+				w.sheds = now.sheds;
+				log_msg("h264: over %u ms ahead of the frame clock (the phone sends faster than "
+				        "%u fps, or caught up after a stall): dropping frames until on time",
+				        kShedAheadMs, h->stream().config().fps);
+			}
 			if (h->stream().sync_wanted()) {
-				log_msg("h264: a reference frame was dropped: asking for an IDR");
+				log_msg("h264: frames were dropped: asking for an IDR");
 				status(proto::kH264Sync);
 			}
 			for (const std::string &n : h->server().take_notes())
@@ -428,7 +476,12 @@ proto::PicStatus frame(const uint8_t *data, unsigned size)
 			std::string why;
 			live::Push p = hw->push(data, size, &why);
 			ack = PicStatus::Shown;
-			if (p != live::Push::Ok) {
+			if (p == live::Push::Shed) {
+				// logged once per time by the hw thread, which also asks
+				// for the IDR when the stream is back on its clock
+				refused_total++;
+				ack = PicStatus::Dropped;
+			} else if (p != live::Push::Ok) {
 				refused_total++;
 				if (refused_logged++ < kLogRefusals)
 					note = std::string(live::push_name(p)) + (why.empty() ? "" : ", ") + why;

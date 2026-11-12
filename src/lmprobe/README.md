@@ -26,7 +26,7 @@ What it does, in order:
 - **Run:** `lmprobe <sd_path> [seconds]` (default 5). It isn't in the
   default run. Use `make sd SD_APPS="lmprobe ..."` and uncomment the
   `#lmprobe` line in `sd/apps.conf` (timeout 45 s).
-- **Output:** `lmprobe.log`, `lmprobe_dshot.png` (our VFB, written by the
+- **Output** (in `var/` on the card): `lmprobe.log`, `lmprobe_dshot.png` (our VFB, written by the
   layer manager) and `lmprobe_sshot.png` (the whole display).
 - **Exit code:** `0` if the bars were shown, `1` if setup failed (gf attach,
   register, `getVfb` or surface attach), `2` for bad usage. If the VFB has

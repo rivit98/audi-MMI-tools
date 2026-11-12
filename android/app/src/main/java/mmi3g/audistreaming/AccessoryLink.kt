@@ -225,6 +225,7 @@ class AccessoryLink(
         const val ACK_TIMEOUT_MS = 3000L
         const val MAX_IN_FLIGHT = 2
         const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked every ~0.2 s
-        val HELLO = "audi_streaming-android/1 ${Build.MANUFACTURER} ${Build.MODEL}"
+        /** Who this is, in the MMI's log: the build first, then the phone. */
+        val HELLO: String get() = "audi_streaming-android/1 build ${AppLog.version}, ${Build.MANUFACTURER} ${Build.MODEL}"
     }
 }

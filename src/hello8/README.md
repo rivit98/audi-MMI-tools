@@ -31,7 +31,7 @@ expectation that failed.
 - **Run:** `hello8 <sd_path> [seconds] [check,check,...]`. Results stay up
   for `seconds` (default 20). The last argument runs only the named
   checks, e.g. `"exceptions,map/set"`.
-- **Output:** `hello8.log`: the compiler, C++ standard and type sizes, then
+- **Output** (in `var/` on the card): `hello8.log`: the compiler, C++ standard and type sizes, then
   `check <name> ...` before each check and `PASS`/`FAIL` after it (time,
   notes, the failed expectation), and `RESULT` counts. A line after
   `hello8 exit` says the static destructors ran.

@@ -41,6 +41,7 @@ static int lm_is_open, registered, partial;
 static struct screen_stats stats;
 static unsigned reshow_ms, shown_at, reshows, reshow_fails;
 static int shown;              /* screen_open's show is done */
+static int no_show_on_close;
 
 static int show_cid_and_hmi(void)
 {
@@ -264,6 +265,25 @@ int screen_present(void)
 	return rc;
 }
 
+void screen_show_again(void)
+{
+	if (lm_is_open && registered)
+		show_logged();
+}
+
+void screen_give_back_to_camera(void)
+{
+	int cids[2] = { 0x10, 0x11 }; /* HMI, rear camera: docs/rear-camera.md 6 */
+
+	if (lm_is_open)
+		log_msg("  lm_show_displayables(0, {16,17}): rc=%d", lm_show_displayables(0, cids, 2));
+}
+
+void screen_no_show_on_close(void)
+{
+	no_show_on_close = 1;
+}
+
 void screen_close(void)
 {
 	int rc;
@@ -277,7 +297,11 @@ void screen_close(void)
 		        registered ? "" : " (was not registered)");
 		if (reshows != 0)
 			log_msg("  re-shows: %u, %u failed", reshows, reshow_fails);
-		show_logged();
+		if (no_show_on_close)
+			log_msg("  no show: the rear camera is up");
+		else
+			show_logged();
+		no_show_on_close = 0;
 		lm_close();
 		shown = 0;
 		reshows = reshow_fails = 0;

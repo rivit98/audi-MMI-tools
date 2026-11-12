@@ -29,6 +29,11 @@ process, because that one starts over whenever the USB bus changes. Acks go
 out before a frame reaches the window, so they say nothing about decoding: this
 shows when and why the phone stops sending, not the MMI's timing.
 
+A phone already in accessory mode that this run didn't switch may belong to
+another app (Android Auto after `make aa-host`), and so may one whose first
+data isn't this protocol: such an accessory is switched again with these
+strings and the USB port reset, which hands it to Audi streaming.
+
 Log lines carry the time of day, to line up with what you do on the phone. A pause
 in the frames of GAP_S or more gets its own lines, and so does how a stream ended.
 
@@ -37,6 +42,7 @@ build/aoa-host/) or `uv run tools/aoa_host.py [--save DIR]` (needs access to
 /dev/bus/usb). Stop adb first if it holds the phone. Test with `make aoa-host-test`.
 """
 
+import errno
 import fcntl
 import json
 import os
@@ -76,6 +82,9 @@ CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, M
 EXT = {FMT_JPEG: "jpg"}
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 GAP_S = 1.0
+PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, VIDEO_DETAILS, H264_CONFIG}
+RESWITCH_TRIES = 3
+SWITCHED_ENV = "AOA_HOST_SWITCHED"  # "1": the accessory is ours (survives the re-exec)
 PIPE_BYTES = 1024 * 1024
 
 
@@ -167,7 +176,7 @@ class Decoder:
 
     def __init__(self) -> None:
         """Start with an empty buffer."""
-        self.buf, self.skip = b"", 0
+        self.buf, self.skip, self.oversized = b"", 0, 0
 
     def feed(self, data: bytes) -> list[tuple[int, bytes]]:
         """Return the frames completed by data."""
@@ -184,12 +193,43 @@ class Decoder:
             ftype, n = struct.unpack_from("<BH", self.buf)
             if n > MAX_PAYLOAD:
                 log(f"  oversized frame ({n} bytes) skipped")
+                self.oversized += 1
                 self.buf, self.skip = self.buf[HDR:], n
                 continue
             if len(self.buf) < HDR + n:
                 return out
             out.append((ftype, self.buf[HDR:HDR + n]))
             self.buf = self.buf[HDR + n:]
+
+
+class Peer:
+    """Is the app on the other end Audi streaming? Its first data says."""
+
+    def __init__(self) -> None:
+        """Nothing heard yet."""
+        self.known = False
+
+    def foreign(self, oversized: int, frames: list[tuple[int, bytes]]) -> bool:
+        """True if data before any frame of this protocol isn't this protocol."""
+        if self.known:
+            return False
+        if oversized or any(ftype not in PHONE_TYPES for ftype, _ in frames):
+            return True
+        self.known = bool(frames)
+        return False
+
+
+def reswitch(acc) -> None:
+    """Hand an accessory another app holds to Audi streaming: our strings, then a port reset."""
+    why = try_switch(acc)
+    if why is not None:
+        log(f"  switching again failed ({why}); resetting the port anyway")
+    os.environ[SWITCHED_ENV] = "1"
+    try:
+        acc.reset()
+    except usb.core.USBError as e:
+        if e.errno != errno.ENOENT:  # ENOENT: the phone is re-enumerating already
+            log(f"  port reset: {e}")
 
 
 def find_accessory():
@@ -265,6 +305,12 @@ def wait_for_accessory():
     while True:
         restart_if_bus_changed()
         acc = find_accessory()
+        if acc is not None and os.environ.get(SWITCHED_ENV) != "1":
+            log("the phone was in accessory mode already, maybe for another app (make aa-host?): "
+                "switching it to Audi streaming")
+            reswitch(acc)
+            time.sleep(2)
+            continue
         if acc is not None:
             return acc
         for dev in usb.core.find(find_all=True):
@@ -274,6 +320,7 @@ def wait_for_accessory():
             attempt = handshakes.tried(key, now)
             why = try_switch(dev)
             if why is None:
+                os.environ[SWITCHED_ENV] = "1"
                 link_state("switching", "phone is switching to accessory mode")
                 break
             if attempt in (1, HANDSHAKE_TRIES):  # first and last: other USB devices refuse too
@@ -386,6 +433,8 @@ class H264:
             self.files += 1
             name = os.path.join(SAVE_DIR, "stream.h264" if self.files == 1 else f"stream{self.files}.h264")
             self.out = open(name, "wb")
+            # SPS and PPS first: the file plays on its own (ffplay, csmp4.py)
+            self.out.write(b"".join(b"\0\0\0\1" + nal for nal in (sps, pps)))
             log(f"  saving to {name}")
         SCREEN.send("h264_config", b"".join(b"\0\0\0\1" + nal for nal in (sps, pps)))
         self.status(H264_PLAYING, ep_out)
@@ -507,12 +556,12 @@ def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
         log(f"frame type {ftype}, {len(payload)} bytes ignored")
 
 
-def session(acc) -> None:
-    """Talk to the accessory until it goes away."""
+def session(acc, may_reswitch: bool = True) -> bool:
+    """Talk to the accessory until it goes away; True if it belonged to another app and was switched."""
     iface, ep_in, ep_out = open_endpoints(acc)
     log(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
           f"OUT 0x{ep_out.bEndpointAddress:02x}; open Audi streaming on the phone")
-    dec, pics = Decoder(), Pictures()
+    dec, pics, peer = Decoder(), Pictures(), Peer()
     link_state("accessory", "open Audi streaming on the phone")
     try:
         ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)
@@ -527,13 +576,23 @@ def session(acc) -> None:
                 pics.gaps.idle(time.monotonic())
                 continue
             pics.gaps.idle(time.monotonic())
-            for ftype, payload in dec.feed(data):
+            oversized = dec.oversized
+            frames = dec.feed(data)
+            if may_reswitch and peer.foreign(dec.oversized - oversized, frames):
+                log("not Audi streaming on the other end (Android Auto, left by make aa-host?): "
+                    "switching the accessory to Audi streaming")
+                reswitch(acc)
+                return True
+            for ftype, payload in frames:
                 handle(ftype, payload, ep_out, pics)
     finally:
         if pics.gaps.last is not None:
             pics.gaps.ended("USB link down", time.monotonic())
         SCREEN.send("stop", why="ended by USB link down")
-        usb.util.release_interface(acc, iface)
+        try:
+            usb.util.release_interface(acc, iface)
+        except usb.core.USBError:
+            pass  # gone, or reset
         usb.util.dispose_resources(acc)
 
 
@@ -574,10 +633,17 @@ def main() -> int:
         if code is not None:
             return code
     log("waiting for an Android phone on USB...")
+    reswitches = 0
     while True:
         acc = wait_for_accessory()
         try:
-            session(acc)
+            if session(acc, may_reswitch=reswitches < RESWITCH_TRIES):
+                reswitches += 1
+                if reswitches == RESWITCH_TRIES:
+                    log("the accessory stays with another app: close it on the phone, or replug")
+                time.sleep(2)
+            else:
+                reswitches = 0
         except usb.core.USBError as e:
             log(f"link down: {e}; waiting again")
             time.sleep(1)

@@ -187,7 +187,7 @@ int main(int argc, char *argv[])
 	const char *only = argc > 3 ? argv[3] : nullptr;
 
 	char logpath[256];
-	std::snprintf(logpath, sizeof(logpath), "%s/hello8.log", argv[1]);
+	std::snprintf(logpath, sizeof(logpath), "%s/hello8.log", var_dir(argv[1]));
 	if (log_open(logpath) != 0)
 		std::fprintf(stderr, "hello8: cannot open %s, logging to stdout only\n", logpath);
 	else

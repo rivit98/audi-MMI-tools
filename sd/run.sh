@@ -12,6 +12,12 @@
 # The verdicts are also in var/summary.txt. (There is no "Next" screen
 # before an app and no "all done" screen at the end.)
 #
+# Everything a run writes goes to var/ on the card: run.sh's own files, the
+# apps' logs, screenshots and recordings (they get the card's root as
+# argv[1] and write under <root>/var), and anything a tool drops into its
+# working directory (the apps run with var/ as cwd). Copy var/ off the card
+# and that's the whole run.
+#
 # The screens are rendered when they are needed: screens.sh prints the
 # layout, bin/pngondemand turns it into a PNG in /tmp, and bin/showScreen -t
 # (core/bin/showScreen, DrGER's tool, proven on the car) shows it. If any
@@ -32,12 +38,14 @@ PRE_S=@PRE_S@          # start screen
 POST_S=@POST_S@        # result screen after each app
 KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
 SDPATH="${1:-${0%/*}}"
+case "${SDPATH}" in /*) ;; *) SDPATH=$(cd "${SDPATH}" && pwd) ;; esac   # we cd away
 VAR="${SDPATH}/var"
 BIN=/tmp/mmi_apps
 SCREEN="${BIN}/screen"     # screen.layout -> screen.png, rendered by show
 LOG="${VAR}/run.log"
 SUMMARY="${VAR}/summary.txt"
 mkdir -p "${VAR}"
+cd "${VAR}" || exit 1      # cwd of the apps and their tools
 
 # app_info (ARGS, TIMEOUT from apps.conf) and the screen_* layouts. Without
 # it the apps still run (defaults), only the screens are missing.

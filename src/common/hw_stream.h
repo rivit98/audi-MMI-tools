@@ -58,11 +58,10 @@ public:
 	// keep_video: the displayable and VCAP stay as they are, for the next
 	// stream (HwOptions::video_on_already) or vout::hide(false).
 	//
-	// /dev/videoctrl is shared with the HMI's rear camera, and nothing tells
-	// an app whether the camera is on (docs/rear-camera.md §9, §11): setting
-	// VP1 while it is hides it, and so does disabling VP1. So the picture is
-	// switched only when the user starts / stops a stream, never on a
-	// restart.
+	// /dev/videoctrl is shared with the HMI's rear camera (docs/rear-camera.md
+	// §9): setting VP1 while it is on hides it, and so does disabling VP1. So
+	// the picture is switched only when the user starts / stops a stream,
+	// never on a restart, and vout leaves VP1 alone while camera::active().
 	void stop(bool keep_video = false);
 
 	bool active() const { return server_.running(); }

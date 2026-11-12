@@ -1,0 +1,11 @@
+# mmi-aa-host - builds and runs android_auto's desk test (src/android_auto/
+# host/): the PC plays the head unit for a real phone, over libusb, with
+# ffplay to show the phone's video. `make aa-host` builds the tool in this
+# image and runs it with /dev/bus/usb and the X11 socket passed through.
+# On top of mmi-sdk (make sdk): the same host gcc that builds the host
+# mbedTLS (build/mbedtls-host/).
+FROM mmi-sdk
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libusb-1.0-0-dev pkgconf ffmpeg ffplay \
+ && rm -rf /var/lib/apt/lists/*

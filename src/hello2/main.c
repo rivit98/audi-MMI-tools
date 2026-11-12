@@ -36,6 +36,7 @@
 #define WATCHDOG_SLACK 40   /* stop (then _exit) if GL or the LM hangs */
 
 static const char *sd_path;
+static const char *out_dir;    /* <sd_path>/var: everything written */
 
 static void log_gl_string(const char *name, GLenum e)
 {
@@ -151,7 +152,7 @@ static void take_screenshots(int w, int h)
 	if (pixels != NULL) {
 		glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 		rc = glGetError();
-		snprintf(path, sizeof(path), "%s/hello2_glread.bmp", sd_path);
+		snprintf(path, sizeof(path), "%s/hello2_glread.bmp", out_dir);
 		log_msg("glReadPixels %dx%d: glError=0x%04x, centre pixel rgba=%u,%u,%u,%u",
 		        w, h, rc,
 		        pixels[((h / 2) * w + w / 2) * 4 + 0], pixels[((h / 2) * w + w / 2) * 4 + 1],
@@ -161,10 +162,10 @@ static void take_screenshots(int w, int h)
 		free(pixels);
 	}
 
-	snprintf(cmd, sizeof(cmd), "d-shot %d %s/hello2_dshot.png", CID, sd_path);
+	snprintf(cmd, sizeof(cmd), "d-shot %d %s/hello2_dshot.png", CID, out_dir);
 	rc = lm_text_command(cmd);
 	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello2_sshot.png", sd_path);
+	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello2_sshot.png", out_dir);
 	rc = lm_text_command(cmd);
 	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
 }
@@ -242,10 +243,11 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	out_dir = var_dir(sd_path);
 	if (argc > 2 && atoi(argv[2]) > 0)
 		seconds = (unsigned)atoi(argv[2]);
 
-	snprintf(path, sizeof(path), "%s/hello2.log", sd_path);
+	snprintf(path, sizeof(path), "%s/hello2.log", out_dir);
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello2: cannot open %s, logging to stdout only\n", path);
 	log_msg("hello2 start, pid=%d, run=%u s", getpid(), seconds);

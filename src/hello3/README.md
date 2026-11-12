@@ -10,7 +10,7 @@ that the GPU produces every pixel. There are three scenes:
 An FPS counter is drawn top left.
 
 - **Run:** `hello3 <sd_path> [scene_seconds]` (default 10 s per scene)
-- **Output:** `hello3.log` (fps per second, per-scene summary, fill-rate
+- **Output** (in `var/` on the card): `hello3.log` (fps per second, per-scene summary, fill-rate
   table), screenshots of scenes 1 and 2.
 - **Status:** More detail is in [docs/gpu-results.md](../../docs/gpu-results.md).
 

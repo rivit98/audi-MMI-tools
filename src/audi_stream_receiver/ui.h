@@ -9,8 +9,8 @@ extern "C" {
 
 namespace ui {
 
-// Redraw everything into c.
-void render(canvas *c, const char *sd_path);
+// Redraw everything into c. out_dir: where the log is (<sd>/var), shown.
+void render(canvas *c, const char *out_dir);
 
 } // namespace ui
 
