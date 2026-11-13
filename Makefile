@@ -360,8 +360,8 @@ CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
 CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
-FWTOOLS_hello9 := testapp-file testapp-cmdline
-FWTOOLS_hello10 := testapp-file testapp-cmdline
+FWTOOLS_hello9 := testapp-cmdline
+FWTOOLS_hello10 := testapp-cmdline
 FILES_hello5   := src/hello5/beep.wav
 
 ifneq ($(filter sd,$(MAKECMDGOALS)),)
