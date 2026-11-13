@@ -674,8 +674,9 @@ phone-app bugs and MMI bugs can be told apart without the car.
 - How the HMI shows the rear camera: answered in [rear-camera.md](rear-camera.md). Still open: how an app can tell the camera is active before it touches VP1.
 - Reading CAN data from an app.
 - Layer manager details beyond what qnx-audi used: register flags `2`
-  (bit 0 selects a different displayable class), and what `{cid, 16, 19}`
-  in the show list on exit means.
+  (bit 0 selects a different displayable class). `{cid, 16, 19}` on exit:
+  answered in [map-and-cluster.md](map-and-cluster.md) §2 (16 = HMI,
+  19 = main map).
 - Optional: rebuild `libstdc++.a`/`libgcc_eh.a` with LL/SC so no gUSA is
   left, which lifts the C++ threading rules in §7.
 
