@@ -19,6 +19,7 @@ make addr APP=x ADDR="0x804..."  # crash address -> function, file:line (apps ar
 make apk / apk-test / apk-install        # Android sender (android/Makefile, adb in a container)
 make aoa-host                    # desk: the PC plays the MMI for the phone app (stop host adb first)
 make aa-host                     # desk: the PC plays the Android Auto head unit
+make plot RUN_DIR="runs/<run>"   # audi_stream_receiver logs -> PNG plots + summary (into the run dir)
 make shell                       # shell in the SDK container
 ```
 

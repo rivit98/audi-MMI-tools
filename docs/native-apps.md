@@ -118,6 +118,7 @@ Everything runs in Docker. No host toolchain is used.
 | `mmi-media` | `media/Dockerfile` | ffmpeg: test clips (`media/mkclips.sh`, `media/csmp4.py`) |
 | `mmi-android` | `android/docker/Dockerfile` | Kotlin/Gradle phone app, `adb` (own `android/Makefile`) |
 | `mmi-aoa-host` | `tools/Dockerfile.aoa-host` | desk stand-in for the MMI's USB side (`tools/aoa_host.py`) |
+| `mmi-plot` | `tools/Dockerfile.plot` | car-run log plots (`tools/plot_stream_perf.py`, `make plot`) |
 
 `make sdk` needs two inputs from the toolkit checkout, passed as narrow
 build contexts so the firmware tree is never sent to Docker:
@@ -166,7 +167,7 @@ tests/                  host unit tests (check.h)
 sd/                     run.sh, screens.sh, apps.conf, card README
 media/                  test clip generators
 android/                phone app (own Makefile)
-tools/                  aoa_host.py, f3swalk.py, gusa-scan.awk, Ghidra script + resolve_decomp.py
+tools/                  aoa_host.py, plot_stream_perf.py, f3swalk.py, gusa-scan.awk, Ghidra script + resolve_decomp.py
 docs/                   this guide and the deep dives
 ```
 

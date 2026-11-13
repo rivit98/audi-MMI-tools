@@ -13,9 +13,15 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   it gets SIGTERM/INT/HUP, so it is always the last app of a run.
 - **Output:** `audi_stream_receiver.log` in `var/` on the card (every USBDI result, state
   change, frame and picture; a `cpu:` line every 10 s with the app's own
-  and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake or a removal also saves
-  the system log to `var/usb_slog_<n>.txt`. The previous run's files are
-  kept as `audi_stream_receiver.prev.log` and `var/usb_slog_prev_<n>.txt`.
+  and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake,
+  a removal or an io-media error also saves the system log to
+  `var/usb_slog_<n>.txt` (up to 6 per run), and while pictures or frames come
+  it is saved every 60 s into `var/usb_slog_periodic_a.txt` and `_b.txt` in
+  turn: when the unit hangs or reboots the app's log just stops, and the older
+  of the two was complete before it happened (a snapshot is `sloginfo` in the
+  background, ~150 KB to the card). The previous run's files are kept as
+  `audi_stream_receiver.prev.log`, `var/usb_slog_prev_<n>.txt` and
+  `var/usb_slog_periodic_prev_{a,b}.txt`.
 - **Build:**
 
   ```sh
@@ -27,6 +33,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   make aoa-host             # desk test: the PC plays the MMI, shows the stream in an 800x480
                             # window; the newest picture lands in build/aoa-host/latest.jpg,
                             # an H.264 stream in stream.h264
+  make plot RUN_DIR="<copied var/ folder>"   # the logs as plots, see Logs: plots
   ```
 
   The phone app builds in its own image (`mmi-android`), the desk test in
@@ -81,10 +88,29 @@ recreated, the old activity's late `onClosed` cleared the new shared link,
 and the capture service waited for an MMI that was connected all along.
 
 **Pictures, MMI side.** It reassembles the picture (`vasm.h`), decodes it
-on the main thread (`video.cpp`, stb_image), draws it and acks it at once. A picture
+on the main thread (`video.cpp`, stb_image), draws it and acks it. A picture
 stays in flight until its ack. With two in flight the next
 picture is already waiting when the current one is shown; only the newest
 waiting one is kept, so a slow MMI lowers the rate instead of queueing.
+
+**The JPEG cap** (`jpeg_pacer.h`). Unpaced, a moving screen kept the main
+thread 91–100 % busy for minutes, at 4.5–5.8 fps (moving content) to
+7.4–8.3 fps (static): the HMI and navigation starved (`hbhogs: 92%`, an
+`MMI3GNavigation` run fault, `dev-ipc: RX watchdog elapsed`) and the unit
+later rebooted [confirmed]. A picture costs decode ~66 ms + render ~23 ms +
+copy and flip 25 ms (still) to ~160 ms (all changed). So the MMI takes at
+most `kMaxJpegFps` = 5 pictures a second (200 ms from take to take), and
+after a picture that took T ms of main-thread time (decode + render + copy +
+flip) it rests at least T ms: the main thread stays at ~50 % or less however
+big the pictures get. The cap lives on the MMI, in the acks: the phone sends
+the next picture only with fewer than two in flight, so the shown picture's
+ack is held until the next may be taken, and the phone waits instead of
+sending pictures that would only be thrown away. Nothing changed on the
+phone, so old and new APKs both work with it. A picture that comes anyway
+waits undecoded (and is dropped, acked `Dropped`, if a newer one replaces
+it). T counts up to 1 s, far from the phone's 3 s ack timeout. Built, not yet
+confirmed on the car.
+
 The picture keeps the phone's shape, never rotated or stretched:
 
 - **Landscape** (w ≥ h): centred on the whole screen (800×368 for a 19.5:9
@@ -117,11 +143,20 @@ writes:
   pictures shown, fps, dropped, bad; avg/max ms of `rx` (USB), `wait`,
   `decode`, `render`, `copy` (into the VFB), `flip` and `latency`
   (`VIDEO_START` in to on screen); the JPEG count, KB, MMI decode
-  and phone time; VFB KB per picture, main loop busy %, process CPU %.
+  and phone time; VFB KB per picture, main loop busy %, process CPU %; and
+  the cap: `cap 5 fps: N delayed avg/max, N acks held avg/max` (pictures
+  that waited undecoded for the cap, and shown pictures whose ack it held,
+  with how long in ms).
 - `audi_stream_perf.csv`, one line per picture with the same fields in µs
-  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms`),
-  128 lines per fsync.
+  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms,cap_us,hold_us`),
+  128 lines per fsync. New columns go at the end; `cap_us` and `hold_us` are
+  the two cap waits above.
+- Warnings, each at most once per 10 s with a count of the ones held back:
+  `perf: HIGH main load: main loop N% busy over 10.0 s of JPEG` (≥ 80 %), and
+  `perf: JPEG cap hit for the whole window: the phone sends faster than 5 fps`
+  (every picture of a window of 1+ fps waited for the cap).
 
+At the first picture of a stream: `video: JPEG fallback, cap 5 fps, duty <= 50%`.
 The first three pictures of a stream are also logged one by one. With a
 1 ms clock tick (`perf: clock resolution`), single µs values are good to
 ±1 ms; averages are fine.
@@ -138,6 +173,28 @@ cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usbd
 io-usb's callbacks (USB receive), `usb` the manager thread; threads under
 0.5 % are left out. A window with own load ≥ 50 % ends in ` - HIGH`. The
 screen footer shows the last second.
+
+## Logs: plots
+
+`make plot RUN_DIR="<run>"` (`tools/plot_stream_perf.py`, in the `mmi-plot`
+image) reads every `audi_stream_receiver*.log` of a copied `var/` folder (the
+current and the `.prev` run) with its `audi_stream_perf*.csv`, writes
+`<log name>.png` next to it and prints a summary per log: time per mode, avg /
+max fps, how much of the time the main loop was ≥ 80 % busy, errors. The
+panels share one time axis, seconds since the app started:
+
+| Panel | From |
+|---|---|
+| CPU: self, unit, others, the main thread; main loop busy (dots) | `cpu:` lines; `perf: window` busy; shaded = a ` - HIGH` window |
+| H.264 per second: frames, skips, io-media reads, waited, evicted | `h264:` windows |
+| H.264 lag: median, min–max band | `h264:` windows |
+| JPEG per second: shown, dropped, held back by the cap | `perf: window` lines |
+| JPEG per picture: decode / render / copy / flip stacked, latency | the CSV (clipped at the 98th percentile, said in the title) |
+
+Vertical lines across all panels mark stream start / end, config, io-media
+error, REFUSED, rear camera up / off, USB link up / down, `HIGH main load` and
+`WARNING` lines. Logs from before a field existed still plot; that series is
+just missing. `make plot-test` checks the parsing.
 
 ## Using it
 
@@ -202,7 +259,13 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   its media or the camera), the stream ends without touching
   `/dev/videoctrl`, and the phone is told `REFUSED` (pictures for the rest
   of the connection). If no new stream follows a restart within 5 s, the
-  CPU-drawn screen comes back.
+  CPU-drawn screen comes back. An `ERROR event: Input/output error` also came
+  minutes into a stream with no camera and no HMI media [confirmed, twice]:
+  our resource manager never answers EIO and slog has no io-media line then,
+  so the cause is unknown. Both times io-media's waited reads per window had
+  dropped from ~250 to 0 20–170 s before it, at a steady ~340 ms lag; reads of
+  frames already gone from the ring (answered with filler) are the suspect
+  [unverified]. The log lines below are there to answer that.
 - **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
   MediaCodec, Baseline 3.0, CBR at the *H.264 rate* drop-down (2.5, 4
   (default), 6 or 8 Mbit/s). With *Sharp H.264* (default on) the screen
@@ -234,7 +297,37 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   totals (`ahead of the clock`: frames the cap dropped, how often, the
   furthest ahead), refused frames (the first 5), `over 500 ms ahead of the
   frame clock` each time the cap starts, and every 10 s frames in, skips,
-  io-media's reads and the lag.
+  io-media's reads and the lag. In detail:
+  - At the start: `h264: ring N frames = X.X s (S-byte frames)`, the frames
+    kept for io-media (8 MB: 62 frames = 2.5 s at 128 KB frames).
+  - The 10 s window, all counts for the window only: `... io-media R reads,
+    W waited (max M ms), lead MIN/LAST/MAX frames; lag min/median/max ms (N
+    TIME), position P s; evicted E, far F, eof O, unblocked U; reader B frames
+    behind, ring N frames`. `lead` is how far past the newest frame a read
+    asked (`last`: the window's last read); `evicted` reads of a frame no
+    longer kept, answered with filler (per frame a read touches); `far` reads
+    > 10 s ahead, answered at once with filler; `eof` reads answered with 0
+    bytes; `unblocked` reads io-media gave up on; `reader B frames behind`:
+    the newest frame minus the furthest byte io-media was answered, at log
+    time. `wait max` is the stream's so far.
+  - `stream ended (...)` adds totals `E evicted, F far, O eof; ring N frames =
+    X.X s`.
+  - On an io-media `ERROR` event, before the stream goes: `h264: at the error:`
+    (frames in, the reader's byte, reads waiting, evicted, ring, the cpumon
+    load of the last second), the last 32 reads (`h264:   <ms>: #seq
+    offset+bytes, frames a..b, lead L, n bytes after w ms` or `still waiting`,
+    plus `far: filler` / `filler: e evicted, a not pushed`), the last 16
+    io-media events (`h264:   <ms>: TIME 12.3 s of 3600.0 s`, `STATUS state 4
+    speed 1000`, `ERROR iom_errno=0x...`), and a slog snapshot (`usb: slog
+    snapshot N (io-media error)`).
+  - Warnings, each at most once per 10 s with a count of the ones held back:
+    `h264: WARNING io-media waited for none of R reads` (a window with no
+    waited read after one with some), `h264: WARNING io-media read a frame no
+    longer kept` (the first evicted read of a stream), `h264: WARNING lag
+    median N ms, over 1000 ms`.
+  - `h264: tx H264_STATUS REFUSED (reason: ...)`: `malformed H264_CONFIG`,
+    `config not decodable`, `stream setup failed`, `the graph would not play`,
+    `io-media error`.
 - **Tests:** on the build host, `make test` (header, padding, push / fill
   / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
   protocol and H.264 helpers); the same MMI code with a clip instead of
