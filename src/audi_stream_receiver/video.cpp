@@ -1,6 +1,7 @@
 // video.cpp - picture hand-over, decode and acks (see video.h).
 #include "video.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
@@ -14,6 +15,7 @@ extern "C" {
 
 #include "aoa.h"
 #include "hwvideo.h"
+#include "jpeg_pacer.h"
 #include "mono_cond.h"
 #include "perf.h"
 
@@ -44,7 +46,10 @@ struct Free {
 View      cur;
 std::unique_ptr<uint32_t, Free> cur_px;   // cur.frame.px (imgdec's malloc)
 bool      have_view;
-bool      unacked;                // cur.id not acked yet
+bool      unacked;                // cur.id decoded, not on screen yet
+bool      held;                   // cur.id on screen, its ack held back by the cap
+unsigned  held_since_us;          // log_us() when it was shown
+JpegPacer pacer;                  // the cap: kMaxJpegFps, ~50 % duty
 unsigned  shown_at[kShownRing];   // log_ms() of recent pictures, a ring
 unsigned  shown_n;
 perf::Pic rec;                    // cur's timings so far
@@ -75,6 +80,17 @@ void drop_unacked()
 	rec.t_ms = log_ms();
 	perf::add(rec);
 	unacked = false;
+}
+
+// The ack of the picture on screen goes out: the phone may send the next.
+void release_held()
+{
+	if (!held)
+		return;
+	held = false;
+	aoa::ack(PicStatus::Shown);
+	rec.hold_us = log_us() - held_since_us;
+	perf::add(rec);
 }
 
 unsigned fps_x10(unsigned now)
@@ -137,8 +153,15 @@ void submit(Picture pic)
 
 void wait(unsigned ms)
 {
+	// a held ack and a picture held back by the cap are due at the
+	// pacer's time: wake for it, not on the picture's arrival
+	unsigned until = pacer.wait_ms(log_ms());
+	if ((held || until > 0) && until < ms)
+		ms = until;
 	std::unique_lock<std::mutex> lock(mu);
-	work.wait_ms(lock, ms, [] { return waiting.data != nullptr || stop_pending; });
+	work.wait_ms(lock, ms, [] {
+		return stop_pending || (waiting.data != nullptr && pacer.ready(log_ms()));
+	});
 }
 
 void stop(const char *why)
@@ -159,13 +182,22 @@ bool poll()
 	Picture pic;
 	std::string why;
 	bool stopped;
+	unsigned now = log_ms();
+	bool ready = pacer.ready(now);
+
+	if (ready)
+		release_held();
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		stopped = stop_pending;
 		stop_pending = false;
 		why = stop_why;
-		pic = std::move(waiting);
-		waiting = Picture();
+		// the cap: a picture waits (undecoded) until the pacer says so;
+		// a newer one replaces it meanwhile and it is acked as dropped
+		if (ready || stopped) {
+			pic = std::move(waiting);
+			waiting = Picture();
+		}
 		cur.dropped = dropped;
 		if (stopped)
 			dropped = 0;
@@ -177,7 +209,9 @@ bool poll()
 		if (have_view)
 			log_msg("video: stopped (%s) after %u shown, %u bad, %u dropped",
 			        why.c_str(), cur.shown, cur.bad, cur.dropped);
+		release_held();
 		drop_unacked();
+		pacer.reset();
 		cur_px.reset();
 		have_view = false;
 		cur = View();
@@ -188,6 +222,17 @@ bool poll()
 	}
 	if (!pic.data)
 		return false;
+
+	if (!have_view && !pacer.active())
+		log_msg("video: JPEG fallback, cap %u fps, duty <= 50%%", JpegPacer::kMaxJpegFps);
+	// held back by the cap: from its arrival to the pacer's time
+	unsigned rx_age_ms = (log_us() - pic.rx_done_us) / 1000, cap_us = 0;
+	if (pacer.active()) {
+		unsigned rx_done_ms = now - rx_age_ms;
+		if ((int)(pacer.next_ms() - rx_done_ms) > 0)
+			cap_us = std::min(pacer.next_ms() - rx_done_ms, rx_age_ms) * 1000;
+	}
+	pacer.taken(now);
 
 	bool portrait = pic.w < pic.h;
 	int max_w = portrait ? port_w : land_w, max_h = portrait ? port_h : land_h;
@@ -202,6 +247,7 @@ bool poll()
 		cur.bad++;
 		aoa::ack(PicStatus::Bad);
 		perf_lost(pic, PicStatus::Bad);
+		pacer.done(log_ms(), (log_us() - t0) / 1000);
 		return false;
 	}
 	unsigned us = log_us() - t0;
@@ -216,6 +262,7 @@ bool poll()
 	rec.rx_us = pic.rx_done_us - pic.rx_start_us;
 	rec.wait_us = t0 - pic.rx_done_us;
 	rec.decode_us = us;
+	rec.cap_us = cap_us;
 	rec.latency_us = pic.rx_start_us;    // start; the span when shown
 	cur_px.reset(px);
 	cur.frame.px = px;
@@ -241,6 +288,10 @@ void presented(const Present *p)
 	if (!unacked)
 		return;
 	unacked = false;
+	unsigned busy_us = rec.decode_us;
+	if (p != nullptr)
+		busy_us += p->render_us + p->copy_us + p->flip_us;
+	pacer.done(now, busy_us / 1000);
 	if (p != nullptr) {
 		rec.render_us = p->render_us;
 		rec.copy_us = p->copy_us;
@@ -255,11 +306,14 @@ void presented(const Present *p)
 	cur.shown++;
 	shown_at[shown_n++ % kShownRing] = now;
 	cur.fps_x10 = fps_x10(now);
-	aoa::ack(PicStatus::Shown);
 	rec.t_ms = now;
 	rec.status = PicStatus::Shown;
 	rec.latency_us = log_us() - rec.latency_us;
-	perf::add(rec);
+	// the ack (and the record) when the cap lets the next one come
+	held = true;
+	held_since_us = log_us();
+	if (pacer.ready(log_ms()))
+		release_held();
 	if (cur.shown <= kLogFirst)
 		log_msg("video: #%u id %u %dx%d %s, %s %u bytes (phone %u ms), decode %u ms, "
 		        "present %u ms (render %u, copy %u, flip %u), vfb %u KB", cur.shown,

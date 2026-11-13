@@ -8,8 +8,12 @@
 //   audi_stream_receiver.log   one "perf:" summary line per kWindowMs with
 //                     pictures (rate, avg/max of every stage, size, decode
 //                     and phone time, VFB bytes, main-loop
-//                     busy, process CPU), and a "perf: stream" line for
-//                     the whole stream when it stops
+//                     busy, process CPU, what the JPEG cap held back), a
+//                     "perf: stream" line for the whole stream when it
+//                     stops, and rate-limited warnings: "perf: HIGH main
+//                     load" (main loop >= kHighBusyPct busy over a window),
+//                     "perf: JPEG cap hit" (every picture of a window held
+//                     back: the phone sends faster than the cap)
 //   audi_stream_perf.csv   one line per picture (columns in perf.cpp), written
 //                     in batches of kBatch lines (or when the stream
 //                     stops / kBatchMs passes), one fsync per batch
@@ -25,6 +29,7 @@ namespace perf {
 constexpr unsigned kWindowMs = 10000;
 constexpr unsigned kBatch = 128;
 constexpr unsigned kBatchMs = 30000;
+constexpr unsigned kHighBusyPct = 80;
 
 // One picture. Times in microseconds (log_us()).
 struct Pic {
@@ -41,6 +46,8 @@ struct Pic {
 	unsigned vfb_bytes = 0, vfb_rows = 0;
 	bool     vfb_full = false;  // a full VFB copy
 	unsigned latency_us = 0;  // VIDEO_START in -> on screen
+	unsigned cap_us = 0;      // complete, held back undecoded by the JPEG cap
+	unsigned hold_us = 0;     // on screen, its ack held back by the cap
 };
 
 // Opens <out_dir>/audi_stream_perf.csv (out_dir = <sd>/var), starts the

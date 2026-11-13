@@ -233,7 +233,7 @@ CXXFLAGS_hello10 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
 # phone's pictures are JPEGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
 
@@ -412,7 +412,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_camera build/test_android_auto
+           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -476,6 +476,8 @@ build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 li
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
 # audi_stream_receiver: which H264_CONFIGs restart the stream
 build/test_config_gate: tests/test_config_gate.cpp tests/check.h src/audi_stream_receiver/config_gate.h
+# audi_stream_receiver: the JPEG cap, and the warnings' rate limit
+build/test_pacer: tests/test_pacer.cpp tests/check.h src/audi_stream_receiver/jpeg_pacer.h src/common/rate_limit.h
 # android_auto's protocol core against a fake phone (TLS server included)
 build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(call common,log) \
     build/mbedtls-host/libmbedtls.a $(AA_CERT)/.done
@@ -484,11 +486,11 @@ build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(
 	    -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^) -Lbuild/mbedtls-host -lmbedtls
 # the HMI's rear camera, from dev-videoctrl's slog lines
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
-build/test_proto build/test_config_gate build/test_camera:
+build/test_proto build/test_config_gate build/test_pacer build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

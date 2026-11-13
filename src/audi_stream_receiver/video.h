@@ -9,6 +9,12 @@
 // pictures in flight (one on its way to the screen, one waiting), so the
 // main loop never waits for the phone and normally nothing is dropped.
 //
+// The cap (jpeg_pacer.h): at most 5 pictures a second, and after each as
+// much rest as it took the main thread. The shown picture's ack is held
+// until the next may be taken, so the phone (two in flight at most) waits
+// rather than sending pictures that would be dropped; one that comes anyway
+// waits undecoded. wait() wakes at the pacer's time.
+//
 // Portrait vs landscape is the picture's own shape (w < h = portrait). The
 // MMI tells the phone which box each fits in (VIDEO_CAPS); ui.cpp lays the
 // screen out to match: landscape on the whole screen (a slim status bar

@@ -21,18 +21,22 @@ extern "C" {
 #include "log.h"
 }
 
+#include "jpeg_pacer.h"
 #include "mono_cond.h"
+#include "rate_limit.h"
 
 namespace perf {
 
 namespace {
 
 constexpr unsigned kRing = 512;
-constexpr unsigned kCsvLineMax = 176;
+constexpr unsigned kCsvLineMax = 200;
+constexpr unsigned kWarnEveryMs = 10000;
 
+// new columns go at the end: tools/plot_stream_perf.py reads older files too
 constexpr const char *kCsvHeader =
 	"t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,"
-	"copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms\n";
+	"copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms,cap_us,hold_us\n";
 
 // --- shared (mu) --------------------------------------------------------
 std::mutex mu;
@@ -82,8 +86,9 @@ long long cpu_us()
 
 struct Agg {
 	unsigned start_ms = 0, shown = 0, bad = 0, dropped = 0, full = 0;
+	unsigned capped = 0, held = 0;    // shown pictures the cap held back / whose ack it held
 	unsigned long long vfb_bytes = 0, vfb_rows = 0, jpeg_bytes = 0;
-	Stat rx, wait, decode, render, copy, flip, latency, phone;
+	Stat rx, wait, decode, render, copy, flip, latency, phone, cap, hold;
 	unsigned long long idle_us = 0;
 	long long cpu_us0 = 0;
 
@@ -117,14 +122,29 @@ struct Agg {
 		copy.add(p.copy_us);
 		flip.add(p.flip_us);
 		latency.add(p.latency_us);
+		if (p.cap_us >= 1000) {
+			capped++;
+			cap.add(p.cap_us);
+		}
+		if (p.hold_us >= 1000) {
+			held++;
+			hold.add(p.hold_us);
+		}
+	}
+
+	// main loop busy % over the span
+	unsigned busy(unsigned now) const
+	{
+		unsigned span = now - start_ms;
+		unsigned b = span ? 100 - (unsigned)(idle_us / 10 / span) : 0;
+		return b > 100 ? 0 : b;
 	}
 
 	void log(const char *what, unsigned now) const
 	{
 		char s_rx[24], s_wait[24], s_dec[24], s_ren[24], s_cpy[24], s_flp[24], s_lat[24];
-		char s_cpu[16], s_fmt[160], s_ph[24];
+		char s_cpu[16], s_fmt[160], s_ph[24], s_cap[24], s_hold[24];
 		unsigned span = now - start_ms, n = shown;
-		unsigned busy = span ? 100 - (unsigned)(idle_us / 10 / span) : 0;
 		long long c = cpu_us();
 
 		if (span == 0)
@@ -136,6 +156,8 @@ struct Agg {
 		copy.fmt(s_cpy, sizeof(s_cpy), n);
 		flip.fmt(s_flp, sizeof(s_flp), n);
 		latency.fmt(s_lat, sizeof(s_lat), n);
+		cap.fmt(s_cap, sizeof(s_cap), capped);
+		hold.fmt(s_hold, sizeof(s_hold), held);
 		if (n) {
 			phone.fmt(s_ph, sizeof(s_ph), n);
 			std::snprintf(s_fmt, sizeof(s_fmt), "JPEG %u x %u KB, decode %s, phone %s",
@@ -149,17 +171,36 @@ struct Agg {
 			std::snprintf(s_cpu, sizeof(s_cpu), "?");
 		log_msg("perf: %s %u.%u s: %u shown %u.%u fps, %u dropped, %u bad | ms avg/max: "
 		        "rx %s wait %s decode %s render %s copy %s flip %s, latency %s | "
-		        "%s | vfb %u KB %u rows, %u full | main busy %u%%, cpu %s",
+		        "%s | vfb %u KB %u rows, %u full | main busy %u%%, cpu %s | "
+		        "cap %u fps: %u delayed %s, %u acks held %s",
 		        what, span / 1000, span / 100 % 10, n, n * 10000 / span / 10,
 		        n * 10000 / span % 10, dropped, bad, s_rx, s_wait, s_dec, s_ren, s_cpy, s_flp, s_lat,
 		        s_fmt,
 		        n ? (unsigned)(vfb_bytes / n / 1024) : 0,
-		        n ? (unsigned)(vfb_rows / n) : 0, full, busy > 100 ? 0 : busy, s_cpu);
+		        n ? (unsigned)(vfb_rows / n) : 0, full, busy(now), s_cpu,
+		        JpegPacer::kMaxJpegFps, capped, s_cap, held, s_hold);
 	}
 };
 
 Agg win, total;
 bool in_stream;
+RateLimit warn_busy(kWarnEveryMs), warn_cap(kWarnEveryMs);
+
+// After a window's line: what in it needs a look.
+void warn_window(const Agg &w, unsigned now)
+{
+	unsigned span = now - w.start_ms, busy = w.busy(now), held;
+
+	if (w.shown == 0)
+		return;
+	if (busy >= kHighBusyPct && warn_busy.allow(now, &held))
+		log_msg("perf: HIGH main load: main loop %u%% busy over %u.%u s of JPEG "
+		        "(%u more not logged)", busy, span / 1000, span / 100 % 10, held);
+	// every picture of a window (1+ fps) waited for the cap
+	if (w.capped == w.shown && w.shown * 1000 >= span && warn_cap.allow(now, &held))
+		log_msg("perf: JPEG cap hit for the whole window: the phone sends faster than "
+		        "%u fps (%u more not logged)", JpegPacer::kMaxJpegFps, held);
+}
 
 void csv_write(unsigned now)
 {
@@ -182,11 +223,11 @@ void csv_add(const Pic &p)
 	if (csv_len + kCsvLineMax > sizeof(csv_buf))
 		csv_write(log_ms());
 	int n = std::snprintf(csv_buf + csv_len, kCsvLineMax,
-	                      "%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u\n",
+	                      "%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u\n",
 	                      p.t_ms, p.id, (int)p.status, p.w, p.h, p.bytes, p.rx_us,
 	                      p.wait_us, p.decode_us, p.render_us, p.copy_us, p.flip_us,
 	                      p.vfb_bytes, p.vfb_rows, (int)p.vfb_full, p.latency_us,
-	                      p.phone_ms);
+	                      p.phone_ms, p.cap_us, p.hold_us);
 	if (n > 0 && (unsigned)n < kCsvLineMax) {
 		csv_len += (unsigned)n;
 		csv_lines++;
@@ -249,8 +290,10 @@ void writer()
 			csv_add(batch[i]);
 		}
 		if (in_stream && (do_flush || now - win.start_ms >= kWindowMs)) {
-			if (win.shown + win.dropped + win.bad > 0)
+			if (win.shown + win.dropped + win.bad > 0) {
 				win.log("window", now);
+				warn_window(win, now);
+			}
 			win.reset(now);
 		}
 		if (do_flush && in_stream) {
