@@ -13,6 +13,9 @@ OLD = """\
 
 NEW = """\
 [ 45925 ms] h264: 10.0 s: 130 frames (13.0 fps), 118 skips, 0 refused; io-media 512 reads, 0 waited (max 63 ms), lead -2/0/1 frames; lag 296/324/461 ms (24 TIME), position 9.3 s; evicted 7, far 0, eof 1, unblocked 2; reader 120 frames behind, ring 60 frames
+[ 46000 ms] h264: 10.0 s: 250 frames (25.0 fps), 0 skips, 0 refused; io-media 512 reads, 0 waited (max 0 ms), lead -2/0/1 frames; lag 296/324/461 ms (24 TIME, 1 not kept), position 9.3 s; evicted 0, far 0, eof 0, unblocked 0; reader 2 frames behind, ring 62 frames; data 4012 kbit/s, frames avg 19 / max 131 KB, 1 IDR
+[ 47000 ms] cpu: 10.0 s: self 9% (max 36%), unit 38% (max 61%), others 29% | main 9%, usbd 2% | mem free 141 MB, heap 3.2 MB - HIGH
+[ 48000 ms] rx STREAM_SETTINGS len=40: up=123 format=H264 sending=H264 max_fps=25 bit_rate_kbit=4000
 [ 50000 ms] perf: window 10.0 s: 50 shown 5.0 fps, 0 dropped, 0 bad | ms avg/max: rx 5/6 wait 12/58 decode 66/68 render 23/24 copy 30/40 flip 19/43, latency 239/331 | JPEG 50 x 52 KB, decode 66/68, phone 67/85 | vfb 916 KB 394 rows, 0 full | main busy 70%, cpu 60% | cap 5 fps: 48 delayed 80/120, 50 acks held 90/110
 [ 50010 ms] perf: HIGH main load: main loop 85% busy over 10.0 s of JPEG (0 more not logged)
 [ 50020 ms] h264: tx H264_STATUS REFUSED (reason: io-media error)
@@ -49,8 +52,21 @@ def test_new_format(tmp_path):
     assert r.h264[0]["waited"] == 0
     assert r.jpeg[0]["delayed"] == 48
     assert r.jpeg[0]["held"] == 50
+    assert r.h264[1]["kbit"] == 4012
+    assert r.h264[1]["max_kb"] == 131
+    assert r.h264[1]["times"] == 24
+    assert r.h264[0]["kbit"] is None
+    assert r.cpu[0]["free_mb"] == 141
+    assert r.cpu[0]["heap_mb"] == 3.2
+    assert r.cpu[0]["main"] == 9
+    assert r.cpu[0]["high"]
     kinds = [k for _, k, _ in r.events]
-    assert kinds == ["HIGH load", "REFUSED", "warning"]
+    assert kinds == ["settings", "HIGH load", "REFUSED", "warning"]
+    text = "\n".join(p.summary(r))
+    assert "4012 kbit/s" in text
+    assert "unit free 141 -> 141 MB" in text
+    p.plot(r, tmp_path / "new.png", "new")
+    assert (tmp_path / "new.png").stat().st_size > 10000
 
 
 def test_csv_pairs_and_plot(tmp_path):

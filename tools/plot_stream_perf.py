@@ -15,9 +15,11 @@ the app started (the log's [N ms]):
 
   CPU            cpu: lines: self, unit, others, the main thread; the main
                  loop's busy % from the JPEG perf windows
+  Memory         the unit's free RAM from the cpu: lines (newer logs)
   H.264 rates    h264: windows, per second: frames, skips, io-media reads,
                  reads that waited, evicted reads (newer logs only)
   H.264 lag      the window's lag median, min-max band
+  H.264 data     kbit/s of the frames as sent (newer logs)
   JPEG rates     perf: windows, per second: shown, dropped, held back by
                  the cap (delayed + acks held; newer logs only)
   JPEG picture   the CSV's shown pictures: decode / render / copy / flip ms
@@ -25,7 +27,7 @@ the app started (the log's [N ms]):
 
 Events are vertical lines across all panels: stream start / end, config,
 io-media error, REFUSED, rear camera up / off, USB link up / down, HIGH
-load and WARNING lines. A short summary per log goes to stdout.
+load, WARNING lines and the phone's settings (rx STREAM_SETTINGS). A short summary per log goes to stdout.
 
 Logs without the newer fields (evicted, cap) still plot; those series are
 just missing.
@@ -43,11 +45,12 @@ LINE = re.compile(r"^\[\s*(\d+) ms\] (.*)$")
 
 CPU = re.compile(
     r"^cpu: ([\d.]+) s: self (\d+)% \(max \d+%\), unit (\d+)% \(max \d+%\), others (\d+)%"
-    r"(?: \| (.*?))?( - HIGH)?$")
+    r"(?: \| (.*?))?(?: \| mem free (\d+|\?)(?: MB)?, heap ([\d.]+) MB)?( - HIGH)?$")
 H264 = re.compile(
     r"^h264: ([\d.]+) s: (\d+) frames \([\d.]+ fps\), (\d+) skips, (\d+) refused; "
     r"io-media (\d+) reads, (\d+) waited \(max \d+ ms\), lead [^;]*; "
-    r"lag (-?\d+)/(-?\d+)/(-?\d+) ms \((\d+) TIME\)")
+    r"lag (-?\d+)/(-?\d+)/(-?\d+) ms \((\d+) TIME[^)]*\)")
+H264_DATA = re.compile(r"; data (\d+) kbit/s, frames avg (\d+) / max (\d+) KB, (\d+) IDR")
 H264_NEW = re.compile(r"; evicted (\d+), far (\d+), eof (\d+), unblocked (\d+); reader (-?\d+) frames behind")
 PERF = re.compile(
     r"^perf: window ([\d.]+) s: (\d+) shown [\d.]+ fps, (\d+) dropped, (\d+) bad .*"
@@ -67,6 +70,7 @@ EVENTS = [
     ("USB link down", re.compile(r"^state CONNECTED -> |^usb: remove ")),
     ("HIGH load", re.compile(r"^perf: HIGH main load")),
     ("warning", re.compile(r"WARNING|^perf: JPEG cap hit")),
+    ("settings", re.compile(r"^rx STREAM_SETTINGS")),
 ]
 
 # fixed categorical order (series 1..5), and event colours: status colours
@@ -84,6 +88,7 @@ EVENT_STYLE = {
     "USB link down": ("#008300", ":", 0.9),
     "HIGH load": ("#ec835a", "-", 0.9),
     "warning": ("#fab219", "-", 0.9),
+    "settings": ("#9a9994", "-.", 0.8),
 }
 
 
@@ -121,17 +126,23 @@ def parse_log(path: Path) -> Run:
         if c := CPU.match(msg):
             run.cpu.append({"t": t, "span": float(c.group(1)), "self": int(c.group(2)),
                             "unit": int(c.group(3)), "others": int(c.group(4)),
-                            "main": threads(c.group(5)).get("main", 0), "high": bool(c.group(6))})
+                            "main": threads(c.group(5)).get("main", 0), "high": bool(c.group(8)),
+                            "free_mb": int(c.group(6)) if c.group(6) and c.group(6) != "?" else None,
+                            "heap_mb": float(c.group(7)) if c.group(7) else None})
             continue
         if h := H264.match(msg):
             span = float(h.group(1)) or 1.0
             row = {"t": t, "span": span, "frames": int(h.group(2)), "skips": int(h.group(3)),
                    "refused": int(h.group(4)), "reads": int(h.group(5)), "waited": int(h.group(6)),
                    "lag_min": int(h.group(7)), "lag_p50": int(h.group(8)),
-                   "lag_max": int(h.group(9)), "times": int(h.group(10)), "evicted": None}
+                   "lag_max": int(h.group(9)), "times": int(h.group(10)), "evicted": None,
+                   "kbit": None}
             if n := H264_NEW.search(msg):
                 row.update(evicted=int(n.group(1)), far=int(n.group(2)), eof=int(n.group(3)),
                            unblocked=int(n.group(4)), behind=int(n.group(5)))
+            if d := H264_DATA.search(msg):
+                row.update(kbit=int(d.group(1)), avg_kb=int(d.group(2)), max_kb=int(d.group(3)),
+                           idr=int(d.group(4)))
             run.h264.append(row)
             continue
         if p := PERF.match(msg):
@@ -193,9 +204,13 @@ def summary(run: Run) -> list[str]:
         lag = [r["lag_p50"] for r in run.h264 if r["times"]]
         ev = (sum(r["evicted"] or 0 for r in run.h264)
               if any(r["evicted"] is not None for r in run.h264) else "n/a (older log)")
+        kb = [r for r in run.h264 if r["kbit"] is not None]
+        data = (f"data avg {sum(r['kbit'] * r['span'] for r in kb) / sum(r['span'] for r in kb):.0f}"
+                f" / max {max(r['kbit'] for r in kb)} kbit/s, largest frame "
+                f"{max(r['max_kb'] for r in kb)} KB" if kb else "data n/a (older log)")
         out.append(f"  H.264: {h_s:.0f} s in {len(run.h264)} windows, frames avg "
                    f"{sum(r['frames'] for r in run.h264) / h_s:.1f} / max {max(fps):.1f} fps, "
-                   f"lag median max {max(lag) if lag else 0} ms, evicted {ev}")
+                   f"lag median max {max(lag) if lag else 0} ms, evicted {ev}, {data}")
     j_s = sum(r["span"] for r in run.jpeg)
     if j_s:
         fps = [r["shown"] / r["span"] for r in run.jpeg]
@@ -213,6 +228,11 @@ def summary(run: Run) -> list[str]:
                    f"unit avg {sum(r['unit'] * r['span'] for r in run.cpu) / c_s:.0f} %, main "
                    f"thread >= 80 % in {100 * hot / c_s:.0f} % of the time, "
                    f"{sum(r['high'] for r in run.cpu)} HIGH windows")
+        mem = [r for r in run.cpu if r["free_mb"] is not None]
+        if mem:
+            out.append(f"  memory: unit free {mem[0]['free_mb']} -> {mem[-1]['free_mb']} MB "
+                       f"(min {min(r['free_mb'] for r in mem)}), heap {mem[0]['heap_mb']} -> "
+                       f"{mem[-1]['heap_mb']} MB (max {max(r['heap_mb'] for r in mem)})")
     count = lambda k: sum(1 for e in run.events if e[1] == k)
     out.append(f"  events: {count('io-media error')} io-media errors, {count('REFUSED')} REFUSED, "
                f"{count('warning')} warnings, {count('HIGH load')} HIGH main load, "
@@ -242,8 +262,12 @@ def plot(run: Run, out: Path, title: str) -> None:
     from matplotlib.lines import Line2D
 
     panels = ["cpu"]
+    if any(r["free_mb"] is not None for r in run.cpu):
+        panels += ["mem"]
     if run.h264:
         panels += ["h264", "lag"]
+    if any(r["kbit"] is not None for r in run.h264):
+        panels += ["data"]
     if run.jpeg or run.pics:
         panels += ["jpeg", "pics"]
     fig, axes = plt.subplots(len(panels), 1, sharex=True, figsize=(16, 2.6 * len(panels) + 1.2),
@@ -277,6 +301,22 @@ def plot(run: Run, out: Path, title: str) -> None:
             ax.set_ylim(0, 105)
             ax.set_ylabel("CPU %", color=ink, fontsize=9)
             ax.set_title("CPU (shaded: cpu window with own load HIGH)", loc="left", fontsize=9,
+                         color=muted)
+        elif name == "mem":
+            m = [r for r in run.cpu if r["free_mb"] is not None]
+            line(ax, window_x(m), [r["free_mb"] for r in m], "unit free", 0)
+            ax.set_ylim(bottom=0)
+            ax.set_ylabel("MB", color=ink, fontsize=9)
+            heap = [r["heap_mb"] for r in m]
+            ax.set_title(f"Memory: the unit's free RAM (our heap {min(heap)}-{max(heap)} MB)",
+                         loc="left", fontsize=9, color=muted)
+        elif name == "data":
+            h = [r for r in run.h264 if r["kbit"] is not None]
+            line(ax, window_x(h), [r["kbit"] for r in h], "H.264 data", 0)
+            ax.set_ylim(bottom=0)
+            ax.set_ylabel("kbit/s", color=ink, fontsize=9)
+            ax.set_title("H.264 data rate (frames as sent, before padding; largest frame "
+                         f"{max(r['max_kb'] for r in h)} KB)", loc="left", fontsize=9,
                          color=muted)
         elif name == "h264":
             h = run.h264
