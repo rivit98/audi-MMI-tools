@@ -18,6 +18,8 @@
 #                        H.264: build/aoa-host/stream.h264) and shows it in an
 #                        800x480 window like the MMI's screen
 #   make aoa-host-test   tools/aoa_host.py's and the window's tests
+#   make plot RUN_DIR=d  a car run's audi_stream_receiver logs as PNG plots (into d)
+#   make plot-test       tools/plot_stream_perf.py's tests
 #   make aa-host         android_auto's desk test: this PC is the Android Auto
 #                        head unit for the phone (build/aa-host/: video, audio,
 #                        log; a live ffplay window)
@@ -173,7 +175,7 @@ SD_APPS ?= $(TESTS)
 PRE_S   := 5
 POST_S  := 8
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan plot plot-test
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -532,6 +534,23 @@ aoa-host-test:
 	    -v $(CURDIR)/tools:/tools:ro -w /tools --entrypoint uv mmi-aoa-host run --no-project \
 	    --with pyusb==1.3.1 --with av==19.0.2 --with pygame==2.6.1 --with pytest==9.2.0 \
 	    pytest -q -p no:cacheprovider tests
+
+# A car run's audi_stream_receiver logs as plots (tools/plot_stream_perf.py):
+# a PNG per log into the run directory, a summary on stdout.
+#   make plot RUN_DIR="runs/<run>"
+PLOT_IMAGE := mmi-plot
+build/.plot-image: tools/Dockerfile.plot tools/plot_stream_perf.py
+	docker build -q -t $(PLOT_IMAGE) -f tools/Dockerfile.plot tools
+	mkdir -p build && touch $@
+plot: build/.plot-image
+	@test -n "$(RUN_DIR)" || { echo 'usage: make plot RUN_DIR="<run dir>"'; exit 2; }
+	docker run --rm -u $(shell id -u):$(shell id -g) -v "$$(cd "$(RUN_DIR)" && pwd)":/run \
+	    $(PLOT_IMAGE) /run --title "$(RUN_DIR)"
+plot-test: build/.plot-image
+	docker run --rm -u $(shell id -u):$(shell id -g) -e PYTHONPATH=/tools -e PYTHONDONTWRITEBYTECODE=1 \
+	    -v $(CURDIR)/tools:/tools:ro -w /tmp --entrypoint uv $(PLOT_IMAGE) run --no-project \
+	    --with matplotlib==3.9.2 --with pytest==9.2.0 pytest -q -p no:cacheprovider \
+	    /tools/tests/test_plot_stream_perf.py
 
 # android_auto's desk test: this PC plays the head unit for the phone
 # (src/android_auto/README.md). Stop adb first. Writes the video, audio and
