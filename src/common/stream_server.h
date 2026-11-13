@@ -37,6 +37,7 @@ struct StreamStats {
 	uint64_t bytes = 0;
 	unsigned min_read = 0, max_read = 0;
 	unsigned wait_ms_max = 0;
+	unsigned wait_win_max = 0;    // the same since the last stats_window()
 	uint64_t wait_ms_sum = 0;
 	int64_t lead_frames_max = INT64_MIN;  // how far past the newest frame a read asked
 	int64_t lead_frames_last = 0;
@@ -83,7 +84,7 @@ public:
 	// Live while serving; after stop(), what it ended with, until the next
 	// start().
 	StreamStats stats();
-	// The same, and a new window starts for lead_win_min / max.
+	// The same, and a new window starts for lead_win_min / max, wait_win_max.
 	StreamStats stats_window();
 	// The last kReadHistory reads, oldest first (waiting ones included).
 	std::vector<ReadRecord> recent_reads();

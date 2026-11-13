@@ -139,6 +139,8 @@ struct StreamServer::Impl {
 			st.wait_ms_sum += waited;
 			if (waited > st.wait_ms_max)
 				st.wait_ms_max = waited;
+			if (waited > st.wait_win_max)
+				st.wait_win_max = waited;
 		}
 		if (p.seq <= kNoteReads && waited > 5 && notes.size() < kMaxNotes) {
 			char line[120];
@@ -452,6 +454,7 @@ StreamStats StreamServer::stats_window()
 	StreamStats s = impl_->st;
 	impl_->st.lead_win_min = INT64_MAX;
 	impl_->st.lead_win_max = INT64_MIN;
+	impl_->st.wait_win_max = 0;
 	return s;
 }
 

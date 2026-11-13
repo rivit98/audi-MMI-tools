@@ -4,11 +4,13 @@
 #include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/procfs.h>
+#include <sys/stat.h>
 #include <sys/syspage.h>
 #include <time.h>
 #include <unistd.h>
@@ -16,6 +18,7 @@
 #include "cpumon.h"
 #include "cpustat.h"
 #include "log.h"
+#include "slogmark.h"
 
 #define SAMPLE_MS 1000
 #define NAME_LEN 12
@@ -158,6 +161,25 @@ static void diff(const struct snap *a, const struct snap *b, struct cpustat_samp
 	}
 }
 
+/* " | mem free 141 MB, heap 3.2 MB": the unit's free RAM (QNX: the size of
+ * /proc is the free memory) and this process's heap in use (mallinfo).
+ * Once a window: a stat() and a walk of our own small heap. */
+static void mem_text(char *out, size_t cap, unsigned *free_mb)
+{
+	struct stat st;
+	struct mallinfo mi = mallinfo();
+	unsigned long long heap = (unsigned long long)(unsigned)mi.uordblks + (unsigned)mi.usmblks;
+	char f[24] = "?";
+
+	*free_mb = 0;
+	if (stat("/proc", &st) == 0) {
+		*free_mb = (unsigned)((unsigned long long)(unsigned long)st.st_size >> 20);
+		snprintf(f, sizeof(f), "%u MB", *free_mb);
+	}
+	snprintf(out, cap, " | mem free %s, heap %llu.%llu MB", f, heap >> 20,
+	         (heap * 10 >> 20) % 10);
+}
+
 static void lower_priority(void)
 {
 	struct sched_param sp;
@@ -209,14 +231,20 @@ static void *sampler(void *arg)
 		now_self = (int)cpustat_pct(s.self_us, s.wall_us);
 		now_unit = s.unit_us < 0 ? -1 : (int)cpustat_pct((unsigned long long)s.unit_us, s.wall_us);
 		if (w.wall_us >= window_ms * 1000ull || (stop && w.samples > 0)) {
-			unsigned self = cpustat_self_pct(&w);
+			unsigned self = cpustat_self_pct(&w), free_mb;
+			char mem[64];
 
 			cpustat_format(&w, line, sizeof(line), name_of);
 			now_high = self >= warn_pct;
 			pthread_mutex_unlock(&lock);
-			log_msg("cpu: %u.%u s: %s%s", (unsigned)(w.wall_us / 1000000u),
-			        (unsigned)(w.wall_us / 100000u % 10), line,
+			mem_text(mem, sizeof(mem), &free_mb);
+			log_msg("cpu: %u.%u s: %s%s%s", (unsigned)(w.wall_us / 1000000u),
+			        (unsigned)(w.wall_us / 100000u % 10), line, mem,
 			        self >= warn_pct ? " - HIGH" : "");
+			/* a slog marker per window (if the app turned them on) */
+			slogmark("cpu: self %u%%, unit %u%%, free %u MB", self,
+			         (unsigned)(s.unit_us < 0 ? 0 : cpustat_pct((unsigned long long)s.unit_us,
+			                                                     s.wall_us)), free_mb);
 			cpustat_reset(&w);
 		} else {
 			pthread_mutex_unlock(&lock);

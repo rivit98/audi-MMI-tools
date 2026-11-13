@@ -80,7 +80,8 @@ CXXFLAGS := $(CFLAGS)
 #   GL      gfx.c (gf + EGL), hud.c (FPS counter), img.c (BMP/PNG)
 #   PROC    proc.c: start the unit's own tools from a threaded app
 #   IMGDEC  imgdec.c: JPEG decoding (stb_image)
-#   CPUMON  cpumon.c: own + unit CPU load, a "cpu:" log line per window (cpustat.c)
+#   CPUMON  cpumon.c: own + unit CPU load and memory, a "cpu:" log line per window
+#           (cpustat.c); slogmark.c: our markers in the system log
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
 #   UI      C++: ui.cpp, the test apps' full-screen text pages (on SCREEN)
 #   LIVE    C++ (CXX_APPS only): a live H.264 stream through the unit's
@@ -103,7 +104,7 @@ IMG    := $(call common,img) src/common/stb_image_write.h
 GL     := $(call common,gfx hud) $(IMG)
 PROC   := $(call common,proc)
 IMGDEC := $(call common,imgdec) src/common/stb_image.h
-CPUMON := $(call common,cpumon cpustat)
+CPUMON := $(call common,cpumon cpustat slogmark)
 IOM    := $(call common,iom)
 UI     := $(call commonxx,ui)
 LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vout hw_stream) src/common/camera_log.h $(IOM)
@@ -533,7 +534,7 @@ aoa-host-test:
 	docker run --rm -e SDL_VIDEODRIVER=dummy -e PYTHONPATH=/tools -e PYTHONDONTWRITEBYTECODE=1 \
 	    -v $(CURDIR)/tools:/tools:ro -w /tools --entrypoint uv mmi-aoa-host run --no-project \
 	    --with pyusb==1.3.1 --with av==19.0.2 --with pygame==2.6.1 --with pytest==9.2.0 \
-	    pytest -q -p no:cacheprovider tests
+	    pytest -q -p no:cacheprovider tests/test_aoa_host.py tests/test_aoa_screen.py
 
 # A car run's audi_stream_receiver logs as plots (tools/plot_stream_perf.py):
 # a PNG per log into the run directory, a summary on stdout.

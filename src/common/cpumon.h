@@ -7,11 +7,13 @@
  * idle thread (procnto, pid 1, tids 1..num_cpu): unit load = 1 - idle.
  * Every window_ms it logs
  *
- *   cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usb 3%
+ *   cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usb 3% | mem free 141 MB, heap 3.2 MB
  *
  * (max = the busiest second, others = the rest of the unit, threads named
- * by cpumon_name_thread() or "tid N"), with " - HIGH" at the end when
- * self reached warn_pct. Kernel time is charged a clock tick at a time
+ * by cpumon_name_thread() or "tid N", mem free = the unit's free RAM, heap =
+ * this process's malloc'ed bytes in use), with " - HIGH" at the end when
+ * self reached warn_pct. If the app called slogmark_init(), each window also
+ * puts a marker into the system log (slogmark.h). Kernel time is charged a clock tick at a time
  * (1 ms), so single seconds are approximate and windows good.
  */
 #ifndef COMMON_CPUMON_H

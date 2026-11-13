@@ -37,6 +37,7 @@
 extern "C" {
 #include "cpumon.h"
 #include "log.h"
+#include "slogmark.h"
 #include "quit.h"
 #include "screen.h"
 }
@@ -109,6 +110,8 @@ int main(int argc, char *argv[])
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
 	log_msg("audi_stream_receiver start, pid=%d, copy=%s", getpid(), partial ? "changed" : "full");
 	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
+	if (slogmark_init("audi_stream_receiver") == 0)
+		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	perf::init(var_dir(sd_path));
@@ -211,6 +214,7 @@ int main(int argc, char *argv[])
 	camera::stop();
 	cpumon_stop();
 	perf::shutdown();
+	slogmark("exit (stop reason: %s)", quit_name(quit_poll()));
 	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

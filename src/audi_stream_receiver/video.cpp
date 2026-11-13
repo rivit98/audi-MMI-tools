@@ -11,6 +11,7 @@
 extern "C" {
 #include "imgdec.h"
 #include "log.h"
+#include "slogmark.h"
 }
 
 #include "aoa.h"
@@ -206,9 +207,11 @@ bool poll()
 	if (stopped) {
 		bool had = have_view;
 
-		if (have_view)
+		if (have_view) {
 			log_msg("video: stopped (%s) after %u shown, %u bad, %u dropped",
 			        why.c_str(), cur.shown, cur.bad, cur.dropped);
+			slogmark("video: JPEG stopped (%s), %u shown", why.c_str(), cur.shown);
+		}
 		release_held();
 		drop_unacked();
 		pacer.reset();
@@ -223,8 +226,10 @@ bool poll()
 	if (!pic.data)
 		return false;
 
-	if (!have_view && !pacer.active())
+	if (!have_view && !pacer.active()) {
 		log_msg("video: JPEG fallback, cap %u fps, duty <= 50%%", JpegPacer::kMaxJpegFps);
+		slogmark("video: JPEG start");
+	}
 	// held back by the cap: from its arrival to the pacer's time
 	unsigned rx_age_ms = (log_us() - pic.rx_done_us) / 1000, cap_us = 0;
 	if (pacer.active()) {
