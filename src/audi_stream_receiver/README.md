@@ -69,7 +69,21 @@ in flight down by their sum, in no particular order: it keeps no ids. If
 nothing comes back for 3 s with pictures in flight, it starts counting from
 zero. `VIDEO_STOP` (or the link going down) brings back the status screen. `VIDEO_DETAILS` (`show u8`) switches the status bar
 over a landscape picture; the phone sends it on every connection, and the
-MMI starts with it off. `0x02`/`0x03`/`0x08` are retired (below).
+MMI starts with it off. `STREAM_SETTINGS` (`0x0E`, ASCII `key=value ...`)
+carries the phone app's settings for the MMI's log only. The phone sends it when
+streaming starts on a link and whenever a setting changes, and logs the same line
+itself (`settings sent:`):
+
+```
+rx STREAM_SETTINGS len=181: up=81234567 format=H264 sending=H264 max_fps=25 bit_rate_kbit=4000 sharp=1 capture_mode=WEAVE hide_nav_bar=1 keep_screen_on=0 frame_kb=128 jpeg_q=90 android=30
+```
+
+`up` is ms since the phone booted (`SystemClock.elapsedRealtime`), to line the
+phone's log up with this one. `format` is the user's choice and `sending` what
+actually goes out (`JPEG` after a `REFUSED`). `frame_kb` is the current
+H264_CONFIG frame size, which the phone raises after a big frame. An older MMI
+logs it as `rx unknown frame type 0x0e` and ignores it. `0x02`/`0x03`/`0x08`
+are retired (below).
 
 **Pictures, phone side** (`CaptureService`, a MediaProjection foreground
 service). The phone mirrors its screen into a virtual display at **k
@@ -166,13 +180,30 @@ time, each thread's, and the kernel idle thread's (procnto pid 1), and
 every 10 s logs
 
 ```
-cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usbd 6%, usb 2%, perf 1%
+cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usbd 6%, usb 2%, perf 1% | mem free 141 MB, heap 3.2 MB
 ```
 
 `others` is the rest of the unit (navigation, media, HMI). `usbd` is
 io-usb's callbacks (USB receive), `usb` the manager thread; threads under
-0.5 % are left out. A window with own load ≥ 50 % ends in ` - HIGH`. The
-screen footer shows the last second.
+0.5 % are left out. `mem free` is the unit's free RAM (QNX reports it as the
+size of `/proc` [unverified on this unit]). `heap` is this app's malloc'ed
+bytes in use (`mallinfo`). A window with own load ≥ 50 % ends in ` - HIGH`.
+The screen footer shows the last second.
+
+**slog markers** (`src/common/slogmark.h`). slog stamps its lines with the
+wall clock, which is 1970 after a cold boot. So the app writes its own lines
+into the system log, each with this log's time:
+
+```
+Jan 01 00:08:20    6 30000     0 audi_stream_receiver: t=123456 ms cpu: self 9%, unit 41%, free 141 MB
+```
+
+There is one with every `cpu:` window (10 s), and one at start and exit, at H.264
+stream start and end, at an io-media error, at a `REFUSED` and at JPEG start and
+stop. In a `usb_slog_*.txt` snapshot, the lines between two markers happened
+between those two log times. The unit's libc has no `slogf()`, so the record
+goes to `/dev/slog` by `write()` in openqnx's layout. The cost is one write to
+slogger's RAM buffer, no card I/O. Built, not yet confirmed on the car.
 
 ## Logs: plots
 
@@ -186,14 +217,16 @@ panels share one time axis, seconds since the app started:
 | Panel | From |
 |---|---|
 | CPU: self, unit, others, the main thread; main loop busy (dots) | `cpu:` lines; `perf: window` busy; shaded = a ` - HIGH` window |
+| Memory: the unit's free RAM (our heap range in the title) | `cpu:` lines |
 | H.264 per second: frames, skips, io-media reads, waited, evicted | `h264:` windows |
 | H.264 lag: median, min–max band | `h264:` windows |
+| H.264 data: kbit/s of the frames as sent (largest frame in the title) | `h264:` windows |
 | JPEG per second: shown, dropped, held back by the cap | `perf: window` lines |
 | JPEG per picture: decode / render / copy / flip stacked, latency | the CSV (clipped at the 98th percentile, said in the title) |
 
 Vertical lines across all panels mark stream start / end, config, io-media
-error, REFUSED, rear camera up / off, USB link up / down, `HIGH main load` and
-`WARNING` lines. Logs from before a field existed still plot; that series is
+error, REFUSED, rear camera up / off, USB link up / down, `HIGH main load`,
+`WARNING` lines and the phone's `STREAM_SETTINGS`. Logs from before a field existed still plot; that series is
 just missing. `make plot-test` checks the parsing.
 
 ## Using it
@@ -302,14 +335,19 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
     kept for io-media (8 MB: 62 frames = 2.5 s at 128 KB frames).
   - The 10 s window, all counts for the window only: `... io-media R reads,
     W waited (max M ms), lead MIN/LAST/MAX frames; lag min/median/max ms (N
-    TIME), position P s; evicted E, far F, eof O, unblocked U; reader B frames
-    behind, ring N frames`. `lead` is how far past the newest frame a read
+    TIME, K not kept), position P s; evicted E, far F, eof O, unblocked U;
+    reader B frames behind, ring N frames; data D kbit/s, frames avg A / max X
+    KB, I IDR`. `max M` is the longest wait in the window; `K not kept` is the
+    TIME events whose frame had already left the ring (they have no lag, so
+    they are not in min/median/max); `data` is the frames as the phone sent
+    them, before padding: the real bit rate, the average and largest frame, and
+    the IDRs. `lead` is how far past the newest frame a read
     asked (`last`: the window's last read); `evicted` reads of a frame no
     longer kept, answered with filler (per frame a read touches); `far` reads
     > 10 s ahead, answered at once with filler; `eof` reads answered with 0
     bytes; `unblocked` reads io-media gave up on; `reader B frames behind`:
     the newest frame minus the furthest byte io-media was answered, at log
-    time. `wait max` is the stream's so far.
+    time.
   - `stream ended (...)` adds totals `E evicted, F far, O eof; ring N frames =
     X.X s`.
   - On an io-media `ERROR` event, before the stream goes: `h264: at the error:`

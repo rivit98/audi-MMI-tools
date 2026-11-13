@@ -199,7 +199,7 @@ docs/                   this guide and the deep dives
 | `IMGDEC` | `imgdec` | JPEG decoder (stb_image) |
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
-| `CPUMON` | `cpumon`, `cpustat` | own + whole-unit CPU load lines |
+| `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 
 Keep logic that doesn't touch the car's APIs in pure files and test it on
 the host (`tests/test_*.c`): protocol parsing, decoding, layout, stream
