@@ -28,7 +28,7 @@
 #ifndef COMMON_IOM_H
 #define COMMON_IOM_H
 
-#include <stdint.h>
+#include "types.h"
 
 /* Event types (testapp-file's switch at 0x8040FC8). Each event is a
  * {u32 size, u32 type} header, size counting the header, then the
@@ -49,9 +49,9 @@ struct iom {
 };
 
 struct iom_err {
-	uint32_t iom_errno;
-	uint32_t value_type;
-	uint64_t value;
+	u32 iom_errno;
+	u32 value_type;
+	u64 value;
 };
 
 int  iom_create(struct iom *g, const char *name);
@@ -59,7 +59,7 @@ int  iom_set_speed(struct iom *g, int speed);          /* 1000 = normal */
 int  iom_set_time_notify(struct iom *g, int ms);
 int  iom_attach_output(struct iom *g, const char *url);
 int  iom_set_volume(struct iom *g, int volume);         /* 0..100 */
-int  iom_attach_input(struct iom *g, uint64_t track, const char *url);
+int  iom_attach_input(struct iom *g, u64 track, const char *url);
 int  iom_detach_input(struct iom *g);
 int  iom_play(struct iom *g);
 int  iom_error_info(struct iom *g, struct iom_err *e);

@@ -4,6 +4,7 @@
 #ifndef COMMON_CAMERA_LOG_H
 #define COMMON_CAMERA_LOG_H
 
+#include "types.h"
 #include <cstddef>
 #include <cstring>
 
@@ -26,7 +27,7 @@ constexpr unsigned kShowAgainMs = 2000;
 //                               we don't write VP1, so this one is the HMI's
 class Tracker {
 public:
-	void line(const char *text, size_t n, unsigned now_ms)
+	void line(const char *text, usize n, unsigned now_ms)
 	{
 		if (has(text, n, "VP0: source changed to")) {
 			active_ = true;
@@ -39,19 +40,19 @@ public:
 
 	// Events as read() from /dev/slog gives them, whole: 3 ints of header
 	// (flags and int count, code, time), then the data.
-	void events(const int *ev, size_t n_ints, unsigned now_ms)
+	void events(const int *ev, usize n_ints, unsigned now_ms)
 	{
-		size_t i = 0;
+		usize i = 0;
 		while (i + 3 <= n_ints) {
-			size_t count = ((unsigned)ev[i] >> 16) & 0xff;
+			usize count = ((unsigned)ev[i] >> 16) & 0xff;
 			bool text = (ev[i] & 0x8) != 0;
 			if (i + 3 + count > n_ints)
 				break;
 			if (text) {
 				const char *t = reinterpret_cast<const char *>(ev + i + 3);
-				size_t max = count * sizeof(int);
+				usize max = count * sizeof(int);
 				const void *end = std::memchr(t, 0, max);
-				line(t, end ? (size_t)(static_cast<const char *>(end) - t) : max, now_ms);
+				line(t, end ? (usize)(static_cast<const char *>(end) - t) : max, now_ms);
 			}
 			i += 3 + count;
 		}
@@ -62,10 +63,10 @@ public:
 	unsigned ended_ms() const { return ended_ms_; }
 
 private:
-	static bool has(const char *text, size_t n, const char *what)
+	static bool has(const char *text, usize n, const char *what)
 	{
-		size_t w = std::strlen(what);
-		for (size_t i = 0; i + w <= n; i++)
+		usize w = std::strlen(what);
+		for (usize i = 0; i + w <= n; i++)
 			if (std::memcmp(text + i, what, w) == 0)
 				return true;
 		return false;

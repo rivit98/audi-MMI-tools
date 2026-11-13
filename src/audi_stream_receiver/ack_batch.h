@@ -6,6 +6,7 @@
 #ifndef AUDI_STREAM_ACK_BATCH_H
 #define AUDI_STREAM_ACK_BATCH_H
 
+#include "types.h"
 #include "proto.h"
 
 class AckBatch {
@@ -21,7 +22,7 @@ public:
 
 		unsigned total() const { return shown + bad + dropped; }
 
-		void encode(uint8_t *payload) const
+		void encode(u8 *payload) const
 		{
 			proto::put_u16(payload, shown);
 			proto::put_u16(payload + 2, bad);

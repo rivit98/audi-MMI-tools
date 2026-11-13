@@ -3,6 +3,7 @@
 // TIME = u64 track, s64 position ms, u64 total ms; STATUS = u64 track, u32
 // state (4 = playing), s32 speed.
 #include "player.h"
+#include "types.h"
 
 extern "C" {
 #include "iom.h"
@@ -30,16 +31,16 @@ const char *const kOutputs[] = {
 
 constexpr int kTimeNotifyMs = 250;
 
-uint32_t rd32(const unsigned char *p)
+u32 rd32(const unsigned char *p)
 {
-	uint32_t v;
+	u32 v;
 	std::memcpy(&v, p, 4);
 	return v;
 }
 
-uint64_t rd64(const unsigned char *p)
+u64 rd64(const unsigned char *p)
 {
-	uint64_t v;
+	u64 v;
 	std::memcpy(&v, p, 8);
 	return v;
 }
@@ -58,8 +59,8 @@ std::string Player::fail(const char *what, int rc)
 		if (events_n_ > 0) {
 			PlayEvent &last = events_[(events_n_ - 1) % kEventHistory];
 			if (last.type == IOM_EV_ERROR && last.a == -1) {
-				last.a = (int64_t)e.iom_errno;
-				last.b = (int64_t)e.value;
+				last.a = (i64)e.iom_errno;
+				last.b = (i64)e.value;
 			}
 		}
 	} else
@@ -113,7 +114,7 @@ std::string Player::play()
 	return rc == EOK ? "" : fail("play", rc);
 }
 
-void Player::remember(uint32_t type, int64_t a, int64_t b)
+void Player::remember(u32 type, i64 a, i64 b)
 {
 	PlayEvent &e = events_[events_n_++ % kEventHistory];
 	e.at_ms = log_ms();
@@ -161,23 +162,23 @@ std::string Player::describe(const PlayEvent &e)
 	return line;
 }
 
-void Player::event(uint32_t type, const unsigned char *p, uint32_t len,
-                   const std::function<void(unsigned, int64_t)> &on_time)
+void Player::event(u32 type, const unsigned char *p, u32 len,
+                   const std::function<void(unsigned, i64)> &on_time)
 {
 	const unsigned t = log_ms() - t_play_;
 
 	switch (type) {
 	case IOM_EV_STATUS:
-		remember(type, len >= 16 ? (int64_t)rd32(p + 8) : -1, len >= 16 ? (int32_t)rd32(p + 12) : 0);
+		remember(type, len >= 16 ? (i64)rd32(p + 8) : -1, len >= 16 ? (i32)rd32(p + 12) : 0);
 		break;
 	case IOM_EV_TIME:
-		remember(type, len >= 24 ? (int64_t)rd64(p + 8) : -1, len >= 24 ? (int64_t)rd64(p + 16) : 0);
+		remember(type, len >= 24 ? (i64)rd64(p + 8) : -1, len >= 24 ? (i64)rd64(p + 16) : 0);
 		break;
 	case IOM_EV_ERROR:
 		remember(type, -1, 0);           // fail() below fills in io-media's error
 		break;
 	default:
-		remember(type, (int64_t)len + 8, 0);
+		remember(type, (i64)len + 8, 0);
 		break;
 	}
 
@@ -192,7 +193,7 @@ void Player::event(uint32_t type, const unsigned char *p, uint32_t len,
 	case IOM_EV_TIME: {
 		if (len < 24)
 			break;
-		int64_t pos = (int64_t)rd64(p + 8);
+		i64 pos = (i64)rd64(p + 8);
 		if (st_.time_events++ == 0) {
 			st_.first_time_ms = t ? t : 1;
 			log_msg("  +%u ms first TIME: at %lld of %llu ms", t, (long long)pos,
@@ -222,7 +223,7 @@ void Player::event(uint32_t type, const unsigned char *p, uint32_t len,
 	log_msg("  +%u ms event type %u, %u bytes", t, (unsigned)type, (unsigned)len + 8);
 }
 
-void Player::poll(const std::function<void(unsigned, int64_t)> &on_time)
+void Player::poll(const std::function<void(unsigned, i64)> &on_time)
 {
 	unsigned char buf[512];
 
@@ -238,8 +239,8 @@ void Player::poll(const std::function<void(unsigned, int64_t)> &on_time)
 		if (len == 0)
 			return;
 		for (int off = 0; off + 8 <= len;) {
-			uint32_t size = rd32(buf + off);
-			if (size < 8 || off + size > (uint32_t)len) {
+			u32 size = rd32(buf + off);
+			if (size < 8 || off + size > (u32)len) {
 				log_msg("  player: bad event size %u at %d of %d bytes", (unsigned)size, off, len);
 				break;
 			}

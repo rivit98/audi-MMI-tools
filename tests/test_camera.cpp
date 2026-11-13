@@ -1,5 +1,6 @@
 // test_camera.cpp - common/camera_log.h: the camera's state from the slog, and
 // what an app with a picture does about it.
+#include "types.h"
 #include "camera_log.h"
 #include "check.h"
 
@@ -20,12 +21,12 @@ void feed(Tracker &t, const char *text, unsigned now)
 // One event as slogger stores it.
 void add_event(std::vector<int> &ev, const char *text, bool is_text = true)
 {
-	size_t bytes = std::strlen(text) + 1;
-	size_t ints = (bytes + 3) / 4;
+	usize bytes = std::strlen(text) + 1;
+	usize ints = (bytes + 3) / 4;
 	ev.push_back((int)((ints << 16) | (is_text ? 0x8 : 0) | 5));
 	ev.push_back(20001);
 	ev.push_back(0);
-	size_t at = ev.size();
+	usize at = ev.size();
 	ev.resize(at + ints, 0);
 	std::memcpy(&ev[at], text, bytes);
 }

@@ -102,13 +102,13 @@
 #ifndef AUDI_STREAM_PROTO_H
 #define AUDI_STREAM_PROTO_H
 
-#include <cstdint>
+#include "types.h"
 #include <cstring>
 #include <optional>
 
 namespace proto {
 
-enum Type : uint8_t {
+enum Type : u8 {
 	kHello = 0x01,
 	kHelloReply = 0x04,
 	kVideoCaps = 0x05,
@@ -126,15 +126,15 @@ constexpr unsigned kFmtJpeg = 1;
 constexpr unsigned kFmtH264 = 3;
 
 // H264_STATUS code
-constexpr uint8_t kH264Playing = 0;
-constexpr uint8_t kH264Sync = 1;
-constexpr uint8_t kH264Refused = 2;
-constexpr uint8_t kH264ConfigWanted = 3;
+constexpr u8 kH264Playing = 0;
+constexpr u8 kH264Sync = 1;
+constexpr u8 kH264Refused = 2;
+constexpr u8 kH264ConfigWanted = 3;
 
 // H264_CONFIG vcap_mode. 0 (leave as is) and 1 (BOB) were retired: BOB makes
 // text flicker, and leaving it is WEAVE anyway (docs/phone-mirroring.md 7.4).
-constexpr uint8_t kVcapWeave = 2;
-constexpr uint8_t kVcapOddOnly = 3;
+constexpr u8 kVcapWeave = 2;
+constexpr u8 kVcapOddOnly = 3;
 
 // How a picture ended: one of VIDEO_ACKS's counts.
 enum class PicStatus {
@@ -153,23 +153,23 @@ constexpr unsigned kHdr = 3;
 constexpr unsigned kMaxPayload = 2048;
 constexpr unsigned kMaxFrame = kHdr + kMaxPayload;
 
-inline uint16_t get_u16(const uint8_t *p)
+inline u16 get_u16(const u8 *p)
 {
-	return (uint16_t)(p[0] | (p[1] << 8));
+	return (u16)(p[0] | (p[1] << 8));
 }
 
-inline uint32_t get_u32(const uint8_t *p)
+inline u32 get_u32(const u8 *p)
 {
-	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24;
 }
 
-inline void put_u16(uint8_t *p, unsigned v)
+inline void put_u16(u8 *p, unsigned v)
 {
-	p[0] = (uint8_t)(v & 0xff);
-	p[1] = (uint8_t)(v >> 8 & 0xff);
+	p[0] = (u8)(v & 0xff);
+	p[1] = (u8)(v >> 8 & 0xff);
 }
 
-inline void put_u32(uint8_t *p, uint32_t v)
+inline void put_u32(u8 *p, u32 v)
 {
 	put_u16(p, v & 0xffff);
 	put_u16(p + 2, v >> 16);
@@ -182,7 +182,7 @@ inline const char *fmt_name(unsigned format)
 
 // Encodes one frame into out[cap]. Returns its size, or 0 if len is over
 // kMaxPayload or the frame does not fit in cap.
-inline unsigned encode(uint8_t *out, unsigned cap, uint8_t type, const void *payload, unsigned len)
+inline unsigned encode(u8 *out, unsigned cap, u8 type, const void *payload, unsigned len)
 {
 	if (len > kMaxPayload || kHdr + len > cap)
 		return 0;
@@ -199,7 +199,7 @@ public:
 	// Feed n received bytes; on_frame(type, payload, len) runs once per
 	// complete frame, in order.
 	template <class OnFrame>
-	void feed(const uint8_t *data, unsigned n, OnFrame &&on_frame)
+	void feed(const u8 *data, unsigned n, OnFrame &&on_frame)
 	{
 		while (n > 0) {
 			if (skip_ > 0) {                 // dropping an oversized frame
@@ -235,7 +235,7 @@ public:
 	unsigned oversized() const { return oversized_; }  // frames dropped for being too big
 
 private:
-	uint8_t  buf_[kMaxFrame];
+	u8  buf_[kMaxFrame];
 	unsigned have_ = 0;       // bytes of the current frame in buf_
 	unsigned skip_ = 0;       // payload bytes of an oversized frame still to drop
 	unsigned oversized_ = 0;
@@ -244,14 +244,14 @@ private:
 // H264_CONFIG payload; sps / pps point into it.
 struct H264Config {
 	unsigned       fps;
-	uint32_t       frame_bytes;
-	const uint8_t *sps, *pps;
+	u32       frame_bytes;
+	const u8 *sps, *pps;
 	unsigned       sps_len, pps_len;
-	uint8_t        vcap_mode;      // kVcap*; anything else reads as kVcapWeave
+	u8        vcap_mode;      // kVcap*; anything else reads as kVcapWeave
 };
 
 // Nothing if malformed (short, lengths past the end, an empty SPS / PPS, fps 0).
-inline std::optional<H264Config> parse_h264_config(const uint8_t *p, unsigned n)
+inline std::optional<H264Config> parse_h264_config(const u8 *p, unsigned n)
 {
 	if (n < kH264ConfigMin)
 		return std::nullopt;

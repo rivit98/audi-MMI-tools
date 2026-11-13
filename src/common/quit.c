@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
-#include <stdint.h>
+#include "types.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -84,7 +84,7 @@ static void *signal_thread(void *arg)
  * app's observer, and that is all. */
 static void *key_thread(void *arg)
 {
-	int fd = (int)(intptr_t)arg, n, i, seen = 0;
+	int fd = (int)(isize)arg, n, i, seen = 0;
 	unsigned char buf[256];
 	char hex[16 * 3 + 1];
 
@@ -145,7 +145,7 @@ int quit_init_ex(const char *sd_path, unsigned watchdog_s,
 	fd = open(KEY_DEVICE, O_RDONLY);
 	if (fd < 0) {
 		log_msg("quit: open %s: %s; no key messages", KEY_DEVICE, strerror(errno));
-	} else if ((errno = pthread_create(&tid, NULL, key_thread, (void *)(intptr_t)fd)) != 0) {
+	} else if ((errno = pthread_create(&tid, NULL, key_thread, (void *)(isize)fd)) != 0) {
 		log_msg("quit: key thread: %s; no key messages", strerror(errno));
 		close(fd);
 	} else {

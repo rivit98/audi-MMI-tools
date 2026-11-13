@@ -18,6 +18,7 @@
 //
 // usage: aa_host [--out DIR] [--cert DIR] [--play] [--no-audio] [--version M.m] [--tls N] [--fps N]
 //   --fps N  ack video frames at most N per second (default 25, 0 = at once)
+#include "types.h"
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -45,8 +46,8 @@ extern "C" {
 
 namespace {
 
-constexpr uint16_t kAoaVid = 0x18D1;
-constexpr uint16_t kAoaPidMin = 0x2D00, kAoaPidMax = 0x2D05;
+constexpr u16 kAoaVid = 0x18D1;
+constexpr u16 kAoaPidMin = 0x2D00, kAoaPidMax = 0x2D05;
 const char *const kStrings[6] = {"Android", "Android Auto", "Android Auto", "2.0.1",
                                  "https://github.com/dspl1236/MMI3G-Toolkit", "MMI3G-AA-DESK"};
 constexpr unsigned kInBuf = 16384;
@@ -89,7 +90,7 @@ std::string slurp(const std::string &path)
 	if (f == nullptr)
 		return s;
 	char buf[4096];
-	size_t n;
+	usize n;
 	while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
 		s.append(buf, n);
 	std::fclose(f);
@@ -102,15 +103,15 @@ bool try_switch(libusb_device *dev, const libusb_device_descriptor &dd)
 	libusb_device_handle *h;
 	if (libusb_open(dev, &h) != 0)
 		return false;
-	uint8_t ver[2] = {};
+	u8 ver[2] = {};
 	int r = libusb_control_transfer(h, 0xC0, 51, 0, 0, ver, 2, 1000);
 	bool ok = r == 2 && (ver[0] | ver[1] << 8) >= 1;
 	if (ok) {
 		log_msg("%04x:%04x speaks AOA v%d, switching to Android Auto", dd.idVendor, dd.idProduct,
 		        ver[0] | ver[1] << 8);
 		for (int i = 0; i < 6 && ok; i++)
-			ok = libusb_control_transfer(h, 0x40, 52, 0, (uint16_t)i, (unsigned char *)kStrings[i],
-			                             (uint16_t)(std::strlen(kStrings[i]) + 1), 1000) >= 0;
+			ok = libusb_control_transfer(h, 0x40, 52, 0, (u16)i, (unsigned char *)kStrings[i],
+			                             (u16)(std::strlen(kStrings[i]) + 1), 1000) >= 0;
 		ok = ok && libusb_control_transfer(h, 0x40, 53, 0, 0, nullptr, 0, 1000) >= 0;
 		if (!ok)
 			log_msg("  AOA strings / START failed");
@@ -122,7 +123,7 @@ bool try_switch(libusb_device *dev, const libusb_device_descriptor &dd)
 struct Accessory {
 	libusb_device_handle *h = nullptr;
 	int                   iface = -1;
-	uint8_t               in = 0, out = 0;
+	u8               in = 0, out = 0;
 	unsigned              out_packet = 512;
 };
 
@@ -179,29 +180,29 @@ public:
 			pclose(player_);
 	}
 
-	void send(const uint8_t *p, size_t n) override
+	void send(const u8 *p, usize n) override
 	{
 		while (n > 0 && !failed) {
-			size_t c = usb_chunk(n, kOutMax, a_.out_packet);
+			usize c = usb_chunk(n, kOutMax, a_.out_packet);
 			int got = 0;
-			int r = libusb_bulk_transfer(a_.h, a_.out, const_cast<uint8_t *>(p), (int)c, &got, 2000);
+			int r = libusb_bulk_transfer(a_.h, a_.out, const_cast<u8 *>(p), (int)c, &got, 2000);
 			if (r != 0) {
 				log_msg("bulk OUT: %s", libusb_error_name(r));
 				failed = true;
 				return;
 			}
 			p += got;
-			n -= (size_t)got;
+			n -= (usize)got;
 		}
 	}
-	void video(const uint8_t *p, size_t n, uint64_t, bool) override
+	void video(const u8 *p, usize n, u64, bool) override
 	{
 		if (video_)
 			std::fwrite(p, 1, n, video_);
 		if (player_ && std::fwrite(p, 1, n, player_) == n)
 			std::fflush(player_);
 	}
-	void audio(uint8_t ch, const uint8_t *p, size_t n) override
+	void audio(u8 ch, const u8 *p, usize n) override
 	{
 		int i = ch - aa::kChMediaAudio;
 		if (i >= 0 && i < 3 && audio_[i])
@@ -223,10 +224,10 @@ void run_session(Accessory &a, const aa::Config &cfg, const std::string &cert, c
 	aa::Session s(cfg, desk);
 	std::mutex lock;
 	MonoCond cond;
-	std::deque<std::vector<uint8_t>> rxq;
+	std::deque<std::vector<u8>> rxq;
 
 	std::thread reader([&] {
-		std::vector<uint8_t> buf(kInBuf);
+		std::vector<u8> buf(kInBuf);
 		while (!quit && !desk.failed) {
 			int got = 0;
 			int r = libusb_bulk_transfer(a.h, a.in, buf.data(), (int)buf.size(), &got, 200);
@@ -247,7 +248,7 @@ void run_session(Accessory &a, const aa::Config &cfg, const std::string &cert, c
 	s.start(cert, key);
 	unsigned last_stats = log_ms();
 	while (!quit && !desk.failed && s.phase() != aa::Phase::Failed && s.phase() != aa::Phase::Ended) {
-		std::deque<std::vector<uint8_t>> q;
+		std::deque<std::vector<u8>> q;
 		{
 			std::unique_lock<std::mutex> g(lock);
 			cond.wait_ms(g, s.ms_to_next(50), [&] { return !rxq.empty() || desk.failed || quit; });
@@ -298,8 +299,8 @@ int main(int argc, char **argv)
 		else if (a == "--no-audio")
 			cfg.audio = false;
 		else if (a == "--version" && i + 1 < argc && std::sscanf(argv[++i], "%u.%u", &m, &n) == 2) {
-			cfg.version_major = (uint16_t)m;
-			cfg.version_minor = (uint16_t)n;
+			cfg.version_major = (u16)m;
+			cfg.version_minor = (u16)n;
 		} else if (a == "--tls" && i + 1 < argc)
 			tls = std::atoi(argv[++i]);
 		else if (a == "--fps" && i + 1 < argc)
@@ -337,9 +338,9 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		libusb_device **list;
-		ssize_t n = libusb_get_device_list(ctx, &list);
+		isize n = libusb_get_device_list(ctx, &list);
 		libusb_device *acc = nullptr;
-		for (ssize_t i = 0; i < n && acc == nullptr; i++) {
+		for (isize i = 0; i < n && acc == nullptr; i++) {
 			libusb_device_descriptor dd;
 			if (libusb_get_device_descriptor(list[i], &dd) != 0 || dd.bDeviceClass == LIBUSB_CLASS_HUB)
 				continue;

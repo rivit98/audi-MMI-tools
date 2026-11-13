@@ -18,7 +18,7 @@
  * usage: lmprobe <sd_path> [seconds]
  */
 #include <errno.h>
-#include <stdint.h>
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,14 +76,14 @@ static void cleanup(const char *when)
 /* Vertical colour bars, 0xAARRGGBB (BGRA8888 in memory, little endian). */
 static void fill_bars(const gf_surface_info_t *si)
 {
-	static const uint32_t bars[8] = {
+	static const u32 bars[8] = {
 		0xffffffff, 0xffffff00, 0xff00ffff, 0xff00ff00,
 		0xffff00ff, 0xffff0000, 0xff0000ff, 0xff000000,
 	};
 	int x, y;
 
 	for (y = 0; y < si->h; y++) {
-		uint32_t *row = (uint32_t *)(si->vaddr + (unsigned)y * si->stride);
+		u32 *row = (u32 *)(si->vaddr + (unsigned)y * si->stride);
 
 		for (x = 0; x < si->w; x++)
 			row[x] = bars[x * 8 / si->w];

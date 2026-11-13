@@ -24,7 +24,7 @@
 #define COMMON_AOA_HOST_H
 
 #include <cstddef>
-#include <cstdint>
+#include "types.h"
 
 namespace aoa_host {
 
@@ -57,7 +57,7 @@ public:
 	// The link is open: send() works from now on.
 	virtual void opened() {}
 	// Bytes from bulk IN. On io-usb's callback thread: copy, don't block.
-	virtual void rx(const uint8_t *p, size_t n) = 0;
+	virtual void rx(const u8 *p, usize n) = 0;
 	// The link is gone (removal, error, stop).
 	virtual void closed(const char * /*why*/) {}
 	virtual void tick() {}
@@ -69,11 +69,11 @@ void stop();    // tear down and join; bounded by quit.c's hard alarm
 
 // Queue bytes for bulk OUT (any thread, copied). false: no link, or more
 // than kOutQueueMax bytes waiting (the link is stuck).
-constexpr size_t kOutQueueMax = 1u << 20;
-bool send(const uint8_t *p, size_t n);
+constexpr usize kOutQueueMax = 1u << 20;
+bool send(const u8 *p, usize n);
 
 // Bytes queued for bulk OUT and not yet sent.
-size_t out_pending();
+usize out_pending();
 
 } // namespace aoa_host
 

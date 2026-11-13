@@ -14,6 +14,7 @@
 //             "seq channel flags id") for check_aa_proto.py to decode.
 //             Without it, the phone's messages come from pb.h's Writer.
 // The fake phone reuses the head unit's certificate as its own.
+#include "types.h"
 #include "check.h"
 
 #include <cstdio>
@@ -49,23 +50,23 @@ void test_pb()
 	sub.u(1, 800).u(2, 480);
 	w.u(1, 3).i(2, -5).b(3, true).s(4, "hi").msg(5, sub).packed(6, {3, 65536});
 	CHECK_EQ(w.buf[0], 0x08);
-	uint64_t v = 0;
+	u64 v = 0;
 	CHECK(pb::get_u(w.buf.data(), w.buf.size(), 1, v));
 	CHECK_EQ(v, 3);
 	CHECK(pb::get_u(w.buf.data(), w.buf.size(), 2, v));
-	CHECK_EQ((int32_t)v, -5);
+	CHECK_EQ((i32)v, -5);
 	CHECK(pb::get_u(w.buf.data(), w.buf.size(), 3, v));
 	CHECK_EQ(v, 1);
 	CHECK(pb::get_str(w.buf.data(), w.buf.size(), 4) == "hi");
 	// zigzag: -1 -> 1, 1 -> 2, -64 -> 127
 	pb::Writer z;
 	z.si(1, -1).si(2, 1).si(3, -64);
-	CHECK(z.buf == std::vector<uint8_t>({0x08, 1, 0x10, 2, 0x18, 127}));
+	CHECK(z.buf == std::vector<u8>({0x08, 1, 0x10, 2, 0x18, 127}));
 	CHECK_EQ(pb::unzigzag(1), -1);
 	CHECK_EQ(pb::unzigzag(127), -64);
 	CHECK_EQ(pb::unzigzag(4294967294u), 2147483647);
-	const uint8_t *p;
-	size_t n;
+	const u8 *p;
+	usize n;
 	CHECK(pb::get_bytes(w.buf.data(), w.buf.size(), 5, p, n));
 	CHECK(pb::get_u(p, n, 2, v));
 	CHECK_EQ(v, 480);
@@ -74,7 +75,7 @@ void test_pb()
 	neg.i(1, -5);
 	CHECK_EQ(neg.buf.size(), 11);
 	// malformed: length past the end
-	const uint8_t bad[] = {0x22, 0x05, 'a'};
+	const u8 bad[] = {0x22, 0x05, 'a'};
 	pb::Reader r(bad, sizeof(bad));
 	pb::Field f;
 	CHECK(!r.next(f));
@@ -84,8 +85,8 @@ void test_pb()
 void test_frames()
 {
 	// encode: bulk has a short header, FIRST an extended one
-	std::vector<uint8_t> out;
-	const uint8_t pay[] = {1, 2, 3};
+	std::vector<u8> out;
+	const u8 pay[] = {1, 2, 3};
 	aap::put_frame(out, 3, aap::kBulk | aap::kEncrypted, 3, pay, 3);
 	CHECK_EQ(out.size(), 7);
 	CHECK_EQ(out[1], 0x0b);
@@ -96,8 +97,8 @@ void test_frames()
 	// decode byte by byte
 	aap::Decoder d;
 	std::vector<aap::Frame> got;
-	std::vector<uint32_t> totals;
-	for (uint8_t b : out)
+	std::vector<u32> totals;
+	for (u8 b : out)
 		d.feed(&b, 1, [&](const aap::Frame &f) {
 			got.push_back(f);
 			totals.push_back(f.total);
@@ -117,7 +118,7 @@ void test_frames()
 	CHECK(a.add(5, aap::kLast, pay, 1) == aap::Assembler::Result::Bad);
 
 	// too big a frame
-	const uint8_t huge[] = {0, 3, 0xff, 0xff};
+	const u8 huge[] = {0, 3, 0xff, 0xff};
 	CHECK(d.feed(huge, 4, [](const aap::Frame &) {}) == aap::Decoder::Result::Bad);
 
 	// USB chunks never a multiple of the packet size
@@ -137,23 +138,23 @@ struct TlsServer {
 	mbedtls_ctr_drbg_context drbg;
 	mbedtls_x509_crt         cert;
 	mbedtls_pk_context       key;
-	std::vector<uint8_t>     in, *out = nullptr;
+	std::vector<u8>     in, *out = nullptr;
 	bool                     done = false;
 
-	static int send_cb(void *ctx, const unsigned char *b, size_t n)
+	static int send_cb(void *ctx, const unsigned char *b, usize n)
 	{
 		auto *s = static_cast<TlsServer *>(ctx);
 		s->out->insert(s->out->end(), b, b + n);
 		return (int)n;
 	}
-	static int recv_cb(void *ctx, unsigned char *b, size_t n)
+	static int recv_cb(void *ctx, unsigned char *b, usize n)
 	{
 		auto *s = static_cast<TlsServer *>(ctx);
 		if (s->in.empty())
 			return MBEDTLS_ERR_SSL_WANT_READ;
 		n = n < s->in.size() ? n : s->in.size();
 		std::memcpy(b, s->in.data(), n);
-		s->in.erase(s->in.begin(), s->in.begin() + (ptrdiff_t)n);
+		s->in.erase(s->in.begin(), s->in.begin() + (isize)n);
 		return (int)n;
 	}
 
@@ -197,23 +198,23 @@ public:
 	TlsServer    tls;
 	aap::Decoder dec;
 	aap::Assembler as;
-	std::vector<uint8_t> to_hu;          // queued for the head unit
-	std::vector<uint8_t> junk;           // where the TLS server writes outside a call
+	std::vector<u8> to_hu;          // queued for the head unit
+	std::vector<u8> junk;           // where the TLS server writes outside a call
 	unsigned clock = 1000;
 
 	// what the phone saw
 	bool version_req = false, auth_ok = false, focus = false, bye_answered = false;
-	uint16_t version_major = 0;
-	std::vector<uint8_t> discovery;
-	std::map<uint8_t, int> open_status;
+	u16 version_major = 0;
+	std::vector<u8> discovery;
+	std::map<u8, int> open_status;
 	int config_status = -1, config_unacked = -1;
 	int acks = 0, ack_session = -1;
 	int pings_from_hu = 0, pong = 0;
-	std::vector<uint8_t> video_got;      // what the HU handed over
+	std::vector<u8> video_got;      // what the HU handed over
 	int video_calls = 0, video_configs = 0;
 	std::string phase_seen;
 	bool client_cert_seen = false;
-	std::map<uint32_t, int> got;         // (channel << 16 | id) -> count, HU -> phone
+	std::map<u32, int> got;         // (channel << 16 | id) -> count, HU -> phone
 	std::vector<int> sensor_statuses;
 	int sensor_batches = 0, key_binding_status = -1, audio_focus_state = -1, nav_focus = -1;
 	int mic_status = -1;
@@ -224,15 +225,15 @@ public:
 	int         seq = 0;
 
 	// The phone's message `name`: from --pb DIR, else `own` (pb::Writer).
-	std::vector<uint8_t> body(const char *name, const std::vector<uint8_t> &own)
+	std::vector<u8> body(const char *name, const std::vector<u8> &own)
 	{
 		if (pbdir.empty())
 			return own;
 		std::string b = slurp((pbdir + "/phone/" + name + ".bin").c_str());
 		CHECK(!b.empty());
-		return std::vector<uint8_t>(b.begin(), b.end());
+		return std::vector<u8>(b.begin(), b.end());
 	}
-	void dump(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *p, size_t n)
+	void dump(u8 ch, u8 flags, u16 id, const u8 *p, usize n)
 	{
 		if (index == nullptr)
 			return;
@@ -248,59 +249,59 @@ public:
 	}
 
 	// Host
-	void send(const uint8_t *p, size_t n) override
+	void send(const u8 *p, usize n) override
 	{
 		dec.feed(p, n, [this](const aap::Frame &f) { on_frame(f); });
 	}
 	void phase(aa::Phase p, const std::string &) override { phase_seen += std::string(aa::phase_name(p)) + ","; }
-	void video_frame(const uint8_t *p, size_t n, bool config)
+	void video_frame(const u8 *p, usize n, bool config)
 	{
 		video_got.insert(video_got.end(), p, p + n);
 		video_calls++;
 		video_configs += config;
 	}
-	void video(const uint8_t *p, size_t n, uint64_t, bool config) override { video_frame(p, n, config); }
+	void video(const u8 *p, usize n, u64, bool config) override { video_frame(p, n, config); }
 	unsigned now_ms() override { return clock; }
 
 	void flush()
 	{
 		while (!to_hu.empty()) {
-			std::vector<uint8_t> b;
+			std::vector<u8> b;
 			b.swap(to_hu);
 			// in odd-sized pieces, as USB reads would
-			for (size_t off = 0; off < b.size(); off += 1000)
-				hu->rx(b.data() + off, std::min<size_t>(1000, b.size() - off));
+			for (usize off = 0; off < b.size(); off += 1000)
+				hu->rx(b.data() + off, std::min<usize>(1000, b.size() - off));
 		}
 	}
 
 	// phone -> HU message, split into frames of at most `frag` plaintext bytes
-	void msg(uint8_t ch, uint8_t flags, uint16_t id, const std::vector<uint8_t> &body, size_t frag = 0x4000)
+	void msg(u8 ch, u8 flags, u16 id, const std::vector<u8> &body, usize frag = 0x4000)
 	{
-		std::vector<uint8_t> plain = {(uint8_t)(id >> 8), (uint8_t)id};
+		std::vector<u8> plain = {(u8)(id >> 8), (u8)id};
 		plain.insert(plain.end(), body.begin(), body.end());
-		for (size_t off = 0; off < plain.size();) {
-			size_t len = std::min(frag, plain.size() - off);
-			uint8_t type = (off == 0 ? aap::kFirst : 0) | (off + len == plain.size() ? aap::kLast : 0);
-			std::vector<uint8_t> payload(plain.begin() + (ptrdiff_t)off, plain.begin() + (ptrdiff_t)(off + len));
+		for (usize off = 0; off < plain.size();) {
+			usize len = std::min(frag, plain.size() - off);
+			u8 type = (off == 0 ? aap::kFirst : 0) | (off + len == plain.size() ? aap::kLast : 0);
+			std::vector<u8> payload(plain.begin() + (isize)off, plain.begin() + (isize)(off + len));
 			if (flags & aap::kEncrypted) {
-				std::vector<uint8_t> rec;
+				std::vector<u8> rec;
 				tls.out = &rec;
 				CHECK(mbedtls_ssl_write(&tls.ssl, payload.data(), payload.size()) == (int)payload.size());
 				tls.out = &junk;
 				payload = rec;
 			}
-			aap::put_frame(to_hu, ch, flags | type, (uint32_t)plain.size(), payload.data(), payload.size());
+			aap::put_frame(to_hu, ch, flags | type, (u32)plain.size(), payload.data(), payload.size());
 			off += len;
 		}
 	}
 
 	void on_frame(const aap::Frame &f)
 	{
-		std::vector<uint8_t> plain(f.payload, f.payload + f.size);
+		std::vector<u8> plain(f.payload, f.payload + f.size);
 		if (f.flags & aap::kEncrypted) {
 			tls.in.insert(tls.in.end(), f.payload, f.payload + f.size);
 			plain.clear();
-			uint8_t buf[20000];
+			u8 buf[20000];
 			int r;
 			while ((r = mbedtls_ssl_read(&tls.ssl, buf, sizeof(buf))) > 0)
 				plain.insert(plain.end(), buf, buf + r);
@@ -308,23 +309,23 @@ public:
 		}
 		if (as.add(f.channel, f.flags, plain.data(), plain.size()) != aap::Assembler::Result::Done)
 			return;
-		const std::vector<uint8_t> &m = as.message(f.channel);
-		uint16_t id = (uint16_t)(m[0] << 8 | m[1]);
+		const std::vector<u8> &m = as.message(f.channel);
+		u16 id = (u16)(m[0] << 8 | m[1]);
 		on_message(f.channel, f.flags, id, m.data() + 2, m.size() - 2);
 	}
 
-	void on_message(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *p, size_t n)
+	void on_message(u8 ch, u8 flags, u16 id, const u8 *p, usize n)
 	{
-		uint64_t v = 0;
-		got[(uint32_t)ch << 16 | id]++;
+		u64 v = 0;
+		got[(u32)ch << 16 | id]++;
 		dump(ch, flags, id, p, n);
 		if (ch == 0 && id == 1) {                        // VERSION_REQUEST
 			version_req = true;
-			version_major = (uint16_t)(p[0] << 8 | p[1]);
+			version_major = (u16)(p[0] << 8 | p[1]);
 			msg(0, 0, 2, {0, 1, 0, 7, 0, 0});            // 1.7, status 0
 		} else if (ch == 0 && id == 3) {                 // TLS
 			tls.in.insert(tls.in.end(), p, p + n);
-			std::vector<uint8_t> out;
+			std::vector<u8> out;
 			tls.out = &out;
 			int r = mbedtls_ssl_handshake(&tls.ssl);
 			tls.out = &junk;
@@ -352,7 +353,7 @@ public:
 			bye_answered = true;
 		} else if (id == 8 && (flags & aap::kControl)) { // CHANNEL_OPEN_RESPONSE
 			CHECK(pb::get_u(p, n, 1, v));
-			open_status[ch] = (int)(int32_t)v;
+			open_status[ch] = (int)(i32)v;
 		} else if (ch == 3 && id == 0x8003) {            // CONFIG
 			pb::get_u(p, n, 1, v);
 			config_status = (int)v;
@@ -369,24 +370,24 @@ public:
 			audio_focus_state = (int)v;
 		} else if (ch == 7 && id == 0x8006) {            // MICROPHONE_RESPONSE
 			CHECK(pb::get_u(p, n, 1, v));
-			mic_status = (int)(int32_t)v;
+			mic_status = (int)(i32)v;
 		} else if (ch == 0 && id == 14) {                // NAV_FOCUS_NOTIFICATION
 			pb::get_u(p, n, 1, v);
 			nav_focus = (int)v;
 		} else if (ch == 2 && id == 0x8002) {            // SENSOR_RESPONSE, in request order
 			pb::get_u(p, n, 1, v);
-			sensor_statuses.push_back((int)(int32_t)v);
+			sensor_statuses.push_back((int)(i32)v);
 		} else if (ch == 2 && id == 0x8003) {            // SENSOR_BATCH
 			sensor_batches++;
 		} else if (ch == 1 && id == 0x8003) {            // KEY_BINDING_RESPONSE
 			pb::get_u(p, n, 1, v);
-			key_binding_status = (int)(int32_t)v;
+			key_binding_status = (int)(i32)v;
 		}
 	}
 };
 
 // The video service in the discovery response: H.264 BP 800x480.
-void check_discovery(const std::vector<uint8_t> &d)
+void check_discovery(const std::vector<u8> &d)
 {
 	pb::Reader r(d.data(), d.size());
 	pb::Field f;
@@ -396,9 +397,9 @@ void check_discovery(const std::vector<uint8_t> &d)
 		if (f.num != 1)
 			continue;
 		services++;
-		uint64_t id = 0, codec = 0, res = 0;
-		const uint8_t *sink, *conf;
-		size_t sn, cn;
+		u64 id = 0, codec = 0, res = 0;
+		const u8 *sink, *conf;
+		usize sn, cn;
 		pb::get_u(f.p, f.n, 1, id);
 		if (id == aa::kChVideo && pb::get_bytes(f.p, f.n, 3, sink, sn) &&
 		    pb::get_u(sink, sn, 1, codec) && pb::get_bytes(sink, sn, 4, conf, cn) &&
@@ -442,10 +443,10 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	// channels: video ok, an unknown one refused
 	pb::Writer open;
 	open.si(1, -1).i(2, 3);                          // priority is sint32
-	std::vector<uint8_t> open_req = phone.body("channel_open", open.buf);
+	std::vector<u8> open_req = phone.body("channel_open", open.buf);
 	phone.msg(3, aap::kEncrypted | aap::kControl, 7, open_req);
 	phone.msg(9, aap::kEncrypted | aap::kControl, 7, open_req);
-	for (uint8_t ch : {aa::kChInput, aa::kChSensor, aa::kChMediaAudio})
+	for (u8 ch : {aa::kChInput, aa::kChSensor, aa::kChMediaAudio})
 		phone.msg(ch, aap::kEncrypted | aap::kControl, 7, open_req);
 	phone.flush();
 	CHECK_EQ(phone.open_status[3], 0);
@@ -463,9 +464,9 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	start.i(1, 7).u(2, 0);
 	phone.msg(3, aap::kEncrypted, 0x8001, phone.body("start", start.buf));
 	phone.msg(3, aap::kEncrypted, 0x0001, {0, 0, 0, 1, 0x67, 0x42});
-	std::vector<uint8_t> big(8 + 40000);
-	for (size_t i = 8; i < big.size(); i++)
-		big[i] = (uint8_t)i;
+	std::vector<u8> big(8 + 40000);
+	for (usize i = 8; i < big.size(); i++)
+		big[i] = (u8)i;
 	big[6] = 0x03;                                   // timestamp 1000 us
 	big[7] = 0xe8;
 	phone.msg(3, aap::kEncrypted, 0x0000, big);
@@ -573,7 +574,7 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 void test_bad_cert()
 {
 	struct Null : aa::Host {
-		void send(const uint8_t *, size_t) override {}
+		void send(const u8 *, usize) override {}
 		unsigned now_ms() override { return 0; }
 	} host;
 	aa::Session hu(aa::Config{}, host);

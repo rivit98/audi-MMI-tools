@@ -11,17 +11,17 @@
 #ifndef HELLO6_LZ4MINI_H
 #define HELLO6_LZ4MINI_H
 
-#include <stdint.h>
+#include "types.h"
 
 /* Worst-case compressed size of n input bytes (incompressible data). */
 #define LZ4MINI_BOUND(n) ((n) + (n) / 255 + 16)
 
 /* Compress src[0..n) into dst (cap bytes). Returns the compressed size, or
  * -1 if dst is too small (cap >= LZ4MINI_BOUND(n) always suffices). */
-int lz4mini_compress(const uint8_t *src, int n, uint8_t *dst, int cap);
+int lz4mini_compress(const u8 *src, int n, u8 *dst, int cap);
 
 /* Decompress one block. Returns the decompressed size, or -1 if the input
  * is malformed or would overflow dst. Never reads or writes out of bounds. */
-int lz4mini_decompress(const uint8_t *src, int n, uint8_t *dst, int cap);
+int lz4mini_decompress(const u8 *src, int n, u8 *dst, int cap);
 
 #endif

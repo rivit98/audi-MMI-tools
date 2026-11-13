@@ -60,6 +60,7 @@
  *                  fsync'ed (~12 ms on the card), which lowers the fps.
  * e.g. hello4 /mnt/sdcard10t12 scenes=s step=5 tori=1,2,4,8:60,12 trace=1
  */
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -257,7 +258,7 @@ static void setup_lights_fog(void)
 	log_msg("lights/fog set up, glError=0x%04x", glGetError());
 }
 
-static void material(float r, float g, float b, float spec, float shininess)
+static void material(f32 r, f32 g, f32 b, f32 spec, f32 shininess)
 {
 	const GLfloat colour[4] = { r, g, b, 1.0f }, sp[4] = { spec, spec, spec, 1.0f };
 
@@ -269,8 +270,8 @@ static void material(float r, float g, float b, float spec, float shininess)
 /* 60 degree vertical field of view; clears colour + depth. */
 static void begin_3d(int w, int h, const GLfloat clear[4])
 {
-	const float znear = 0.5f, zfar = 60.0f, top = znear * 0.57735027f;
-	const float right = top * w / h;
+	const f32 znear = 0.5f, zfar = 60.0f, top = znear * 0.57735027f;
+	const f32 right = top * w / h;
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
@@ -287,7 +288,7 @@ static void begin_3d(int w, int h, const GLfloat clear[4])
 
 /* ---- scenes ---- */
 
-static void draw_cube_scene(float t)
+static void draw_cube_scene(f32 t)
 {
 	glDisable(GL_LIGHTING);
 	glDisable(GL_TEXTURE_2D);
@@ -309,7 +310,7 @@ static void draw_cube_scene(float t)
 	glPopMatrix();
 }
 
-static void draw_light_scene(float t, int flat)
+static void draw_light_scene(f32 t, int flat)
 {
 	static const GLfloat sun_dir[4] = { -0.5f, 0.6f, 0.8f, 0.0f };
 	const GLfloat lamp[4] = { 2.2f * cosf(t * 1.3f), sinf(t * 0.7f), 2.2f * sinf(t * 1.3f), 1.0f };
@@ -341,7 +342,7 @@ static void draw_light_scene(float t, int flat)
 	glDisable(GL_LIGHT1);
 }
 
-static void draw_world_scene(float t)
+static void draw_world_scene(f32 t)
 {
 	static const GLfloat sun_dir[4] = { 0.4f, 1.0f, 0.3f, 0.0f };
 	int i;
@@ -381,7 +382,7 @@ static void draw_world_scene(float t)
 	glDisable(GL_FOG);
 }
 
-static void draw_stress_scene(float t, unsigned n)
+static void draw_stress_scene(f32 t, unsigned n)
 {
 	static const GLfloat sun_dir[4] = { -0.5f, 0.6f, 0.8f, 0.0f };
 	static const GLfloat hue[4][3] = {
@@ -389,7 +390,7 @@ static void draw_stress_scene(float t, unsigned n)
 		{ 0.8f, 0.3f, 0.5f }, { 0.4f, 0.85f, 0.4f },
 	};
 	unsigned cols = 1, rows, i;
-	float sp;
+	f32 sp;
 
 	/* grid roughly the screen's 5:3 shape; the view is ~15 x 9 units at z=-8 */
 	while (cols * cols < n * 5 / 3)
@@ -405,7 +406,7 @@ static void draw_stress_scene(float t, unsigned n)
 	glEnable(GL_LIGHTING);
 	glEnable(GL_LIGHT0);
 	for (i = 0; i < n; i++) {
-		const float *c = hue[i % 4];
+		const f32 *c = hue[i % 4];
 
 		material(c[0], c[1], c[2], 0.7f, 30.0f);
 		glPushMatrix();
@@ -420,7 +421,7 @@ static void draw_stress_scene(float t, unsigned n)
 
 /* ---- HUD ---- */
 
-static void draw_hud(int w, int h, unsigned fps, unsigned count, float progress)
+static void draw_hud(int w, int h, unsigned fps, unsigned count, f32 progress)
 {
 	static const GLubyte backing[4] = { 0, 0, 0, 170 };
 	static const GLubyte green[4] = { 80, 255, 80, 255 };
@@ -428,7 +429,7 @@ static void draw_hud(int w, int h, unsigned fps, unsigned count, float progress)
 	static const GLubyte state_col[3][4] = {
 		{ 130, 130, 130, 255 }, { 60, 220, 60, 255 }, { 235, 40, 40, 255 },
 	};
-	float px = w - 8.0f - nprobes * 20.0f;
+	f32 px = w - 8.0f - nprobes * 20.0f;
 	int i;
 
 	glMatrixMode(GL_PROJECTION);
@@ -509,7 +510,7 @@ static unsigned build_segs(const struct opts *o, struct seg *seg)
 	return n;
 }
 
-static void seg_label(const struct opts *o, const struct seg *s, char *buf, size_t n)
+static void seg_label(const struct opts *o, const struct seg *s, char *buf, usize n)
 {
 	if (s->scene == SCENE_STRESS)
 		snprintf(buf, n, "stress step %u/%u (%u tori)", s->step + 1, o->nsteps,
@@ -598,7 +599,7 @@ static void run(struct gfx *g, const struct opts *o)
 	for (;;) {
 		unsigned now = log_ms(), ms = now - start - paused, sms, count = 0, t0, t_draw, t_swap;
 		const struct seg *sg;
-		float t;
+		f32 t;
 
 		if (ms >= run_ms)
 			quit_request(QUIT_TIMER);
@@ -642,7 +643,7 @@ static void run(struct gfx *g, const struct opts *o)
 			draw_stress_scene(t, count);
 			break;
 		}
-		draw_hud(w, h, fps_shown, count, (float)sms / sg->ms);
+		draw_hud(w, h, fps_shown, count, (f32)sms / sg->ms);
 		t_draw = log_ms() - t0;
 
 		/* screenshot mid-scene; not in the stress scene, it would skew timing */
@@ -824,7 +825,7 @@ int main(int argc, char *argv[])
 	struct opts o;
 	struct seg seg[MAX_SEGS];
 	unsigned run_s = 0, i, n;
-	size_t len = 0;
+	usize len = 0;
 
 	if (argc < 2) {
 		fprintf(stderr, "usage: %s <sd_path> [scene_seconds] [option=value ...]\n", argv[0]);

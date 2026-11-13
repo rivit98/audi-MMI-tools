@@ -2,6 +2,7 @@
 // manager, io-media graph, video displayable) is common/hw_stream.h, the
 // code hello9 runs on the car with a clip instead of the phone.
 #include "hwvideo.h"
+#include "types.h"
 
 #include "camera.h"
 #include "camera_log.h"
@@ -42,21 +43,21 @@ constexpr unsigned kTickMs = 20;
 constexpr unsigned kWindowMs = 10000;   // an "h264:" summary line per window
 constexpr unsigned kSyncEveryMs = 500;  // at most one SYNC per this
 constexpr unsigned kLogRefusals = 5;    // refused frames logged one by one
-constexpr uint32_t kRingBytes = 8u << 20; // frames kept for io-media: 8 MB (>= 16 frames)
+constexpr u32 kRingBytes = 8u << 20; // frames kept for io-media: 8 MB (>= 16 frames)
 // more ahead of the frame clock than this: frames dropped up to it, then an
 // IDR (live_stream.h, clock cap). A phone at 26 fps against the stream's 25
 // took the lag from 0.5 s to 3.3 s in 3 minutes; this keeps it under ~1 s.
 constexpr unsigned kShedAheadMs = 500;
 // warnings: each at most once per this, with a count of the ones held back
 constexpr unsigned kWarnEveryMs = 10000;
-constexpr int64_t kLagWarnMs = 1000;    // lag median over this
+constexpr i64 kLagWarnMs = 1000;    // lag median over this
 
 // Per-window deltas: the counters at the window's start.
 struct Window {
-	uint32_t real = 0, skips = 0, refused = 0, sheds = 0, evicted = 0, idr = 0;
+	u32 real = 0, skips = 0, refused = 0, sheds = 0, evicted = 0, idr = 0;
 	unsigned reads = 0, waited = 0, far = 0, eof = 0, unblocked = 0;
 	bool waited_before = false;          // a window of this stream had waited reads
-	std::vector<int64_t> lags;
+	std::vector<i64> lags;
 	unsigned lag_unknown = 0;            // TIME events for a frame no longer kept
 };
 
@@ -66,16 +67,16 @@ bool evicted_seen = false;              // hw thread: this stream had an evicted
 std::mutex mu;                          // everything below, but `hw` use by the hw thread
 std::unique_ptr<HwStream> hw;           // set / taken under mu; polled by the hw thread
 ConfigGate gate;                        // the newest config: running, being set up or pending
-std::vector<uint8_t> config_next;       // a new one for the hw thread
+std::vector<u8> config_next;       // a new one for the hw thread
 bool config_pending = false;
 bool stop_pending = false;
 std::string stop_why;
 bool restart_pending = false;           // stream full: same config again
-std::deque<std::pair<uint8_t, const char *>> statuses;   // code, why (REFUSED)
+std::deque<std::pair<u8, const char *>> statuses;   // code, why (REFUSED)
 unsigned last_sync_ms = 0;
-uint32_t refused_total = 0, refused_logged = 0;
-uint64_t win_bytes = 0;                 // frames taken into the stream this window (before padding)
-uint32_t win_max_bytes = 0;
+u32 refused_total = 0, refused_logged = 0;
+u64 win_bytes = 0;                 // frames taken into the stream this window (before padding)
+u32 win_max_bytes = 0;
 
 std::atomic<bool> is_active{false};
 std::atomic<bool> quit{false};
@@ -101,7 +102,7 @@ enum class End {
 };
 
 // mu held. why: a static string, logged when it goes out (REFUSED).
-void queue_status(uint8_t code, const char *why = nullptr)
+void queue_status(u8 code, const char *why = nullptr)
 {
 	if (code == proto::kH264Sync) {
 		if (log_ms() - last_sync_ms < kSyncEveryMs && last_sync_ms != 0)
@@ -112,7 +113,7 @@ void queue_status(uint8_t code, const char *why = nullptr)
 		statuses.emplace_back(code, why);
 }
 
-const char *status_name(uint8_t c)
+const char *status_name(u8 c)
 {
 	switch (c) {
 	case proto::kH264Playing: return "PLAYING";
@@ -123,7 +124,7 @@ const char *status_name(uint8_t c)
 	return "?";
 }
 
-void status(uint8_t code, const char *why = nullptr)
+void status(u8 code, const char *why = nullptr)
 {
 	{
 		std::lock_guard<std::mutex> lock(mu);
@@ -133,9 +134,9 @@ void status(uint8_t code, const char *why = nullptr)
 }
 
 // "12.3 s", the ring's depth at the config's rate
-double ring_s(const live::Config &c)
+f64 ring_s(const live::Config &c)
 {
-	return c.fps ? c.ring_frames / (double)c.fps : 0.0;
+	return c.fps ? c.ring_frames / (f64)c.fps : 0.0;
 }
 
 // hw thread: give up a picture left on for a stream that didn't come.
@@ -226,7 +227,7 @@ void teardown(const char *why, End how = End::Stop)
 }
 
 // hw thread: a stream from an H264_CONFIG payload.
-void setup(const std::vector<uint8_t> &payload)
+void setup(const std::vector<u8> &payload)
 {
 	auto parsed = proto::parse_h264_config(payload.data(), (unsigned)payload.size());
 	if (!parsed) {
@@ -242,11 +243,11 @@ void setup(const std::vector<uint8_t> &payload)
 	o.cfg.sps.assign(c.sps, c.sps + c.sps_len);
 	o.cfg.pps.assign(c.pps, c.pps + c.pps_len);
 	o.cfg.fps = c.fps;
-	uint32_t s = std::max<uint32_t>(c.frame_bytes + csmp4::kFillerMin, 8192);
+	u32 s = std::max<u32>(c.frame_bytes + csmp4::kFillerMin, 8192);
 	o.cfg.sample_size = (s + 4095) / 4096 * 4096;
 	o.cfg.declared = 0;                  // as many as fit: ~1.6 h at 28 KB x 25 fps
 	o.cfg.fill = true;
-	o.cfg.ring_frames = std::min<uint32_t>(128, std::max<uint32_t>(16, kRingBytes / o.cfg.sample_size));
+	o.cfg.ring_frames = std::min<u32>(128, std::max<u32>(16, kRingBytes / o.cfg.sample_size));
 	o.cfg.shed_ahead_ms = kShedAheadMs;
 	o.path = kPath;
 	char g[48];
@@ -310,11 +311,11 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 {
 	live::Stats ls = h.stream().stats();
 	StreamStats ss = h.server().stats_window();
-	std::vector<int64_t> lags;
+	std::vector<i64> lags;
 	lags.swap(w.lags);
 	std::sort(lags.begin(), lags.end());
-	uint32_t refused, max_bytes;
-	uint64_t bytes;
+	u32 refused, max_bytes;
+	u64 bytes;
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		refused = refused_total;
@@ -324,14 +325,14 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 		win_max_bytes = 0;
 	}
 	const live::Config &c = h.stream().config();
-	uint32_t frames = ls.real - w.real;
+	u32 frames = ls.real - w.real;
 	bool any_lead = ss.lead_win_max != INT64_MIN;
 	// how far io-media reads behind the newest frame (negative: ahead)
-	int64_t behind = ss.served_end <= h.stream().data_off() ? 0 :
-		((int64_t)h.stream().available() - (int64_t)ss.served_end) / (int64_t)c.sample_size;
+	i64 behind = ss.served_end <= h.stream().data_off() ? 0 :
+		((i64)h.stream().available() - (i64)ss.served_end) / (i64)c.sample_size;
 	unsigned reads = ss.reads - w.reads, waited = ss.waited - w.waited;
-	uint32_t evicted = ls.evicted_reads - w.evicted;
-	int64_t p50 = lags.empty() ? 0 : lags[lags.size() / 2];
+	u32 evicted = ls.evicted_reads - w.evicted;
+	i64 p50 = lags.empty() ? 0 : lags[lags.size() / 2];
 	log_msg("h264: %.1f s: %u frames (%.1f fps), %u skips, %u refused; io-media %u reads, %u "
 	        "waited (max %u ms), lead %lld/%lld/%lld frames; lag %lld/%lld/%lld ms (%zu TIME, "
 	        "%u not kept), position %.1f s%s; evicted %u, far %u, eof %u, unblocked %u; reader "
@@ -424,7 +425,7 @@ void run()
 	bool was_playing = false;
 
 	while (!quit) {
-		std::vector<uint8_t> next;
+		std::vector<u8> next;
 		bool have_next = false, do_stop = false, do_restart = false;
 		std::string why;
 		{
@@ -463,8 +464,8 @@ void run()
 			is_active = false;
 		}
 		if (h != nullptr) {
-			std::string err = h->poll([&w, h](unsigned, int64_t pos) {
-				int64_t lag = h->lag_ms(pos);
+			std::string err = h->poll([&w, h](unsigned, i64 pos) {
+				i64 lag = h->lag_ms(pos);
 				if (lag == INT64_MIN)
 					w.lag_unknown++;     // that frame left the ring: no lag for it
 				else if (w.lags.size() < 2000)
@@ -552,9 +553,9 @@ void shutdown()
 	thread_started = false;
 }
 
-void config(const uint8_t *payload, unsigned n)
+void config(const u8 *payload, unsigned n)
 {
-	std::vector<uint8_t> p(payload, payload + n);
+	std::vector<u8> p(payload, payload + n);
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		if (gate.offer(p)) {
@@ -570,7 +571,7 @@ void config(const uint8_t *payload, unsigned n)
 	aoa::wake();
 }
 
-proto::PicStatus frame(const uint8_t *data, unsigned size)
+proto::PicStatus frame(const u8 *data, unsigned size)
 {
 	using proto::PicStatus;
 	bool wake = false;
@@ -643,7 +644,7 @@ void stop(const char *why)
 	gate.forget();
 }
 
-bool status_pop(uint8_t *code)
+bool status_pop(u8 *code)
 {
 	const char *why;
 	{

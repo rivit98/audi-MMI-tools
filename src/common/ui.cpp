@@ -1,5 +1,6 @@
 // ui.cpp - see ui.h.
 #include "ui.h"
+#include "types.h"
 
 extern "C" {
 #include "font_big.h"
@@ -13,11 +14,11 @@ namespace ui {
 namespace {
 
 constexpr int kMargin = 20;
-constexpr uint32_t C_BG = 0xff101828u;
-constexpr uint32_t C_TITLE = 0xffffd040u;
-constexpr uint32_t C_TEXT = 0xffffffffu;
-constexpr uint32_t C_FOOT = 0xff90a0b0u;
-constexpr uint32_t C_BAR = 0xff2a3a58u;
+constexpr u32 C_BG = 0xff101828u;
+constexpr u32 C_TITLE = 0xffffd040u;
+constexpr u32 C_TEXT = 0xffffffffu;
+constexpr u32 C_FOOT = 0xff90a0b0u;
+constexpr u32 C_BAR = 0xff2a3a58u;
 
 bool is_open = false;
 
@@ -70,7 +71,7 @@ int show_list(const char *title, const std::vector<std::string> &lines)
 	if (c == nullptr)
 		return (int)lines.size();
 	int y = font_big.h + 24;
-	size_t i = 0;
+	usize i = 0;
 	for (; i < lines.size() && y + font_small.h <= c->h; i++, y += font_small.h + 1)
 		text_draw(c, &font_small, kMargin, y, lines[i].c_str(), -1, C_TEXT);
 	screen_present();

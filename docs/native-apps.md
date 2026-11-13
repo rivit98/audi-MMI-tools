@@ -201,6 +201,11 @@ docs/                   this guide and the deep dives
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 
+Integer, size and float types use the short names from `src/common/types.h`
+(C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`, not
+`uint32_t`, `size_t` or `double`. `usize`/`isize` also replace `uintptr_t`,
+`ssize_t` and `ptrdiff_t`. Include `"types.h"` wherever they are used.
+
 Keep logic that doesn't touch the car's APIs in pure files and test it on
 the host (`tests/test_*.c`): protocol parsing, decoding, layout, stream
 planning. A FAIL on the car is then the car, not the code.

@@ -1,5 +1,6 @@
 // tls.cpp - see tls.h.
 #include "tls.h"
+#include "types.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -31,12 +32,12 @@ namespace aa {
 
 namespace {
 
-constexpr size_t kReadChunk = 16384;
+constexpr usize kReadChunk = 16384;
 
 // /dev/urandom's last answer: bytes read, or -errno (-1 = not tried yet)
 int urandom_got = -1;
 
-uint64_t cycles()
+u64 cycles()
 {
 #ifdef __QNX__
 	// On SH, ClockCycles() returns the TMU1 count shifted up by
@@ -49,14 +50,14 @@ uint64_t cycles()
 #else
 	timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+	return (u64)ts.tv_sec * 1000000000u + (u64)ts.tv_nsec;
 #endif
 }
 
 void debug_cb(void *, int level, const char *file, int line, const char *msg)
 {
 	const char *base = std::strrchr(file, '/');
-	size_t n = std::strlen(msg);
+	usize n = std::strlen(msg);
 	if (n > 0 && msg[n - 1] == '\n')
 		n--;
 	log_msg("tls[%d] %s:%d %.*s", level, base ? base + 1 : file, line, (int)n, msg);
@@ -71,31 +72,31 @@ void debug_cb(void *, int level, const char *file, int line, const char *msg)
 // (seed_source), which runs it through AES before use. Weak, but what it protects is
 // a USB cable inside the car; the session keys also get the phone's
 // randomness through ECDHE.
-int entropy_source(void *, unsigned char *out, size_t len, size_t *olen)
+int entropy_source(void *, unsigned char *out, usize len, usize *olen)
 {
-	size_t got = 0;
+	usize got = 0;
 	for (const char *dev : {"/dev/urandom", "/dev/random"}) {
 		int fd = open(dev, O_RDONLY | O_NONBLOCK);
 		if (fd < 0) {
 			urandom_got = -errno;
 			continue;
 		}
-		ssize_t r = read(fd, out, len);
+		isize r = read(fd, out, len);
 		urandom_got = r < 0 ? -errno : (int)r;
 		close(fd);
 		if (r > 0)
-			got = (size_t)r;
+			got = (usize)r;
 		break;
 	}
-	for (size_t i = 0; i < len; i++) {
-		uint8_t acc = 0;
+	for (usize i = 0; i < len; i++) {
+		u8 acc = 0;
 		for (int k = 0; k < 8; k++) {
-			uint64_t t0 = cycles();
+			u64 t0 = cycles();
 			getpid();                        // a kernel call: its time varies
-			uint64_t t1 = cycles();
-			acc = (uint8_t)((acc << 1 | acc >> 7) ^ (uint8_t)(t1 - t0) ^ (uint8_t)(t1 >> 3));
+			u64 t1 = cycles();
+			acc = (u8)((acc << 1 | acc >> 7) ^ (u8)(t1 - t0) ^ (u8)(t1 >> 3));
 		}
-		out[i] = i < got ? (uint8_t)(out[i] ^ acc) : acc;
+		out[i] = i < got ? (u8)(out[i] ^ acc) : acc;
 	}
 	*olen = len;
 	return 0;
@@ -104,11 +105,11 @@ int entropy_source(void *, unsigned char *out, size_t len, size_t *olen)
 // CTR-DRBG's seed straight from entropy_source, without mbedTLS's entropy
 // pool: on the unit mbedtls_entropy_func failed (CTR-DRBG "entropy source
 // failed") while the same code passes on a PC and under qemu-sh4.
-static int seed_source(void *, unsigned char *out, size_t len)
+static int seed_source(void *, unsigned char *out, usize len)
 {
 	while (len > 0) {
 		unsigned char buf[MBEDTLS_ENTROPY_MAX_GATHER];
-		size_t n = len < sizeof(buf) ? len : sizeof(buf), got = 0;
+		usize n = len < sizeof(buf) ? len : sizeof(buf), got = 0;
 		if (entropy_source(nullptr, buf, n, &got) != 0 || got == 0)
 			return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
 		if (got > n)
@@ -128,9 +129,9 @@ struct Tls::Impl {
 	mbedtls_x509_crt         cert;
 	mbedtls_pk_context       key;
 
-	std::vector<uint8_t>  in;       // from the phone, not yet read by mbedTLS
-	size_t                in_off = 0;
-	std::vector<uint8_t> *out = nullptr;   // where mbedTLS writes, during a call
+	std::vector<u8>  in;       // from the phone, not yet read by mbedTLS
+	usize                in_off = 0;
+	std::vector<u8> *out = nullptr;   // where mbedTLS writes, during a call
 	bool                  done = false;
 
 	Impl()
@@ -152,7 +153,7 @@ struct Tls::Impl {
 		mbedtls_pk_free(&key);
 	}
 
-	static int send_cb(void *ctx, const unsigned char *buf, size_t len)
+	static int send_cb(void *ctx, const unsigned char *buf, usize len)
 	{
 		Impl *d = static_cast<Impl *>(ctx);
 		if (d->out == nullptr)
@@ -160,13 +161,13 @@ struct Tls::Impl {
 		d->out->insert(d->out->end(), buf, buf + len);
 		return (int)len;
 	}
-	static int recv_cb(void *ctx, unsigned char *buf, size_t len)
+	static int recv_cb(void *ctx, unsigned char *buf, usize len)
 	{
 		Impl *d = static_cast<Impl *>(ctx);
-		size_t avail = d->in.size() - d->in_off;
+		usize avail = d->in.size() - d->in_off;
 		if (avail == 0)
 			return MBEDTLS_ERR_SSL_WANT_READ;
-		size_t n = len < avail ? len : avail;
+		usize n = len < avail ? len : avail;
 		std::memcpy(buf, d->in.data() + d->in_off, n);
 		d->in_off += n;
 		if (d->in_off == d->in.size()) {
@@ -175,10 +176,10 @@ struct Tls::Impl {
 		}
 		return (int)n;
 	}
-	void feed(const uint8_t *p, size_t n)
+	void feed(const u8 *p, usize n)
 	{
 		if (in_off > 0 && in_off > in.size() / 2) {
-			in.erase(in.begin(), in.begin() + (ptrdiff_t)in_off);
+			in.erase(in.begin(), in.begin() + (isize)in_off);
 			in_off = 0;
 		}
 		in.insert(in.end(), p, p + n);
@@ -265,7 +266,7 @@ fail:
 	return false;
 }
 
-Tls::Step Tls::handshake(const uint8_t *in, size_t n, std::vector<uint8_t> &out)
+Tls::Step Tls::handshake(const u8 *in, usize n, std::vector<u8> &out)
 {
 	if (n > 0)
 		d_->feed(in, n);
@@ -294,10 +295,10 @@ std::string Tls::suite() const
 	return std::string(v ? v : "?") + " " + (s ? s : "?");
 }
 
-bool Tls::encrypt(const uint8_t *p, size_t n, std::vector<uint8_t> &out)
+bool Tls::encrypt(const u8 *p, usize n, std::vector<u8> &out)
 {
 	d_->out = &out;
-	size_t off = 0;
+	usize off = 0;
 	while (off < n) {
 		int rc = mbedtls_ssl_write(&d_->ssl, p + off, n - off);
 		if (rc <= 0) {
@@ -305,23 +306,23 @@ bool Tls::encrypt(const uint8_t *p, size_t n, std::vector<uint8_t> &out)
 			set_error("encrypt", rc);
 			return false;
 		}
-		off += (size_t)rc;
+		off += (usize)rc;
 	}
 	d_->out = nullptr;
 	return true;
 }
 
-bool Tls::decrypt(const uint8_t *p, size_t n, std::vector<uint8_t> &out)
+bool Tls::decrypt(const u8 *p, usize n, std::vector<u8> &out)
 {
 	d_->feed(p, n);
-	std::vector<uint8_t> dummy;
+	std::vector<u8> dummy;
 	d_->out = &dummy;                     // an alert we'd send: dropped
 	for (;;) {
-		size_t at = out.size();
+		usize at = out.size();
 		out.resize(at + kReadChunk);
 		int rc = mbedtls_ssl_read(&d_->ssl, out.data() + at, kReadChunk);
 		if (rc > 0) {
-			out.resize(at + (size_t)rc);
+			out.resize(at + (usize)rc);
 			continue;
 		}
 		out.resize(at);

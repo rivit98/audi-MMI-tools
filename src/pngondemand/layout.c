@@ -1,6 +1,7 @@
 /*
  * layout.c - pngondemand's layout language (see README.md).
  */
+#include "types.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -16,7 +17,7 @@
 
 struct colour {
 	char     name[16];
-	uint32_t rgb;
+	u32 rgb;
 };
 
 struct state {
@@ -27,7 +28,7 @@ struct state {
 	int           ncolours;
 	/* para's line callback */
 	const struct font *pf;
-	uint32_t      pc;
+	u32      pc;
 };
 
 static int fail(struct state *st, const char *fmt, ...)
@@ -101,7 +102,7 @@ static long parse_hex(const char *w)
 	return w[6] == 0 ? v : -1;
 }
 
-static int colour(struct state *st, char **s, uint32_t *out)
+static int colour(struct state *st, char **s, u32 *out)
 {
 	char *w = word(s);
 	long v;
@@ -116,7 +117,7 @@ static int colour(struct state *st, char **s, uint32_t *out)
 		}
 	if ((v = parse_hex(w)) < 0)
 		return fail(st, "unknown colour \"%s\"", w);
-	*out = 0xFF000000u | (uint32_t)v;
+	*out = 0xFF000000u | (u32)v;
 	return 0;
 }
 
@@ -148,7 +149,7 @@ static int canvas(struct state *st)
 
 	if (c->px != NULL)
 		return 0;
-	c->px = malloc((size_t)st->w * st->h * 4);
+	c->px = malloc((usize)st->w * st->h * 4);
 	if (c->px == NULL)
 		return fail(st, "out of memory");
 	c->w = c->stride = st->w;
@@ -158,7 +159,7 @@ static int canvas(struct state *st)
 }
 
 /* One flow line of s[0..nbytes) at the margin, cut to fit. */
-static void flow_line(struct state *st, const struct font *f, uint32_t rgb,
+static void flow_line(struct state *st, const struct font *f, u32 rgb,
                       const char *s, int nbytes)
 {
 	struct canvas *c = &st->r->canvas;
@@ -210,7 +211,7 @@ static int command(struct state *st, char *s)
 {
 	struct canvas *c = &st->r->canvas;
 	const struct font *f;
-	uint32_t rgb, fg;
+	u32 rgb, fg;
 	int x, y, w, h;
 	char *cmd = word(&s), *name;
 
@@ -331,7 +332,7 @@ int layout_render(const char *src, struct layout_result *r)
 
 	while (*src != 0) {
 		const char *nl = strchr(src, '\n');
-		size_t len = nl != NULL ? (size_t)(nl - src) : strlen(src);
+		usize len = nl != NULL ? (usize)(nl - src) : strlen(src);
 
 		n++;
 		if (len >= sizeof(line)) {

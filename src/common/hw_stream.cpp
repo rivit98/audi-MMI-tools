@@ -1,5 +1,6 @@
 // hw_stream.cpp - see hw_stream.h.
 #include "hw_stream.h"
+#include "types.h"
 
 #include "camera.h"
 #include "vout.h"
@@ -29,7 +30,7 @@ std::string HwStream::start(const HwOptions &o)
 	        "%u declared (%.0f min), header %llu bytes, gap fill %s",
 	        s.width, s.height, (unsigned)s.profile, (unsigned)s.level, s.poc_type, o.cfg.fps,
 	        stream_.sample_size(), stream_.declared(),
-	        stream_.declared() / (double)o.cfg.fps / 60.0,
+	        stream_.declared() / (f64)o.cfg.fps / 60.0,
 	        (unsigned long long)stream_.data_off(),
 	        !o.cfg.fill ? "off" : stream_.skips_possible() ? "on" : "impossible for this stream");
 	err = server_.start(o.path.c_str(), &stream_);
@@ -38,12 +39,12 @@ std::string HwStream::start(const HwOptions &o)
 	return "";
 }
 
-live::Push HwStream::push(const uint8_t *annexb, size_t n, std::string *why)
+live::Push HwStream::push(const u8 *annexb, usize n, std::string *why)
 {
 	return stream_.push(annexb, n, log_ms(), why);
 }
 
-std::string HwStream::poll(const std::function<void(unsigned, int64_t)> &on_time)
+std::string HwStream::poll(const std::function<void(unsigned, i64)> &on_time)
 {
 	if (!server_.running() || failed_)
 		return failed_ ? "failed" : "";
@@ -88,13 +89,13 @@ void HwStream::stop(bool keep_video)
 	server_.stop();
 }
 
-int64_t HwStream::lag_ms(int64_t pos_ms) const
+i64 HwStream::lag_ms(i64 pos_ms) const
 {
 	if (pos_ms < 0)
 		return INT64_MIN;
-	uint64_t frame = (uint64_t)pos_ms * opts_.cfg.fps / 1000;
-	int64_t at = stream_.push_ms(frame);
+	u64 frame = (u64)pos_ms * opts_.cfg.fps / 1000;
+	i64 at = stream_.push_ms(frame);
 	if (at < 0)
 		return INT64_MIN;
-	return (int64_t)log_ms() - at;
+	return (i64)log_ms() - at;
 }

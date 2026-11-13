@@ -43,7 +43,7 @@
 #include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,7 +162,7 @@ static int vc_capture(const struct attempt *a, int on)
 
 struct grow {
 	int fd;
-	uint8_t *data;
+	u8 *data;
 	long size, done, head;
 	unsigned t0;
 };
@@ -178,8 +178,8 @@ static int grow_start(struct grow *g, const char *src, const char *dst)
 	fseek(f, 0, SEEK_END);
 	g->size = ftell(f);
 	fseek(f, 0, SEEK_SET);
-	g->data = malloc((size_t)g->size);
-	if (g->data == NULL || fread(g->data, 1, (size_t)g->size, f) != (size_t)g->size) {
+	g->data = malloc((usize)g->size);
+	if (g->data == NULL || fread(g->data, 1, (usize)g->size, f) != (usize)g->size) {
 		fclose(f);
 		free(g->data);
 		g->data = NULL;
@@ -193,7 +193,7 @@ static int grow_start(struct grow *g, const char *src, const char *dst)
 		return -1;
 	}
 	g->head = g->size * HEAD_S / CLIP_S;
-	g->done = write(g->fd, g->data, (size_t)g->head);
+	g->done = write(g->fd, g->data, (usize)g->head);
 	if (g->done < 0)
 		g->done = 0;
 	g->t0 = log_ms();
@@ -203,19 +203,19 @@ static int grow_start(struct grow *g, const char *src, const char *dst)
 
 static void grow_tick(struct grow *g)
 {
-	double frac;
+	f64 frac;
 	long want;
-	ssize_t n;
+	isize n;
 
 	if (g == NULL || g->fd < 0 || g->done >= g->size)
 		return;
 	frac = (log_ms() - g->t0) / (CLIP_S * 1000.0);
-	want = g->head + (long)(frac * (double)g->size);
+	want = g->head + (long)(frac * (f64)g->size);
 	if (want > g->size)
 		want = g->size;
 	if (want <= g->done)
 		return;
-	n = write(g->fd, g->data + g->done, (size_t)(want - g->done));
+	n = write(g->fd, g->data + g->done, (usize)(want - g->done));
 	if (n > 0)
 		g->done += n;
 	if (g->done >= g->size)

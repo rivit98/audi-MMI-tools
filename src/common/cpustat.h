@@ -10,6 +10,7 @@
 #ifndef COMMON_CPUSTAT_H
 #define COMMON_CPUSTAT_H
 
+#include "types.h"
 #include <stddef.h>
 
 #define CPUSTAT_THREADS 32
@@ -51,7 +52,7 @@ unsigned cpustat_self_pct(const struct cpustat_win *w);
  * first, those that rounded to 0 % left out. name() gives a thread's name
  * (NULL: shown as "tid N"). Returns the length (snprintf-style, cut to
  * cap). */
-int cpustat_format(const struct cpustat_win *w, char *out, size_t cap,
+int cpustat_format(const struct cpustat_win *w, char *out, usize cap,
                    const char *(*name)(int tid));
 
 #endif

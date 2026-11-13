@@ -8,7 +8,7 @@
 #ifndef AUDI_STREAM_VASM_H
 #define AUDI_STREAM_VASM_H
 
-#include <cstdint>
+#include "types.h"
 #include <cstring>
 #include <memory>
 #include <new>
@@ -17,8 +17,8 @@
 
 // A complete picture.
 struct Picture {
-	std::unique_ptr<uint8_t[]> data;
-	uint32_t size = 0;
+	std::unique_ptr<u8[]> data;
+	u32 size = 0;
 	unsigned id = 0, w = 0, h = 0, format = 0;     // format: proto::kFmt*
 	unsigned phone_ms = 0;                         // the phone's scale + encode, 0 = not sent
 	unsigned rx_start_us = 0, rx_done_us = 0;      // log_us(), set by the link (perf)
@@ -38,11 +38,11 @@ public:
 		int cut_short = -1;    // start(): id of an incomplete picture this one replaced
 	};
 
-	explicit Assembler(uint32_t max_bytes) : max_bytes_(max_bytes) {}
+	explicit Assembler(u32 max_bytes) : max_bytes_(max_bytes) {}
 
 	// VIDEO_START payload. Bad: size 0 / over max_bytes, unknown format,
 	// zero width or height, out of memory.
-	Result start(const uint8_t *p, unsigned n)
+	Result start(const u8 *p, unsigned n)
 	{
 		Result r;
 		r.rx = Rx::Bad;
@@ -64,7 +64,7 @@ public:
 		    (pic.format != proto::kFmtJpeg && pic.format != proto::kFmtH264) ||
 		    pic.w == 0 || pic.h == 0)
 			return r;
-		pic.data.reset(new (std::nothrow) uint8_t[pic.size]);
+		pic.data.reset(new (std::nothrow) u8[pic.size]);
 		if (!pic.data)
 			return r;
 		cur_ = std::move(pic);
@@ -74,7 +74,7 @@ public:
 	}
 
 	// VIDEO_DATA payload. Bad = more bytes than announced (dropped).
-	Result data(const uint8_t *p, unsigned n)
+	Result data(const u8 *p, unsigned n)
 	{
 		Result r;
 		if (n < 2 || !active_ || proto::get_u16(p) != cur_.id) {
@@ -113,10 +113,10 @@ public:
 	bool active() const { return active_; }
 
 private:
-	uint32_t max_bytes_;
+	u32 max_bytes_;
 	bool     active_ = false;  // a picture is being assembled
 	Picture  cur_;
-	uint32_t have_ = 0;        // bytes of cur_ received
+	u32 have_ = 0;        // bytes of cur_ received
 };
 
 #endif

@@ -1,6 +1,7 @@
 /*
  * iom.c - see iom.h.
  */
+#include "types.h"
 #include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -84,7 +85,7 @@ int iom_set_volume(struct iom *g, int volume)
 	return devctlv(g->fd, DCMD_VOLUME, 2, 0, iov, NULL, NULL);
 }
 
-int iom_attach_input(struct iom *g, uint64_t track, const char *url)
+int iom_attach_input(struct iom *g, u64 track, const char *url)
 {
 	struct iovec iov[2];
 
@@ -111,7 +112,7 @@ int iom_error_info(struct iom *g, struct iom_err *e)
 
 int iom_read_events(struct iom *g, void *buf, int len)
 {
-	ssize_t n = _readx(g->fd, buf, (size_t)len, IO_XFLAG_NONBLOCK, NULL, 0);
+	isize n = _readx(g->fd, buf, (usize)len, IO_XFLAG_NONBLOCK, NULL, 0);
 
 	if (n < 0)
 		return errno == EAGAIN ? 0 : -1;

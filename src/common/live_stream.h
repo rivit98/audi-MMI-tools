@@ -39,7 +39,7 @@
 #include "csmp4.h"
 #include "h264.h"
 
-#include <cstdint>
+#include "types.h"
 #include <mutex>
 #include <string>
 #include <vector>
@@ -47,10 +47,10 @@
 namespace live {
 
 struct Config {
-	std::vector<uint8_t> sps, pps;   // NAL units, header byte first, no start code
+	std::vector<u8> sps, pps;   // NAL units, header byte first, no start code
 	unsigned fps = 25;
-	uint32_t sample_size = 32768;    // S, every frame padded to it
-	uint32_t declared = 0;           // frames in the header; 0 = as many as fit in 4 GB
+	u32 sample_size = 32768;    // S, every frame padded to it
+	u32 declared = 0;           // frames in the header; 0 = as many as fit in 4 GB
 	bool fill = true;
 	unsigned fill_after_ms = 0;      // nothing pushed for this long (0: one frame
 	                                 // period) and 2+ frames behind: fill
@@ -78,15 +78,15 @@ const char *push_name(Push p);
 std::string check_decodable(const h264::Sps &sps, unsigned fps);
 
 struct Stats {
-	uint32_t frames = 0;        // in the stream (real + skips)
-	uint32_t real = 0, idr = 0, skips = 0;
-	uint32_t too_big = 0, wait_idr = 0, bad = 0, config_changed = 0;
-	uint32_t evicted_reads = 0; // reads of frames no longer kept (got filler)
-	uint32_t max_frame = 0;     // largest frame pushed (bytes, before padding)
-	uint32_t gaps = 0;          // times fill() started filling
-	uint32_t shed = 0;          // frames dropped ahead of the clock
-	uint32_t sheds = 0;         // times the stream got too far ahead
-	int64_t ahead_ms_max = 0;   // furthest ahead of the clock a frame was pushed
+	u32 frames = 0;        // in the stream (real + skips)
+	u32 real = 0, idr = 0, skips = 0;
+	u32 too_big = 0, wait_idr = 0, bad = 0, config_changed = 0;
+	u32 evicted_reads = 0; // reads of frames no longer kept (got filler)
+	u32 max_frame = 0;     // largest frame pushed (bytes, before padding)
+	u32 gaps = 0;          // times fill() started filling
+	u32 shed = 0;          // frames dropped ahead of the clock
+	u32 sheds = 0;         // times the stream got too far ahead
+	i64 ahead_ms_max = 0;   // furthest ahead of the clock a frame was pushed
 };
 
 class Stream {
@@ -97,9 +97,9 @@ public:
 	const h264::Sps &sps() const { return sps_; }
 	bool skips_possible() const { return skip_ok_; }
 
-	Push push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string *why = nullptr);
+	Push push(const u8 *annexb, usize n, u64 now_ms, std::string *why = nullptr);
 	// Appends skip frames if a gap calls for it; returns how many.
-	unsigned fill(uint64_t now_ms);
+	unsigned fill(u64 now_ms);
 	// End of stream: reads past the last frame get EOF from now on.
 	void finish();
 	bool finished() const;
@@ -108,13 +108,13 @@ public:
 	bool sync_wanted();
 
 	// ---- serving ----
-	uint64_t data_off() const { return data_off_; }
-	uint32_t sample_size() const { return cfg_.sample_size; }
-	uint32_t declared() const { return declared_; }
-	uint64_t total() const { return data_off_ + (uint64_t)declared_ * cfg_.sample_size; }
+	u64 data_off() const { return data_off_; }
+	u32 sample_size() const { return cfg_.sample_size; }
+	u32 declared() const { return declared_; }
+	u64 total() const { return data_off_ + (u64)declared_ * cfg_.sample_size; }
 	// Bytes [0, available()) exist now.
-	uint64_t available() const;
-	uint64_t frames() const;
+	u64 available() const;
+	u64 frames() const;
 	// What one read() served as filler instead of frames.
 	struct ReadInfo {
 		unsigned evicted = 0;   // frames no longer kept (past ring_frames)
@@ -122,33 +122,33 @@ public:
 	};
 	// Copy [off, off + n) into dst; n is clamped at total(). Bytes past
 	// available() (a "far" read) come as filler frames. Returns the count.
-	size_t read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info = nullptr);
+	usize read(u64 off, u8 *dst, usize n, ReadInfo *info = nullptr);
 	// When frame k was pushed (real or skip), or -1 if unknown / no longer kept.
-	int64_t push_ms(uint64_t k) const;
+	i64 push_ms(u64 k) const;
 	bool started() const;        // the first IDR is in
-	uint64_t start_ms() const;   // when it came
+	u64 start_ms() const;   // when it came
 	Stats stats() const;
 
 private:
-	void store(const std::vector<uint8_t> &sample, uint64_t now_ms);
+	void store(const std::vector<u8> &sample, u64 now_ms);
 
 	mutable std::mutex mu_;
 	Config cfg_;
 	h264::Sps sps_;
 	h264::Pps pps_;
 	bool skip_ok_ = false;
-	std::vector<uint8_t> header_;
-	uint64_t data_off_ = 0;
-	uint32_t declared_ = 0;
+	std::vector<u8> header_;
+	u64 data_off_ = 0;
+	u32 declared_ = 0;
 
-	std::vector<uint8_t> ring_;          // ring_frames * S
-	std::vector<int64_t> ring_ms_;
-	uint64_t frames_ = 0;
+	std::vector<u8> ring_;          // ring_frames * S
+	std::vector<i64> ring_ms_;
+	u64 frames_ = 0;
 	bool started_ = false, need_idr_ = false, finished_ = false, sync_ = false;
-	uint64_t t0_ms_ = 0, last_push_ms_ = 0;
+	u64 t0_ms_ = 0, last_push_ms_ = 0;
 	bool filling_ = false, shedding_ = false;
 	unsigned prev_ref_frame_num_ = 0, last_poc_lsb_ = 0;
-	std::vector<uint8_t> sample_, filler_;
+	std::vector<u8> sample_, filler_;
 	Stats st_;
 };
 

@@ -468,7 +468,7 @@ build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/
 build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp src/hello8/gusa.cpp \
     src/hello8/checks.h
 	mkdir -p build
-	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello8 \
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello8 -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
 # LIVE's pure part (H.264 bits, CS-MP4 header, the live stream with gap
 # fill) and hello9's release schedule

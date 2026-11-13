@@ -27,6 +27,7 @@
 //   version=    AAP version we ask for (default 1.1)
 //   save=MB     cap of android_auto.h264 (default 64, 0 = don't save)
 //   tls=N       mbedTLS trace level in the log (default 1: errors)
+#include "types.h"
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -64,7 +65,7 @@ constexpr unsigned kCpuWindowMs = 10000;
 constexpr unsigned kCpuWarnPct = 50;
 constexpr unsigned kStatsEveryMs = 10000;
 constexpr unsigned kSessionTickMs = 50;
-constexpr size_t   kRxQueueMax = 8u << 20;   // bytes waiting for the session thread
+constexpr usize   kRxQueueMax = 8u << 20;   // bytes waiting for the session thread
 
 // Identification for the AOA handshake: what the Android Auto app expects
 // from a head unit (aasdk's AccessoryModeQueryFactory). Model
@@ -96,7 +97,7 @@ struct Status {
 	unsigned        kbps = 0;
 	unsigned        held_pct = 0;          // video acks held back by pacing, % (last second)
 	unsigned        wait_avg = 0;          // their average wait, ms
-	uint64_t        saved = 0;             // bytes in android_auto.h264
+	u64        saved = 0;             // bytes in android_auto.h264
 	unsigned        version = 0;           // bumped on every change
 	char            pace_label[16] = "";   // "25 fps" or "off"
 };
@@ -119,7 +120,7 @@ Status snapshot()
 }
 
 // The last log lines, for the screen (log_set_tap; must not log).
-constexpr size_t      kTailLines = 7;
+constexpr usize      kTailLines = 7;
 std::mutex            tail_lock;
 std::deque<std::string> tail;
 std::atomic<unsigned> tail_version{0};
@@ -177,7 +178,7 @@ public:
 	}
 	void opened() override { post(Ev::Open); }
 	void closed(const char *) override { post(Ev::Close); }
-	void rx(const uint8_t *p, size_t n) override
+	void rx(const u8 *p, usize n) override
 	{
 		{
 			std::lock_guard<std::mutex> lock(lock_);
@@ -194,7 +195,7 @@ public:
 	}
 
 	// aa::Host (session thread)
-	void send(const uint8_t *p, size_t n) override
+	void send(const u8 *p, usize n) override
 	{
 		if (!aoa_host::send(p, n))
 			log_msg("session: %zu bytes not sent (no link / queue full)", n);
@@ -208,9 +209,9 @@ public:
 			st.phase_detail = detail;
 		});
 	}
-	void video(const uint8_t *p, size_t n, uint64_t, bool) override
+	void video(const u8 *p, usize n, u64, bool) override
 	{
-		if (video_ == nullptr || video_saved_ + n > (uint64_t)opt_.save_mb << 20)
+		if (video_ == nullptr || video_saved_ + n > (u64)opt_.save_mb << 20)
 			return;
 		if (std::fwrite(p, 1, n, video_) == n)
 			video_saved_ += n;
@@ -278,8 +279,8 @@ private:
 	{
 		const aa::Stats &s = session_->stats();
 		unsigned dt = now - last_report_;
-		uint64_t frames = s.video_frames - last_frames_, bytes = s.video_bytes - last_bytes_;
-		uint64_t held = s.acks_held - last_held_, wait_sum = s.ack_wait_ms_sum - last_wait_sum_;
+		u64 frames = s.video_frames - last_frames_, bytes = s.video_bytes - last_bytes_;
+		u64 held = s.acks_held - last_held_, wait_sum = s.ack_wait_ms_sum - last_wait_sum_;
 		unsigned fps10 = dt ? (unsigned)(frames * 10000 / dt) : 0;
 		unsigned kbps = dt ? (unsigned)(bytes * 8 / dt) : 0;
 		if (now - last_log_ >= kStatsEveryMs && session_->phase() == aa::Phase::Running) {
@@ -329,7 +330,7 @@ private:
 	void run()
 	{
 		cpumon_name_thread("session");
-		std::deque<std::vector<uint8_t>> rx;
+		std::deque<std::vector<u8>> rx;
 		std::deque<Ev> events;
 		for (;;) {
 			{
@@ -352,7 +353,7 @@ private:
 					open_session();
 				}
 			if (session_)
-				for (const std::vector<uint8_t> &b : rx)
+				for (const std::vector<u8> &b : rx)
 					session_->rx(b.data(), b.size());
 			for (Ev e : events)
 				if (e == Ev::Close)
@@ -378,28 +379,28 @@ private:
 	std::mutex                       lock_;
 	MonoCond                         cond_;
 	bool                             stopping_ = false;
-	std::deque<std::vector<uint8_t>> rx_;
-	size_t                           rx_bytes_ = 0;
+	std::deque<std::vector<u8>> rx_;
+	usize                           rx_bytes_ = 0;
 	bool                             rx_overflow_ = false;
 	std::deque<Ev>                   events_;
 
 	// session thread only
 	std::unique_ptr<aa::Session> session_;
 	FILE    *video_ = nullptr;
-	uint64_t video_saved_ = 0;
+	u64 video_saved_ = 0;
 	unsigned last_report_ = 0, last_log_ = 0;
-	uint64_t last_frames_ = 0, last_bytes_ = 0, last_held_ = 0, last_wait_sum_ = 0;
-	uint64_t log_held_ = 0, log_frames_ = 0, log_wait_sum_ = 0;
+	u64 last_frames_ = 0, last_bytes_ = 0, last_held_ = 0, last_wait_sum_ = 0;
+	u64 log_held_ = 0, log_frames_ = 0, log_wait_sum_ = 0;
 };
 
 // --- the screen -------------------------------------------------------------
 
-constexpr uint32_t kBg = 0xFF101820u;
-constexpr uint32_t kText = 0xFFE8E8E8u;
-constexpr uint32_t kDim = 0xFF8A929Eu;
+constexpr u32 kBg = 0xFF101820u;
+constexpr u32 kText = 0xFFE8E8E8u;
+constexpr u32 kDim = 0xFF8A929Eu;
 constexpr int      kMargin = 16;
 
-uint32_t bar_colour(const Status &s)
+u32 bar_colour(const Status &s)
 {
 	if (s.phase == aa::Phase::Failed)
 		return 0xFFA03028u;
@@ -469,9 +470,9 @@ int done_steps(const Status &s)
 	return n;
 }
 
-void line(struct canvas *c, int x, int &y, uint32_t colour, const char *fmt, ...)
+void line(struct canvas *c, int x, int &y, u32 colour, const char *fmt, ...)
 	__attribute__((format(printf, 5, 6)));
-void line(struct canvas *c, int x, int &y, uint32_t colour, const char *fmt, ...)
+void line(struct canvas *c, int x, int &y, u32 colour, const char *fmt, ...)
 {
 	char buf[160];
 	va_list ap;
@@ -482,9 +483,9 @@ void line(struct canvas *c, int x, int &y, uint32_t colour, const char *fmt, ...
 	y += font_small.h + 6;
 }
 
-constexpr uint32_t kGood = 0xFF5CCB7Au;
-constexpr uint32_t kBusy = 0xFFF0C040u;
-constexpr uint32_t kBad = 0xFFFF8070u;
+constexpr u32 kGood = 0xFF5CCB7Au;
+constexpr u32 kBusy = 0xFFF0C040u;
+constexpr u32 kBad = 0xFFFF8070u;
 
 void render(struct canvas *c, const Status &s, const std::deque<std::string> &log_tail, unsigned step_s)
 {
@@ -501,7 +502,7 @@ void render(struct canvas *c, const Status &s, const std::deque<std::string> &lo
 	int y = 64;
 	for (int i = 0; i < kNumSteps; i++) {
 		const char *mark = "·";
-		uint32_t colour = kDim;
+		u32 colour = kDim;
 		if (i < done) {
 			mark = "√";
 			colour = kGood;
@@ -566,8 +567,8 @@ void render(struct canvas *c, const Status &s, const std::deque<std::string> &lo
 	if (room > 0 && !log_tail.empty()) {
 		canvas_fill(c, kMargin, y, c->w - 2 * kMargin, 1, kDim);
 		y += 4;
-		size_t first = log_tail.size() > (size_t)room ? log_tail.size() - room : 0;
-		for (size_t i = first; i < log_tail.size(); i++) {
+		usize first = log_tail.size() > (usize)room ? log_tail.size() - room : 0;
+		for (usize i = first; i < log_tail.size(); i++) {
 			const std::string &l = log_tail[i];
 			bool bad = l.find("FAIL") != std::string::npos || l.find("fail") != std::string::npos ||
 			           l.find("error") != std::string::npos;
@@ -603,7 +604,7 @@ std::string slurp(const std::string &path)
 	if (f == nullptr)
 		return s;
 	char buf[4096];
-	size_t n;
+	usize n;
 	while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
 		s.append(buf, n);
 	std::fclose(f);
@@ -618,8 +619,8 @@ bool parse_args(int argc, char *argv[], Options &o)
 		if (std::strncmp(a, "audio=", 6) == 0)
 			o.cfg.audio = a[6] != '0';
 		else if (std::sscanf(a, "version=%u.%u", &m, &n) == 2) {
-			o.cfg.version_major = (uint16_t)m;
-			o.cfg.version_minor = (uint16_t)n;
+			o.cfg.version_major = (u16)m;
+			o.cfg.version_minor = (u16)n;
 		} else if (std::strncmp(a, "save=", 5) == 0)
 			o.save_mb = (unsigned)std::atoi(a + 5);
 		else if (std::strncmp(a, "tls=", 4) == 0)

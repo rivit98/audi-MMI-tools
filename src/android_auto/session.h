@@ -28,7 +28,7 @@
 #define ANDROID_AUTO_SESSION_H
 
 #include <cstddef>
-#include <cstdint>
+#include "types.h"
 #include <string>
 #include <vector>
 
@@ -38,14 +38,14 @@
 namespace aa {
 
 // Our channel numbers, as advertised in the service discovery response.
-constexpr uint8_t kChControl = 0;
-constexpr uint8_t kChInput = 1;
-constexpr uint8_t kChSensor = 2;
-constexpr uint8_t kChVideo = 3;
-constexpr uint8_t kChMediaAudio = 4;
-constexpr uint8_t kChGuidanceAudio = 5;
-constexpr uint8_t kChSystemAudio = 6;
-constexpr uint8_t kChMic = 7;           // advertised always: the phone ends the session without one
+constexpr u8 kChControl = 0;
+constexpr u8 kChInput = 1;
+constexpr u8 kChSensor = 2;
+constexpr u8 kChVideo = 3;
+constexpr u8 kChMediaAudio = 4;
+constexpr u8 kChGuidanceAudio = 5;
+constexpr u8 kChSystemAudio = 6;
+constexpr u8 kChMic = 7;           // advertised always: the phone ends the session without one
 
 enum class Phase {
 	Idle,        // not started
@@ -59,8 +59,8 @@ enum class Phase {
 const char *phase_name(Phase p);
 
 struct Config {
-	uint16_t    version_major = 1;
-	uint16_t    version_minor = 1;
+	u16    version_major = 1;
+	u16    version_minor = 1;
 	bool        audio = true;          // advertise the three audio sinks
 	unsigned    dpi = 140;
 	unsigned    ping_ms = 1000;
@@ -75,19 +75,19 @@ struct Stats {
 	std::string label;               // label_text
 	std::string suite;               // TLS version + cipher suite
 	std::string error;               // why Failed
-	uint32_t    open_channels = 0;   // bit n: channel n opened
-	int32_t     video_session = -1;  // from START, -1 none yet
+	u32    open_channels = 0;   // bit n: channel n opened
+	i32     video_session = -1;  // from START, -1 none yet
 	bool        video_started = false;
-	uint64_t    video_frames = 0, video_bytes = 0, video_configs = 0;
+	u64    video_frames = 0, video_bytes = 0, video_configs = 0;
 	// ack pacing: frame acks that had to wait for their turn, and how long
-	uint64_t    acks_held = 0, ack_wait_ms_sum = 0;
+	u64    acks_held = 0, ack_wait_ms_sum = 0;
 	unsigned    ack_wait_ms_max = 0;
 	// Frame age: our arrival time minus the phone's timestamp, relative to
 	// the smallest seen (the phone's clock is its own, so only changes
 	// mean something). Growing = frames wait longer on the phone side.
 	unsigned    age_ms = 0, age_ms_max = 0;
-	uint64_t    audio_bytes[3] = {};  // media, guidance, system
-	uint64_t    rx_bytes = 0, tx_bytes = 0, rx_frames = 0;
+	u64    audio_bytes[3] = {};  // media, guidance, system
+	u64    rx_bytes = 0, tx_bytes = 0, rx_frames = 0;
 	unsigned    pings_sent = 0, pongs = 0, pings_answered = 0;
 	unsigned    last_rtt_ms = 0;
 	unsigned    handshake_ms = 0;    // the TLS handshake, from the first ClientHello
@@ -98,12 +98,12 @@ class Host {
 public:
 	virtual ~Host() = default;
 	// Bytes for bulk OUT, in order.
-	virtual void send(const uint8_t *p, size_t n) = 0;
+	virtual void send(const u8 *p, usize n) = 0;
 	virtual void phase(Phase, const std::string & /*detail*/) {}
 	// H.264 Annex-B: codec config (SPS/PPS) or a frame, ts in us (0 if none).
-	virtual void video(const uint8_t *, size_t, uint64_t /*ts_us*/, bool /*config*/) {}
+	virtual void video(const u8 *, usize, u64 /*ts_us*/, bool /*config*/) {}
 	// PCM on one of the audio channels.
-	virtual void audio(uint8_t /*channel*/, const uint8_t *, size_t) {}
+	virtual void audio(u8 /*channel*/, const u8 *, usize) {}
 	// Milliseconds, monotonic (pings, handshake time).
 	virtual unsigned now_ms() = 0;
 };
@@ -116,7 +116,7 @@ public:
 	// false: Failed (Stats::error says why).
 	bool start(const std::string &cert_pem, const std::string &key_pem);
 	// Bytes read from bulk IN, any boundaries.
-	void rx(const uint8_t *p, size_t n);
+	void rx(const u8 *p, usize n);
 	// Pings and paced video acks; call at least every ms_to_next() ms.
 	void tick();
 	// ms until tick() has something due (a held video ack), at most limit.
@@ -128,30 +128,30 @@ public:
 	const Stats &stats() const { return stats_; }
 
 	// For tests: the service discovery response we send.
-	std::vector<uint8_t> discovery_response() const;
+	std::vector<u8> discovery_response() const;
 
 private:
 	void set_phase(Phase p, const std::string &detail);
 	void fail(const std::string &why);
-	void send_msg(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *body, size_t n);
-	void send_msg(uint8_t ch, uint8_t flags, uint16_t id, const std::vector<uint8_t> &body)
+	void send_msg(u8 ch, u8 flags, u16 id, const u8 *body, usize n);
+	void send_msg(u8 ch, u8 flags, u16 id, const std::vector<u8> &body)
 	{
 		send_msg(ch, flags, id, body.data(), body.size());
 	}
 	void on_frame(const aap::Frame &f);
-	void on_message(uint8_t ch, uint8_t flags, const std::vector<uint8_t> &m);
-	void on_control(uint16_t id, const uint8_t *p, size_t n);
-	void on_handshake(const uint8_t *p, size_t n);
-	void on_channel_open(uint8_t ch, const uint8_t *p, size_t n);
-	void on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n);
-	void on_sensor(uint16_t id, const uint8_t *p, size_t n);
-	void on_input(uint16_t id, const uint8_t *p, size_t n);
+	void on_message(u8 ch, u8 flags, const std::vector<u8> &m);
+	void on_control(u16 id, const u8 *p, usize n);
+	void on_handshake(const u8 *p, usize n);
+	void on_channel_open(u8 ch, const u8 *p, usize n);
+	void on_media(u8 ch, u16 id, const u8 *p, usize n);
+	void on_sensor(u16 id, const u8 *p, usize n);
+	void on_input(u16 id, const u8 *p, usize n);
 	void send_video_focus();
-	void ack_media(uint8_t ch);
-	void video_frame_in(uint64_t ts_us);
+	void ack_media(u8 ch);
+	void video_frame_in(u64 ts_us);
 	void send_due_acks();
-	bool channel_known(uint8_t ch) const;
-	void log_unknown(uint8_t ch, uint16_t id, size_t n);
+	bool channel_known(u8 ch) const;
+	void log_unknown(u8 ch, u16 id, usize n);
 
 	Config         cfg_;
 	Host          &host_;
@@ -160,18 +160,18 @@ private:
 	aap::Assembler assembler_;
 	Phase          phase_ = Phase::Idle;
 	Stats          stats_;
-	int32_t        media_session_[256];
+	i32        media_session_[256];
 	unsigned       handshake_t0_ = 0;
 	unsigned       last_ping_ = 0;
 	unsigned       last_pong_ = 0;
 	bool           pong_warned_ = false;
 	// ack pacing (times in us of now_ms())
 	unsigned       acks_due_ = 0;       // video frame acks held back
-	uint64_t       next_ack_us_ = 0;    // when the first of them is due
-	uint64_t       held_since_us_ = 0;  // when it arrived
+	u64       next_ack_us_ = 0;    // when the first of them is due
+	u64       held_since_us_ = 0;  // when it arrived
 	bool           age_known_ = false;
-	int64_t        age_min_ = 0;
-	std::vector<uint8_t> plain_;     // scratch: a frame's plaintext
+	i64        age_min_ = 0;
+	std::vector<u8> plain_;     // scratch: a frame's plaintext
 };
 
 } // namespace aa

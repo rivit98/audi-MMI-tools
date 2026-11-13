@@ -4,6 +4,7 @@
 #ifndef HELLO6_H
 #define HELLO6_H
 
+#include "types.h"
 #include <stddef.h>
 
 #define SCREEN_W 800
@@ -13,7 +14,7 @@
 const char *sd_card_path(void);
 
 /* <sd>/hello6/<name>: every file hello6 writes besides hello6.log. */
-void out_path(char *buf, size_t n, const char *name);
+void out_path(char *buf, usize n, const char *name);
 
 /* A line for the end-of-run summary (log + summary screen). */
 void summary_add(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

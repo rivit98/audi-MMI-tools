@@ -1,4 +1,5 @@
 #include "lz4mini.h"
+#include "types.h"
 
 #include <string.h>
 
@@ -10,20 +11,20 @@
 #define MAX_OFFSET    65535
 #define HASH_LOG      12
 
-static uint32_t rd32(const uint8_t *p)
+static u32 rd32(const u8 *p)
 {
-	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
-	       (uint32_t)p[3] << 24;
+	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 |
+	       (u32)p[3] << 24;
 }
 
-static unsigned hash4(uint32_t v)
+static unsigned hash4(u32 v)
 {
 	return (v * 2654435761u) >> (32 - HASH_LOG);
 }
 
 /* The 255-run extension of a length that did not fit the 4-bit token
  * field. Returns the new op, or -1 if it does not fit. */
-static int put_len(uint8_t *dst, int op, int cap, int len)
+static int put_len(u8 *dst, int op, int cap, int len)
 {
 	for (; len >= 255; len -= 255) {
 		if (op >= cap)
@@ -32,40 +33,40 @@ static int put_len(uint8_t *dst, int op, int cap, int len)
 	}
 	if (op >= cap)
 		return -1;
-	dst[op++] = (uint8_t)len;
+	dst[op++] = (u8)len;
 	return op;
 }
 
 /* One sequence: lit literals from src+anchor, then (if mlen) a match of
  * mlen bytes at distance off. Returns the new op or -1. */
-static int put_seq(uint8_t *dst, int op, int cap, const uint8_t *lits, int lit,
+static int put_seq(u8 *dst, int op, int cap, const u8 *lits, int lit,
                    int off, int mlen)
 {
 	int tok = op++, ml = mlen - MIN_MATCH;
 
 	if (tok >= cap)
 		return -1;
-	dst[tok] = (uint8_t)((lit >= 15 ? 15 : lit) << 4);
+	dst[tok] = (u8)((lit >= 15 ? 15 : lit) << 4);
 	if (lit >= 15 && (op = put_len(dst, op, cap, lit - 15)) < 0)
 		return -1;
 	if (lit > cap - op)
 		return -1;
-	memcpy(dst + op, lits, (size_t)lit);
+	memcpy(dst + op, lits, (usize)lit);
 	op += lit;
 	if (mlen == 0)
 		return op;
 
 	if (2 > cap - op)
 		return -1;
-	dst[op++] = (uint8_t)off;
-	dst[op++] = (uint8_t)(off >> 8);
-	dst[tok] |= (uint8_t)(ml >= 15 ? 15 : ml);
+	dst[op++] = (u8)off;
+	dst[op++] = (u8)(off >> 8);
+	dst[tok] |= (u8)(ml >= 15 ? 15 : ml);
 	if (ml >= 15 && (op = put_len(dst, op, cap, ml - 15)) < 0)
 		return -1;
 	return op;
 }
 
-int lz4mini_compress(const uint8_t *src, int n, uint8_t *dst, int cap)
+int lz4mini_compress(const u8 *src, int n, u8 *dst, int cap)
 {
 	int table[1 << HASH_LOG];
 	int ip = 0, anchor = 0, op = 0, i;
@@ -76,7 +77,7 @@ int lz4mini_compress(const uint8_t *src, int n, uint8_t *dst, int cap)
 		table[i] = -1;
 
 	while (n > MF_LIMIT && ip < n - MF_LIMIT) {
-		uint32_t v = rd32(src + ip);
+		u32 v = rd32(src + ip);
 		unsigned h = hash4(v);
 		int ref = table[h], len;
 
@@ -106,7 +107,7 @@ int lz4mini_compress(const uint8_t *src, int n, uint8_t *dst, int cap)
 }
 
 /* Reads a 255-run length extension. Returns the added length, or -1. */
-static int get_len(const uint8_t *src, int n, int *ip)
+static int get_len(const u8 *src, int n, int *ip)
 {
 	int len = 0;
 	unsigned b;
@@ -122,7 +123,7 @@ static int get_len(const uint8_t *src, int n, int *ip)
 	return len;
 }
 
-int lz4mini_decompress(const uint8_t *src, int n, uint8_t *dst, int cap)
+int lz4mini_decompress(const u8 *src, int n, u8 *dst, int cap)
 {
 	int ip = 0, op = 0;
 
@@ -143,7 +144,7 @@ int lz4mini_decompress(const uint8_t *src, int n, uint8_t *dst, int cap)
 		}
 		if (lit > n - ip || lit > cap - op)
 			return -1;
-		memcpy(dst + op, src + ip, (size_t)lit);
+		memcpy(dst + op, src + ip, (usize)lit);
 		ip += lit;
 		op += lit;
 		if (ip == n)
@@ -165,7 +166,7 @@ int lz4mini_decompress(const uint8_t *src, int n, uint8_t *dst, int cap)
 		if (ml > cap - op)
 			return -1;
 		if (off >= ml) {
-			memcpy(dst + op, dst + op - off, (size_t)ml);
+			memcpy(dst + op, dst + op - off, (usize)ml);
 		} else {
 			for (i = 0; i < ml; i++)          /* overlapping: byte order matters */
 				dst[op + i] = dst[op + i - off];

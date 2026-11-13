@@ -1,5 +1,6 @@
 // session.cpp - see session.h.
 #include "session.h"
+#include "types.h"
 
 #include <cstdio>
 #include <cstring>
@@ -15,7 +16,7 @@ namespace aa {
 namespace {
 
 // control channel (ControlMessageType.proto)
-enum : uint16_t {
+enum : u16 {
 	kVersionRequest = 1,
 	kVersionResponse = 2,
 	kEncapsulatedSsl = 3,
@@ -39,7 +40,7 @@ enum : uint16_t {
 };
 
 // media sink channels (MediaMessageId.proto)
-enum : uint16_t {
+enum : u16 {
 	kMediaData = 0x0000,         // u64 BE timestamp + data
 	kMediaCodecConfig = 0x0001,  // data
 	kMediaSetup = 0x8000,
@@ -54,14 +55,14 @@ enum : uint16_t {
 };
 
 // sensor channel (SensorMessageId.proto)
-enum : uint16_t {
+enum : u16 {
 	kSensorRequest = 0x8001,
 	kSensorResponse = 0x8002,
 	kSensorBatch = 0x8003,
 };
 
 // input channel (InputMessageId.proto)
-enum : uint16_t {
+enum : u16 {
 	kKeyBindingRequest = 0x8002,
 	kKeyBindingResponse = 0x8003,
 };
@@ -82,7 +83,7 @@ constexpr unsigned kAudioMedia = 3;
 
 // KeyCode.proto: what the MMI could send one day (main knob, its push,
 // the buttons around it).
-const std::vector<int32_t> kKeycodes = {
+const std::vector<i32> kKeycodes = {
 	3,       // HOME
 	4,       // BACK
 	19, 20, 21, 22, 23,  // DPAD up / down / left / right / center
@@ -93,20 +94,20 @@ const std::vector<int32_t> kKeycodes = {
 
 constexpr unsigned kPongWarnMs = 10000;
 
-uint16_t be16(const uint8_t *p)
+u16 be16(const u8 *p)
 {
-	return (uint16_t)(p[0] << 8 | p[1]);
+	return (u16)(p[0] << 8 | p[1]);
 }
 
-uint64_t be64(const uint8_t *p)
+u64 be64(const u8 *p)
 {
-	uint64_t v = 0;
+	u64 v = 0;
 	for (int i = 0; i < 8; i++)
 		v = v << 8 | p[i];
 	return v;
 }
 
-const char *channel_name(uint8_t ch)
+const char *channel_name(u8 ch)
 {
 	switch (ch) {
 	case kChControl:       return "control";
@@ -121,7 +122,7 @@ const char *channel_name(uint8_t ch)
 	return "?";
 }
 
-int audio_index(uint8_t ch)
+int audio_index(u8 ch)
 {
 	switch (ch) {
 	case kChMediaAudio:    return 0;
@@ -164,7 +165,7 @@ const char *phase_name(Phase p)
 
 Session::Session(const Config &cfg, Host &host) : cfg_(cfg), host_(host)
 {
-	for (int32_t &s : media_session_)
+	for (i32 &s : media_session_)
 		s = -1;
 }
 
@@ -183,7 +184,7 @@ void Session::fail(const std::string &why)
 	set_phase(Phase::Failed, why);
 }
 
-bool Session::channel_known(uint8_t ch) const
+bool Session::channel_known(u8 ch) const
 {
 	switch (ch) {
 	case kChInput:
@@ -201,21 +202,21 @@ bool Session::channel_known(uint8_t ch) const
 
 // --- out -----------------------------------------------------------------
 
-void Session::send_msg(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *body, size_t n)
+void Session::send_msg(u8 ch, u8 flags, u16 id, const u8 *body, usize n)
 {
-	std::vector<uint8_t> plain;
+	std::vector<u8> plain;
 	plain.reserve(2 + n);
-	plain.push_back((uint8_t)(id >> 8));
-	plain.push_back((uint8_t)id);
+	plain.push_back((u8)(id >> 8));
+	plain.push_back((u8)id);
 	plain.insert(plain.end(), body, body + n);
 
-	std::vector<uint8_t> out, rec;
-	size_t total = plain.size();
-	for (size_t off = 0; off < total || total == 0;) {
-		size_t len = total - off < aap::kMaxFramePlain ? total - off : aap::kMaxFramePlain;
-		uint8_t type = (off == 0 ? aap::kFirst : 0) | (off + len == total ? aap::kLast : 0);
-		const uint8_t *payload = plain.data() + off;
-		size_t size = len;
+	std::vector<u8> out, rec;
+	usize total = plain.size();
+	for (usize off = 0; off < total || total == 0;) {
+		usize len = total - off < aap::kMaxFramePlain ? total - off : aap::kMaxFramePlain;
+		u8 type = (off == 0 ? aap::kFirst : 0) | (off + len == total ? aap::kLast : 0);
+		const u8 *payload = plain.data() + off;
+		usize size = len;
 		if (flags & aap::kEncrypted) {
 			rec.clear();
 			if (!tls_.encrypt(payload, len, rec)) {
@@ -225,7 +226,7 @@ void Session::send_msg(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *bo
 			payload = rec.data();
 			size = rec.size();
 		}
-		aap::put_frame(out, ch, (uint8_t)(flags | type), (uint32_t)total, payload, size);
+		aap::put_frame(out, ch, (u8)(flags | type), (u32)total, payload, size);
 		off += len;
 		if (total == 0)
 			break;
@@ -234,7 +235,7 @@ void Session::send_msg(uint8_t ch, uint8_t flags, uint16_t id, const uint8_t *bo
 	host_.send(out.data(), out.size());
 }
 
-std::vector<uint8_t> Session::discovery_response() const
+std::vector<u8> Session::discovery_response() const
 {
 	pb::Writer r;
 
@@ -297,8 +298,8 @@ bool Session::start(const std::string &cert_pem, const std::string &key_pem)
 		fail("TLS setup: " + err);
 		return false;
 	}
-	uint8_t v[4] = {(uint8_t)(cfg_.version_major >> 8), (uint8_t)cfg_.version_major,
-	                (uint8_t)(cfg_.version_minor >> 8), (uint8_t)cfg_.version_minor};
+	u8 v[4] = {(u8)(cfg_.version_major >> 8), (u8)cfg_.version_major,
+	                (u8)(cfg_.version_minor >> 8), (u8)cfg_.version_minor};
 	char detail[48];
 	std::snprintf(detail, sizeof(detail), "asked for protocol %u.%u", cfg_.version_major,
 	              cfg_.version_minor);
@@ -307,7 +308,7 @@ bool Session::start(const std::string &cert_pem, const std::string &key_pem)
 	return phase_ != Phase::Failed;
 }
 
-void Session::rx(const uint8_t *p, size_t n)
+void Session::rx(const u8 *p, usize n)
 {
 	if (phase_ == Phase::Failed || phase_ == Phase::Idle)
 		return;
@@ -323,8 +324,8 @@ void Session::rx(const uint8_t *p, size_t n)
 void Session::on_frame(const aap::Frame &f)
 {
 	stats_.rx_frames++;
-	const uint8_t *plain = f.payload;
-	size_t n = f.size;
+	const u8 *plain = f.payload;
+	usize n = f.size;
 	if (f.flags & aap::kEncrypted) {
 		if (!tls_.done()) {
 			fail("an encrypted frame before the TLS handshake ended");
@@ -351,15 +352,15 @@ void Session::on_frame(const aap::Frame &f)
 	}
 }
 
-void Session::on_message(uint8_t ch, uint8_t flags, const std::vector<uint8_t> &m)
+void Session::on_message(u8 ch, u8 flags, const std::vector<u8> &m)
 {
-	uint16_t id;
+	u16 id;
 	if (!aap::message_id(m, id)) {
 		log_msg("aa: channel %u: message of %zu bytes, no id", ch, m.size());
 		return;
 	}
-	const uint8_t *p = m.data() + 2;
-	size_t n = m.size() - 2;
+	const u8 *p = m.data() + 2;
+	usize n = m.size() - 2;
 	if (ch == kChControl) {
 		on_control(id, p, n);
 		return;
@@ -380,15 +381,15 @@ void Session::on_message(uint8_t ch, uint8_t flags, const std::vector<uint8_t> &
 		on_media(ch, id, p, n);
 }
 
-void Session::log_unknown(uint8_t ch, uint16_t id, size_t n)
+void Session::log_unknown(u8 ch, u16 id, usize n)
 {
 	stats_.unknown++;
 	log_msg("aa: channel %u (%s): message 0x%04x, %zu bytes, not handled", ch, channel_name(ch), id, n);
 }
 
-void Session::on_control(uint16_t id, const uint8_t *p, size_t n)
+void Session::on_control(u16 id, const u8 *p, usize n)
 {
-	uint64_t v = 0;
+	u64 v = 0;
 	pb::Writer w;
 
 	switch (id) {
@@ -398,7 +399,7 @@ void Session::on_control(uint16_t id, const uint8_t *p, size_t n)
 			return;
 		}
 		unsigned major = be16(p), minor = be16(p + 2);
-		int16_t status = (int16_t)be16(p + 4);
+		i16 status = (i16)be16(p + 4);
 		log_msg("aa: VERSION_RESPONSE %u.%u status %d", major, minor, status);
 		// Phones answer non-zero statuses on sessions that work; only -1
 		// (STATUS_NO_COMPATIBLE_VERSION) refuses (open-headunit's
@@ -432,7 +433,7 @@ void Session::on_control(uint16_t id, const uint8_t *p, size_t n)
 	}
 	case kPingRequest:
 		pb::get_u(p, n, 1, v);
-		w.i(1, (int64_t)v);
+		w.i(1, (i64)v);
 		send_msg(kChControl, 0, kPingResponse, w.buf);    // plain, as aasdk
 		stats_.pings_answered++;
 		return;
@@ -477,9 +478,9 @@ void Session::on_control(uint16_t id, const uint8_t *p, size_t n)
 	log_unknown(kChControl, id, n);
 }
 
-void Session::on_handshake(const uint8_t *p, size_t n)
+void Session::on_handshake(const u8 *p, usize n)
 {
-	std::vector<uint8_t> out;
+	std::vector<u8> out;
 	Tls::Step step = tls_.handshake(p, n, out);
 	if (!out.empty())
 		send_msg(kChControl, 0, kEncapsulatedSsl, out);
@@ -498,9 +499,9 @@ void Session::on_handshake(const uint8_t *p, size_t n)
 	}
 }
 
-void Session::on_channel_open(uint8_t ch, const uint8_t *p, size_t n)
+void Session::on_channel_open(u8 ch, const u8 *p, usize n)
 {
-	uint64_t prio = 0, svc = 0;
+	u64 prio = 0, svc = 0;
 	pb::get_u(p, n, 1, prio);
 	pb::get_u(p, n, 2, svc);
 	bool ok = channel_known(ch);
@@ -520,16 +521,16 @@ void Session::send_video_focus()
 	send_msg(kChVideo, aap::kEncrypted, kVideoFocusNotification, w.buf);
 }
 
-void Session::ack_media(uint8_t ch)
+void Session::ack_media(u8 ch)
 {
 	pb::Writer w;
 	w.i(1, media_session_[ch]).u(2, 1);
 	send_msg(ch, aap::kEncrypted, kMediaAck, w.buf);
 }
 
-void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
+void Session::on_media(u8 ch, u16 id, const u8 *p, usize n)
 {
-	uint64_t v = 0, idx = 0;
+	u64 v = 0, idx = 0;
 	pb::Writer w;
 	int ai = audio_index(ch);
 
@@ -545,17 +546,17 @@ void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
 	case kMediaStart:
 		pb::get_u(p, n, 1, v);
 		pb::get_u(p, n, 2, idx);
-		media_session_[ch] = (int32_t)v;
+		media_session_[ch] = (i32)v;
 		if (ch == kChVideo)
-			stats_.video_session = (int32_t)v;
-		log_msg("aa: %s START session %d config %u", channel_name(ch), (int)(int32_t)v, (unsigned)idx);
+			stats_.video_session = (i32)v;
+		log_msg("aa: %s START session %d config %u", channel_name(ch), (int)(i32)v, (unsigned)idx);
 		return;
 	case kMediaStop:
 		log_msg("aa: %s STOP", channel_name(ch));
 		return;
 	case kMediaCodecConfig:
 	case kMediaData: {
-		uint64_t ts = 0;
+		u64 ts = 0;
 		if (id == kMediaData) {
 			if (n < 8) {
 				log_msg("aa: %s data message of %zu bytes, too short", channel_name(ch), n);
@@ -594,7 +595,7 @@ void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
 		log_msg("aa: MICROPHONE_REQUEST %s -> ok (no mic data)", v ? "open" : "close");
 		w.u(1, 0);                                        // MicrophoneResponse: status OK
 		if (media_session_[ch] >= 0)
-			w.u(2, (uint64_t)media_session_[ch]);
+			w.u(2, (u64)media_session_[ch]);
 		send_msg(ch, aap::kEncrypted, kMicResponse, w.buf);
 		return;
 	case kVideoFocusRequest:
@@ -610,10 +611,10 @@ void Session::on_media(uint8_t ch, uint16_t id, const uint8_t *p, size_t n)
 // A video frame came: its ack is due one frame period after the last one
 // (or now, if the phone was slower than that). Acks are never saved up: a
 // phone that paused gets no burst of quick acks afterwards.
-void Session::video_frame_in(uint64_t ts_us)
+void Session::video_frame_in(u64 ts_us)
 {
-	uint64_t now = (uint64_t)host_.now_ms() * 1000;
-	int64_t age = (int64_t)(now / 1000) - (int64_t)(ts_us / 1000);
+	u64 now = (u64)host_.now_ms() * 1000;
+	i64 age = (i64)(now / 1000) - (i64)(ts_us / 1000);
 	if (ts_us != 0) {
 		if (!age_known_ || age < age_min_) {
 			age_min_ = age;
@@ -623,9 +624,9 @@ void Session::video_frame_in(uint64_t ts_us)
 		if (stats_.age_ms > stats_.age_ms_max)
 			stats_.age_ms_max = stats_.age_ms;
 	}
-	uint64_t period = 1000000 / cfg_.video_fps;
+	u64 period = 1000000 / cfg_.video_fps;
 	if (acks_due_ == 0) {
-		uint64_t due = next_ack_us_ + period;    // after the last ack sent
+		u64 due = next_ack_us_ + period;    // after the last ack sent
 		next_ack_us_ = due > now ? due : now;
 		held_since_us_ = now;
 	}
@@ -637,7 +638,7 @@ void Session::send_due_acks()
 {
 	if (acks_due_ == 0)
 		return;
-	uint64_t now = (uint64_t)host_.now_ms() * 1000;
+	u64 now = (u64)host_.now_ms() * 1000;
 	if (now < next_ack_us_)
 		return;
 	unsigned waited = (unsigned)((now - held_since_us_) / 1000);
@@ -662,20 +663,20 @@ unsigned Session::ms_to_next(unsigned limit) const
 {
 	if (acks_due_ == 0)
 		return limit;
-	uint64_t now = (uint64_t)host_.now_ms() * 1000;
+	u64 now = (u64)host_.now_ms() * 1000;
 	if (now >= next_ack_us_)
 		return 0;
-	uint64_t ms = (next_ack_us_ - now + 999) / 1000;
+	u64 ms = (next_ack_us_ - now + 999) / 1000;
 	return ms < limit ? (unsigned)ms : limit;
 }
 
-void Session::on_sensor(uint16_t id, const uint8_t *p, size_t n)
+void Session::on_sensor(u16 id, const u8 *p, usize n)
 {
 	if (id != kSensorRequest) {
 		log_unknown(kChSensor, id, n);
 		return;
 	}
-	uint64_t type = 0, period = 0;
+	u64 type = 0, period = 0;
 	pb::get_u(p, n, 1, type);
 	pb::get_u(p, n, 2, period);
 	bool ok = type == kSensorDrivingStatus || type == kSensorNightMode;
@@ -697,7 +698,7 @@ void Session::on_sensor(uint16_t id, const uint8_t *p, size_t n)
 	send_msg(kChSensor, aap::kEncrypted, kSensorBatch, batch.buf);
 }
 
-void Session::on_input(uint16_t id, const uint8_t *, size_t n)
+void Session::on_input(u16 id, const u8 *, usize n)
 {
 	if (id != kKeyBindingRequest) {
 		log_unknown(kChInput, id, n);

@@ -1,17 +1,18 @@
 /*
  * text.c - UTF-8 decoding, word wrap and bitmap-font drawing (see text.h).
  */
+#include "types.h"
 #include <string.h>
 
 #include "text.h"
 
 #define REPLACEMENT 0xFFFD
 
-uint32_t utf8_next(const char **s, const char *end)
+u32 utf8_next(const char **s, const char *end)
 {
 	const unsigned char *p = (const unsigned char *)*s;
 	const unsigned char *e = (const unsigned char *)end;
-	uint32_t cp, min;
+	u32 cp, min;
 	int n, i;
 
 	if ((e != NULL && p >= e) || *p == 0)
@@ -53,7 +54,7 @@ int utf8_count(const char *s, int nbytes)
 	return n;
 }
 
-int font_glyph(const struct font *f, uint32_t cp)
+int font_glyph(const struct font *f, u32 cp)
 {
 	int lo = 0, hi = f->nmap - 1;
 
@@ -72,7 +73,7 @@ int font_glyph(const struct font *f, uint32_t cp)
 	return f->fallback;
 }
 
-void canvas_fill(struct canvas *c, int x, int y, int w, int h, uint32_t color)
+void canvas_fill(struct canvas *c, int x, int y, int w, int h, u32 color)
 {
 	int x1 = x + w, y1 = y + h, i;
 
@@ -81,7 +82,7 @@ void canvas_fill(struct canvas *c, int x, int y, int w, int h, uint32_t color)
 	if (x1 > c->w) x1 = c->w;
 	if (y1 > c->h) y1 = c->h;
 	for (; y < y1; y++) {
-		uint32_t *row = c->px + y * c->stride;
+		u32 *row = c->px + y * c->stride;
 
 		for (i = x; i < x1; i++)
 			row[i] = color;
@@ -89,15 +90,15 @@ void canvas_fill(struct canvas *c, int x, int y, int w, int h, uint32_t color)
 }
 
 static void draw_glyph(struct canvas *c, const struct font *f, int x, int y,
-                       int glyph, uint32_t color)
+                       int glyph, u32 color)
 {
-	const uint8_t *g = f->bits + glyph * f->h * f->row_bytes;
+	const u8 *g = f->bits + glyph * f->h * f->row_bytes;
 	int gy, gx;
 
 	if (x >= c->w || y >= c->h || x + f->w <= 0 || y + f->h <= 0)
 		return;
 	for (gy = 0; gy < f->h; gy++, g += f->row_bytes) {
-		uint32_t *row;
+		u32 *row;
 
 		if (y + gy < 0 || y + gy >= c->h)
 			continue;
@@ -112,10 +113,10 @@ static void draw_glyph(struct canvas *c, const struct font *f, int x, int y,
 }
 
 int text_draw(struct canvas *c, const struct font *f, int x, int y,
-              const char *s, int nbytes, uint32_t color)
+              const char *s, int nbytes, u32 color)
 {
 	const char *end = s + (nbytes < 0 ? (int)strlen(s) : nbytes);
-	uint32_t cp;
+	u32 cp;
 
 	while ((cp = utf8_next(&s, end)) != 0) {
 		if (cp == '\r')

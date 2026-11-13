@@ -2,6 +2,7 @@
  * probe.c - pixel-readback checks of the 3D pipeline (see probe.h).
  */
 #include "probe.h"
+#include "types.h"
 
 #include <stdlib.h>
 
@@ -63,7 +64,7 @@ static void reset(void)
 
 /* Axis-aligned quad at depth z with texcoords (0,0)-(1,1); counter-
  * clockwise (front-facing by default) unless cw. */
-static void quad(float x0, float y0, float x1, float y1, float z, int cw)
+static void quad(f32 x0, f32 y0, f32 x1, f32 y1, f32 z, int cw)
 {
 	GLfloat v[12] = { x0, y0, z,  x1, y0, z,  x0, y1, z,  x1, y1, z };
 	static const GLfloat t_ccw[8] = { 0, 0,  1, 0,  0, 1,  1, 1 };
@@ -78,7 +79,7 @@ static void quad(float x0, float y0, float x1, float y1, float z, int cw)
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-static void colour(float r, float g, float b)
+static void colour(f32 r, f32 g, f32 b)
 {
 	glColor4f(r, g, b, 1.0f);
 }
@@ -236,7 +237,7 @@ static int p_texture(void)
 static int p_fog(void)
 {
 	static const GLfloat yellow[4] = { 1, 1, 0, 1 };
-	static const float range[3][2] = { { 1, 3 }, { 3, 7 }, { 6, 9 } };
+	static const f32 range[3][2] = { { 1, 3 }, { 3, 7 }, { 6, 9 } };
 	static const int want[3][3] = { { 255, 255, 0 }, { 127, 127, 127 }, { 0, 0, 255 } };
 	int i;
 

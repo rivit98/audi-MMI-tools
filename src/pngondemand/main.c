@@ -8,6 +8,7 @@
  * and shows the PNG with showScreen, so nothing is pre-rendered. Usage and
  * the layout language: README.md here, or -h (the text below).
  */
+#include "types.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,7 +60,7 @@ static char *read_all(const char *path)
 {
 	FILE *f = strcmp(path, "-") == 0 ? stdin : fopen(path, "rb");
 	char *buf;
-	size_t n;
+	usize n;
 
 	if (f == NULL)
 		return NULL;

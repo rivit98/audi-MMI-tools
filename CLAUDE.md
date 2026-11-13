@@ -74,6 +74,8 @@ gradle, adb or gcc.
 - **Never use the user's nickname** in identifiers, strings, paths, package ids, log names or
   docs. The repo's own directory name is the only exception. Neutral identities: run dir
   `/tmp/mmi_apps`, AOA manufacturer `mmi3g`, packages `mmi3g.*`, run log `var/run.log`.
+- Types: `src/common/types.h` (`u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`), never
+  `uint32_t`/`size_t`/`ssize_t`/`double` etc. in our code (third-party headers excepted).
 - Header guards = directory + file (`COMMON_LOG_H`, `HELLO5_PULSE_H`), never a bare `X_H`.
 - New app: `src/<app>/` + README, Makefile rule (+ `CXX_APPS` for C++), `sd/apps.conf` line,
   host tests (native-apps.md §4 "Adding an app").

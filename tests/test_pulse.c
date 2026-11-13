@@ -2,16 +2,16 @@
  * test_pulse.c - src/hello5/pulse.c: the WAV header, the train's layout
  * (n pings, silence between), clean ping edges, the level and the pitch.
  */
-#include <stdint.h>
+#include "types.h"
 #include <stdlib.h>
 
 #include "check.h"
 #include "pulse.h"
 
-static uint32_t rd32(const unsigned char *p)
+static u32 rd32(const unsigned char *p)
 {
-	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
-	       (uint32_t)p[3] << 24;
+	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 |
+	       (u32)p[3] << 24;
 }
 
 static void test_header(void)
@@ -36,16 +36,16 @@ static void test_header(void)
 static void test_train(void)
 {
 	const unsigned n = 3;
-	const uint32_t period = PULSE_RATE / 1000 * PULSE_PERIOD_MS;
-	const uint32_t len = PULSE_RATE / 1000 * PULSE_PING_MS;
-	uint32_t ns = pulse_samples(n), i, k;
-	int16_t *pcm = malloc(ns * sizeof(*pcm));
+	const u32 period = PULSE_RATE / 1000 * PULSE_PERIOD_MS;
+	const u32 len = PULSE_RATE / 1000 * PULSE_PING_MS;
+	u32 ns = pulse_samples(n), i, k;
+	i16 *pcm = malloc(ns * sizeof(*pcm));
 	int peak = 0, ok_silence = 1, ok_edges = 1, ok_same = 1;
 
 	CHECK_EQ(ns, n * period);
 	pulse_render(pcm, n);
 	for (k = 0; k < n; k++) {
-		const int16_t *p = pcm + k * period;
+		const i16 *p = pcm + k * period;
 		unsigned up = 0;
 
 		ok_edges &= p[0] == 0 && abs(p[len - 1]) < 50;

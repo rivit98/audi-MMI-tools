@@ -8,6 +8,7 @@
 // bulk transfers for data, a short transfer reported as
 // USBD_STATUS_CMP_ERR | USBD_STATUS_DATA_UNDERRUN counting as success.
 #include "aoa_host.h"
+#include "types.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -41,9 +42,9 @@ namespace aoa_host {
 namespace {
 
 // AOA protocol (source.android.com/docs/core/interaction/accessories/aoa)
-constexpr uint8_t  kAoaGetProtocol = 51;
-constexpr uint8_t  kAoaSendString = 52;
-constexpr uint8_t  kAoaStart = 53;
+constexpr u8  kAoaGetProtocol = 51;
+constexpr u8  kAoaSendString = 52;
+constexpr u8  kAoaStart = 53;
 constexpr unsigned kAoaVid = 0x18D1;
 constexpr unsigned kAoaPidMin = 0x2D00;   // 2d00 accessory, 2d01 +adb, 2d04/05 +audio
 constexpr unsigned kAoaPidMax = 0x2D05;
@@ -60,7 +61,7 @@ constexpr int      kHandshakeTries = 5;
 constexpr unsigned kInBufSize = 16384;        // Android accessory reads want >= 16 KB
 constexpr unsigned kOutBufSize = 16384;
 constexpr int      kMaxDevices = 16;
-constexpr size_t   kMaxEvents = 32;
+constexpr usize   kMaxEvents = 32;
 
 Config  cfg;
 Client *client;
@@ -145,18 +146,18 @@ struct UrbFree {
 using Urb = std::unique_ptr<struct usbd_urb, UrbFree>;
 
 struct UsbFree {
-	void operator()(uint8_t *p) const { usbd_free(p); }
+	void operator()(u8 *p) const { usbd_free(p); }
 };
-using UsbBuf = std::unique_ptr<uint8_t, UsbFree>;
+using UsbBuf = std::unique_ptr<u8, UsbFree>;
 
-UsbBuf usb_alloc(size_t n)
+UsbBuf usb_alloc(usize n)
 {
-	return UsbBuf(static_cast<uint8_t *>(usbd_alloc(n)));
+	return UsbBuf(static_cast<u8 *>(usbd_alloc(n)));
 }
 
-bool urb_ok(struct usbd_urb *urb, uint32_t *len)
+bool urb_ok(struct usbd_urb *urb, u32 *len)
 {
-	uint32_t status = 0;
+	u32 status = 0;
 
 	*len = 0;
 	int rc = usbd_urb_status(urb, &status, len);
@@ -166,9 +167,9 @@ bool urb_ok(struct usbd_urb *urb, uint32_t *len)
 	       status == (USBD_STATUS_CMP_ERR | USBD_STATUS_DATA_UNDERRUN);
 }
 
-uint32_t urb_status(struct usbd_urb *urb)
+u32 urb_status(struct usbd_urb *urb)
 {
-	uint32_t status = 0, len = 0;
+	u32 status = 0, len = 0;
 
 	usbd_urb_status(urb, &status, &len);
 	return status;
@@ -198,8 +199,8 @@ public:
 	// nullptr if that fails.
 	static std::unique_ptr<Link> open(struct usbd_device *dev);
 
-	bool send(const uint8_t *p, size_t n);
-	size_t pending()
+	bool send(const u8 *p, usize n);
+	usize pending()
 	{
 		std::lock_guard<std::recursive_mutex> lock(lock_);
 		return outq_bytes_;
@@ -209,12 +210,12 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(lock_);
 		return broken_;
 	}
-	uint32_t fail_status()
+	u32 fail_status()
 	{
 		std::lock_guard<std::recursive_mutex> lock(lock_);
 		return fail_status_;
 	}
-	uint64_t rx_bytes() const { return rx_bytes_; }
+	u64 rx_bytes() const { return rx_bytes_; }
 
 	// Frees the link, unless a pipe will not close: then a URB may still be
 	// in flight into our buffers, so everything is leaked instead.
@@ -246,13 +247,13 @@ private:
 	UsbBuf               in_buf_, out_buf_;
 	unsigned             out_packet_ = 0;     // wMaxPacketSize of bulk OUT
 
-	std::deque<std::vector<uint8_t>> outq_;  // front: being sent from outq_off_
-	size_t   outq_off_ = 0, outq_bytes_ = 0;
-	size_t   out_len_ = 0;                    // bytes in flight
+	std::deque<std::vector<u8>> outq_;  // front: being sent from outq_off_
+	usize   outq_off_ = 0, outq_bytes_ = 0;
+	usize   out_len_ = 0;                    // bytes in flight
 	bool     in_pending_ = false, out_pending_ = false;
 	bool     closing_ = false, broken_ = false;
-	uint32_t fail_status_ = 0;
-	uint64_t rx_bytes_ = 0;                   // usbd thread
+	u32 fail_status_ = 0;
+	u64 rx_bytes_ = 0;                   // usbd thread
 };
 
 // lock_ held. Starts the next transfer if nothing is in flight.
@@ -260,10 +261,10 @@ void Link::out_kick()
 {
 	if (out_pending_ || outq_.empty() || closing_ || broken_)
 		return;
-	const std::vector<uint8_t> &b = outq_.front();
-	size_t n = usb_chunk(b.size() - outq_off_, kOutBufSize, out_packet_);
+	const std::vector<u8> &b = outq_.front();
+	usize n = usb_chunk(b.size() - outq_off_, kOutBufSize, out_packet_);
 	std::memcpy(out_buf_.get(), b.data() + outq_off_, n);
-	usbd_setup_bulk(out_urb_.get(), URB_DIR_OUT, out_buf_.get(), (uint32_t)n);
+	usbd_setup_bulk(out_urb_.get(), URB_DIR_OUT, out_buf_.get(), (u32)n);
 	out_pending_ = true;
 	out_len_ = n;
 	int rc = usbd_io(out_urb_.get(), out_, out_done_cb, this, USBD_TIME_INFINITY);
@@ -275,7 +276,7 @@ void Link::out_kick()
 	}
 }
 
-bool Link::send(const uint8_t *p, size_t n)
+bool Link::send(const u8 *p, usize n)
 {
 	std::lock_guard<std::recursive_mutex> lock(lock_);
 	if (broken_ || closing_)
@@ -292,7 +293,7 @@ bool Link::send(const uint8_t *p, size_t n)
 
 void Link::out_done(struct usbd_urb *urb)
 {
-	uint32_t len;
+	u32 len;
 	bool ok = urb_ok(urb, &len);
 
 	std::lock_guard<std::recursive_mutex> lock(lock_);
@@ -330,7 +331,7 @@ int Link::in_post()
 
 void Link::in_done(struct usbd_urb *urb)
 {
-	uint32_t len;
+	u32 len;
 	bool ok = urb_ok(urb, &len);
 
 	name_usbd_thread();
@@ -481,7 +482,7 @@ std::unique_ptr<Link> Link::open(struct usbd_device *dev)
 
 // --- AOA handshake -------------------------------------------------------
 
-const char *status_name(uint32_t st)
+const char *status_name(u32 st)
 {
 	if (st & USBD_STATUS_TIMEOUT)
 		return "timeout";
@@ -497,17 +498,17 @@ const char *status_name(uint32_t st)
 	return "?";
 }
 
-int ctrl(struct usbd_pipe *pipe, struct usbd_urb *urb, bool in, uint8_t req, uint16_t index,
-         uint8_t *buf, uint32_t len, uint32_t *got)
+int ctrl(struct usbd_pipe *pipe, struct usbd_urb *urb, bool in, u8 req, u16 index,
+         u8 *buf, u32 len, u32 *got)
 {
-	uint16_t rtype = USB_TYPE_VENDOR | USB_RECIPIENT_DEVICE |
+	u16 rtype = USB_TYPE_VENDOR | USB_RECIPIENT_DEVICE |
 	                 (in ? USB_DIRECTION_HOST : USB_DIRECTION_DEVICE);
 	unsigned t0 = log_ms();
 
 	usbd_setup_vendor(urb, in ? URB_DIR_IN : URB_DIR_OUT, req, rtype, 0, index, buf, len);
 	int rc = usbd_io(urb, pipe, nullptr, nullptr, kCtrlTimeoutMs);
 	if (rc == EOK && !urb_ok(urb, got)) {
-		uint32_t st = urb_status(urb);
+		u32 st = urb_status(urb);
 
 		log_msg("usb:   request %u index %u: status 0x%08x (%s) after %u ms", req, index,
 		        (unsigned)st, status_name(st), log_ms() - t0);
@@ -539,8 +540,8 @@ Switch aoa_switch(struct usbd_device *dev)
 	UsbBuf usb_buf = usb_alloc(256);
 	if (!urb || !usb_buf)
 		return Switch::Failed;
-	uint8_t *buf = usb_buf.get();
-	uint32_t got = 0;
+	u8 *buf = usb_buf.get();
+	u32 got = 0;
 
 	buf[0] = buf[1] = 0;
 	int rc = ctrl(pipe, urb.get(), true, kAoaGetProtocol, 0, buf, 2, &got);
@@ -554,13 +555,13 @@ Switch aoa_switch(struct usbd_device *dev)
 		return no_answer ? Switch::Failed : Switch::NotAoa;
 	}
 	for (int i = 0; i < 6; i++) {
-		size_t n = std::strlen(cfg.strings[i]) + 1;
+		usize n = std::strlen(cfg.strings[i]) + 1;
 
 		if (n > 256)
 			n = 256;
 		std::memcpy(buf, cfg.strings[i], n);
 		buf[n - 1] = 0;
-		rc = ctrl(pipe, urb.get(), false, kAoaSendString, (uint16_t)i, buf, (uint32_t)n, &got);
+		rc = ctrl(pipe, urb.get(), false, kAoaSendString, (u16)i, buf, (u32)n, &got);
 		if (rc != EOK) {
 			log_msg("usb:   AOA SEND_STRING %d: %s", i, strerror(rc));
 			return Switch::Failed;
@@ -575,8 +576,8 @@ Switch aoa_switch(struct usbd_device *dev)
 
 struct DevEntry {
 	bool                   used = false;
-	uint8_t                path = 0, devno = 0;
-	uint16_t               generation = 0;
+	u8                path = 0, devno = 0;
+	u16               generation = 0;
 	struct usbd_device    *dev = nullptr;   // still attached, or nullptr
 	usbd_device_instance_t inst{};          // the instance we attached through
 	bool                   is_acc = false;  // an AOA accessory (18d1:2d0x)
@@ -668,8 +669,8 @@ bool acc_open(DevEntry *d)
 void acc_broken()
 {
 	DevEntry *d = acc_entry;
-	uint32_t status = acc->fail_status();
-	uint64_t rx = acc->rx_bytes();
+	u32 status = acc->fail_status();
+	u64 rx = acc->rx_bytes();
 
 	log_msg("usb: accessory link broken (status 0x%08x, %llu bytes received)",
 	        (unsigned)status, (unsigned long long)rx);
@@ -999,13 +1000,13 @@ const char *state_name(State s)
 	return "?";
 }
 
-bool send(const uint8_t *p, size_t n)
+bool send(const u8 *p, usize n)
 {
 	std::lock_guard<std::mutex> lock(acc_lock);
 	return acc && acc->send(p, n);
 }
 
-size_t out_pending()
+usize out_pending()
 {
 	std::lock_guard<std::mutex> lock(acc_lock);
 	return acc ? acc->pending() : 0;

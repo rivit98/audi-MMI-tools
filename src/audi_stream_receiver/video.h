@@ -24,7 +24,7 @@
 #define AUDI_STREAM_VIDEO_H
 
 #include <array>
-#include <cstdint>
+#include "types.h"
 
 #include "proto.h"
 #include "vasm.h"
@@ -36,7 +36,7 @@ extern "C" {
 namespace video {
 
 constexpr int kTopbarH = 28;                  // status bar over a landscape picture
-constexpr uint32_t kMaxBytes = 512u * 1024;   // one JPEG
+constexpr u32 kMaxBytes = 512u * 1024;   // one JPEG
 
 struct View {
 	canvas   frame{};     // the picture on screen, opaque ARGB
@@ -51,7 +51,7 @@ struct View {
 // Screen size: sets the boxes in VIDEO_CAPS.
 void init(int screen_w, int screen_h);
 // VIDEO_CAPS payload.
-std::array<uint8_t, proto::kVideoCapsLen> caps();
+std::array<u8, proto::kVideoCapsLen> caps();
 
 // usbd thread.
 void submit(Picture pic);

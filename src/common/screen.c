@@ -10,6 +10,7 @@
  * on every update and must be fetched again; drawing into the first sid
  * forever showed a never-written surface (noise) on every other update.
  */
+#include "types.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,7 +32,7 @@ static struct vfb_slot {
 	unsigned          sid;
 	gf_surface_t      surface;
 	gf_surface_info_t si;
-	uint32_t         *shadow;   /* partial: what the surface holds */
+	u32         *shadow;   /* partial: what the surface holds */
 	int               shadow_ok;
 	unsigned          full_at;  /* log_ms() of its last full copy */
 } slot[2];
@@ -81,7 +82,7 @@ static void maybe_reshow(void)
 /* The surface goes; its shadow buffer is kept for the next one. */
 static void free_slot(int i)
 {
-	uint32_t *shadow = slot[i].shadow;
+	u32 *shadow = slot[i].shadow;
 
 	if (slot[i].surface != NULL)
 		gf_surface_free(slot[i].surface);
@@ -163,7 +164,7 @@ int screen_open(void)
 	back.w = si->w;
 	back.h = si->h;
 	back.stride = si->w;
-	back.px = calloc((size_t)si->w * si->h, 4);
+	back.px = calloc((usize)si->w * si->h, 4);
 	if (back.px == NULL) {
 		log_msg("FAIL out of memory for the back buffer");
 		return -1;
@@ -204,7 +205,7 @@ static void copy_to_vfb(struct vfb_slot *v)
 	int full;
 
 	if (partial && v->shadow == NULL)
-		v->shadow = malloc((size_t)back.w * back.h * 4);
+		v->shadow = malloc((usize)back.w * back.h * 4);
 	full = !partial || v->shadow == NULL || !v->shadow_ok ||
 	       now - v->full_at >= SCREEN_FULL_EVERY_MS;
 	/* the shadow is w pixels a row: only usable when the VFB is the

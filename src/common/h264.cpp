@@ -1,6 +1,7 @@
 // h264.cpp - see h264.h. Syntax as in ITU-T H.264 7.3 (SPS 7.3.2.1.1,
 // PPS 7.3.2.2, slice header 7.3.3, slice data 7.3.4).
 #include "h264.h"
+#include "types.h"
 
 namespace h264 {
 
@@ -9,12 +10,12 @@ namespace {
 // Reads bits of an RBSP, skipping emulation prevention bytes on the way.
 class Bits {
 public:
-	Bits(const uint8_t *p, size_t n) : p_(p), n_(n) {}
+	Bits(const u8 *p, usize n) : p_(p), n_(n) {}
 
 	bool fail() const { return fail_; }
 	// Bits read so far, counted in the RBSP (emulation prevention bytes
 	// not counted).
-	size_t pos() const { return rbsp_bytes_ * 8 - left_; }
+	usize pos() const { return rbsp_bytes_ * 8 - left_; }
 
 	unsigned u(unsigned bits)
 	{
@@ -51,7 +52,7 @@ private:
 				fail_ = true;
 				return 0;
 			}
-			uint8_t b = p_[pos_++];
+			u8 b = p_[pos_++];
 			// 00 00 03: the 03 is not data
 			if (b == 3 && zeros_ >= 2) {
 				zeros_ = 0;
@@ -70,10 +71,10 @@ private:
 		return cur_ >> left_ & 1;
 	}
 
-	const uint8_t *p_;
-	size_t n_, pos_ = 0, rbsp_bytes_ = 0;
+	const u8 *p_;
+	usize n_, pos_ = 0, rbsp_bytes_ = 0;
 	unsigned zeros_ = 0, left_ = 0;
-	uint8_t cur_ = 0;
+	u8 cur_ = 0;
 	bool fail_ = false;
 };
 
@@ -104,35 +105,35 @@ public:
 			bit(0);
 	}
 
-	std::vector<uint8_t> out;
+	std::vector<u8> out;
 
 private:
 	void bit(unsigned b)
 	{
-		cur_ = (uint8_t)(cur_ << 1 | b);
+		cur_ = (u8)(cur_ << 1 | b);
 		if (++n_ == 8) {
 			out.push_back(cur_);
 			cur_ = 0;
 			n_ = 0;
 		}
 	}
-	uint8_t cur_ = 0;
+	u8 cur_ = 0;
 	unsigned n_ = 0;
 };
 
-bool is_slice(uint8_t t)
+bool is_slice(u8 t)
 {
 	return t == kSlice || t == kIdr;
 }
 
 } // namespace
 
-std::vector<Nal> split_annexb(const uint8_t *p, size_t n)
+std::vector<Nal> split_annexb(const u8 *p, usize n)
 {
 	std::vector<Nal> out;
-	std::vector<size_t> starts;
+	std::vector<usize> starts;
 
-	for (size_t i = 0; i + 2 < n;) {
+	for (usize i = 0; i + 2 < n;) {
 		if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1) {
 			starts.push_back(i + 3);
 			i += 3;
@@ -140,9 +141,9 @@ std::vector<Nal> split_annexb(const uint8_t *p, size_t n)
 			i++;
 		}
 	}
-	for (size_t k = 0; k < starts.size(); k++) {
-		size_t s = starts[k];
-		size_t e = k + 1 < starts.size() ? starts[k + 1] - 3 : n;
+	for (usize k = 0; k < starts.size(); k++) {
+		usize s = starts[k];
+		usize e = k + 1 < starts.size() ? starts[k + 1] - 3 : n;
 		while (e > s && p[e - 1] == 0)
 			e--;
 		if (e > s)
@@ -151,23 +152,23 @@ std::vector<Nal> split_annexb(const uint8_t *p, size_t n)
 	return out;
 }
 
-std::vector<Range> split_access_units(const uint8_t *p, size_t n)
+std::vector<Range> split_access_units(const u8 *p, usize n)
 {
 	std::vector<Range> out;
 	std::vector<Nal> nals = split_annexb(p, n);
-	size_t begin = 0;
+	usize begin = 0;
 	bool have_slice = false;
 
 	for (const Nal &nal : nals) {
-		uint8_t t = nal.type();
+		u8 t = nal.type();
 		bool starts_new = false;
 		if (have_slice && (t == kAud || t == kSps || t == kPps || t == kSei))
 			starts_new = true;
 		else if (have_slice && is_slice(t) && nal.n > 1 && (nal.p[1] & 0x80))
 			starts_new = true;     // first_mb_in_slice == 0: ue "1"
 		// the unit's first byte: back over the start code (and a 4th zero)
-		size_t at = (size_t)(nal.p - p);
-		size_t sc = at >= 3 ? at - 3 : 0;
+		usize at = (usize)(nal.p - p);
+		usize sc = at >= 3 ? at - 3 : 0;
 		if (sc > 0 && p[sc - 1] == 0)
 			sc--;
 		if (starts_new) {
@@ -188,18 +189,18 @@ namespace {
 // Where frame_cropping_flag starts and where its fields end, in RBSP bits
 // (crop_sps rewrites what is between).
 struct SpsPos {
-	size_t crop = 0, after_crop = 0;
+	usize crop = 0, after_crop = 0;
 };
 
-std::string parse_sps_at(const uint8_t *nal, size_t n, Sps &s, SpsPos *at)
+std::string parse_sps_at(const u8 *nal, usize n, Sps &s, SpsPos *at)
 {
 	s = Sps();
 	if (n < 4 || (nal[0] & 0x1f) != kSps)
 		return "not an SPS";
 	Bits b(nal + 1, n - 1);
-	s.profile = (uint8_t)b.u(8);
-	s.constraints = (uint8_t)b.u(8);
-	s.level = (uint8_t)b.u(8);
+	s.profile = (u8)b.u(8);
+	s.constraints = (u8)b.u(8);
+	s.level = (u8)b.u(8);
 	s.id = b.ue();
 	switch (s.profile) {
 	case 100: case 110: case 122: case 244: case 44: case 83: case 86: case 118: case 128:
@@ -264,13 +265,13 @@ std::string parse_sps_at(const uint8_t *nal, size_t n, Sps &s, SpsPos *at)
 }
 
 // NAL payload -> RBSP: the 03 after two zero bytes is dropped.
-std::vector<uint8_t> unescape(const uint8_t *p, size_t n)
+std::vector<u8> unescape(const u8 *p, usize n)
 {
-	std::vector<uint8_t> out;
+	std::vector<u8> out;
 	unsigned zeros = 0;
 
 	out.reserve(n);
-	for (size_t i = 0; i < n; i++) {
+	for (usize i = 0; i < n; i++) {
 		if (zeros >= 2 && p[i] == 3) {
 			zeros = 0;
 			continue;
@@ -283,13 +284,13 @@ std::vector<uint8_t> unescape(const uint8_t *p, size_t n)
 
 } // namespace
 
-std::string parse_sps(const uint8_t *nal, size_t n, Sps &s)
+std::string parse_sps(const u8 *nal, usize n, Sps &s)
 {
 	return parse_sps_at(nal, n, s, nullptr);
 }
 
-std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned height,
-                     uint8_t level, std::vector<uint8_t> &out)
+std::string crop_sps(const u8 *nal, usize n, unsigned width, unsigned height,
+                     u8 level, std::vector<u8> &out)
 {
 	Sps s;
 	SpsPos at;
@@ -303,9 +304,9 @@ std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned heig
 		return "crop: " + std::to_string(width) + "x" + std::to_string(height) +
 		       " does not fit the coded " + std::to_string(cw) + "x" + std::to_string(ch);
 
-	std::vector<uint8_t> rbsp = unescape(nal + 1, n - 1);
+	std::vector<u8> rbsp = unescape(nal + 1, n - 1);
 	// the last 1 bit is rbsp_stop_one_bit; the fields end before it
-	size_t end = rbsp.size() * 8;
+	usize end = rbsp.size() * 8;
 	while (end > 0 && !(rbsp[(end - 1) / 8] >> (7 - (end - 1) % 8) & 1))
 		end--;
 	if (end == 0 || end - 1 < at.after_crop)
@@ -314,9 +315,9 @@ std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned heig
 	if (level != 0)
 		rbsp[2] = level;                     // level_idc: byte 2, byte-aligned
 
-	auto bit = [&](size_t i) { return (unsigned)(rbsp[i / 8] >> (7 - i % 8) & 1); };
+	auto bit = [&](usize i) { return (unsigned)(rbsp[i / 8] >> (7 - i % 8) & 1); };
 	Writer w;
-	for (size_t i = 0; i < at.crop; i++)
+	for (usize i = 0; i < at.crop; i++)
 		w.u(1, bit(i));
 	bool crop = width != cw || height != ch;
 	w.u(1, crop);
@@ -326,7 +327,7 @@ std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned heig
 		w.ue(0);
 		w.ue((ch - height) / 2);
 	}
-	for (size_t i = at.after_crop; i < end; i++)
+	for (usize i = at.after_crop; i < end; i++)
 		w.u(1, bit(i));
 	w.trailing();
 
@@ -336,11 +337,11 @@ std::string crop_sps(const uint8_t *nal, size_t n, unsigned width, unsigned heig
 	return "";
 }
 
-std::string crop_sps_annexb(const uint8_t *p, size_t n, unsigned width, unsigned height,
-                            uint8_t level, std::vector<uint8_t> &out)
+std::string crop_sps_annexb(const u8 *p, usize n, unsigned width, unsigned height,
+                            u8 level, std::vector<u8> &out)
 {
-	static const uint8_t kStart[4] = {0, 0, 0, 1};
-	std::vector<uint8_t> sps;
+	static const u8 kStart[4] = {0, 0, 0, 1};
+	std::vector<u8> sps;
 
 	out.clear();
 	for (const Nal &nal : split_annexb(p, n)) {
@@ -357,7 +358,7 @@ std::string crop_sps_annexb(const uint8_t *p, size_t n, unsigned width, unsigned
 	return "";
 }
 
-std::string parse_pps(const uint8_t *nal, size_t n, Pps &p)
+std::string parse_pps(const u8 *nal, usize n, Pps &p)
 {
 	p = Pps();
 	if (n < 2 || (nal[0] & 0x1f) != kPps)
@@ -385,13 +386,13 @@ std::string parse_pps(const uint8_t *nal, size_t n, Pps &p)
 	return "";
 }
 
-std::string parse_slice(const uint8_t *nal, size_t n, const Sps &sps, const Pps &pps, Slice &s)
+std::string parse_slice(const u8 *nal, usize n, const Sps &sps, const Pps &pps, Slice &s)
 {
 	s = Slice();
 	if (n < 2 || !is_slice(nal[0] & 0x1f))
 		return "not a slice";
 	s.nal_type = nal[0] & 0x1f;
-	s.ref_idc = (uint8_t)(nal[0] >> 5 & 3);
+	s.ref_idc = (u8)(nal[0] >> 5 & 3);
 	Bits b(nal + 1, n - 1);
 	s.first_mb = b.ue();
 	s.slice_type = b.ue();
@@ -425,11 +426,11 @@ std::string skip_supported(const Sps &sps, const Pps &pps)
 	return "";
 }
 
-void escape(const std::vector<uint8_t> &rbsp, std::vector<uint8_t> &out)
+void escape(const std::vector<u8> &rbsp, std::vector<u8> &out)
 {
 	unsigned zeros = 0;
 
-	for (uint8_t b : rbsp) {
+	for (u8 b : rbsp) {
 		if (zeros >= 2 && b <= 3) {
 			out.push_back(3);
 			zeros = 0;
@@ -439,7 +440,7 @@ void escape(const std::vector<uint8_t> &rbsp, std::vector<uint8_t> &out)
 	}
 }
 
-std::vector<uint8_t> skip_slice(const Sps &sps, const Pps &pps, unsigned frame_num,
+std::vector<u8> skip_slice(const Sps &sps, const Pps &pps, unsigned frame_num,
                                 unsigned poc_lsb)
 {
 	Writer w;
@@ -468,7 +469,7 @@ std::vector<uint8_t> skip_slice(const Sps &sps, const Pps &pps, unsigned frame_n
 	w.ue(sps.mbs());                        // mb_skip_run: the whole picture
 	w.trailing();
 
-	std::vector<uint8_t> nal;
+	std::vector<u8> nal;
 	nal.push_back(kSlice);                  // forbidden 0, nal_ref_idc 0, type 1
 	escape(w.out, nal);
 	return nal;

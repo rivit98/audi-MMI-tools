@@ -8,6 +8,7 @@
  * paths (so no libm), no SIMD (SH4; on the host test the same scalar code
  * runs), and no thread-local error string - QNX 6.3.2 has no TLS.
  */
+#include "types.h"
 #include <stdlib.h>
 
 #include "imgdec.h"
@@ -26,19 +27,19 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include "stb_image.h"
 
-int imgdec_info(const uint8_t *data, unsigned n, int *w, int *h)
+int imgdec_info(const u8 *data, unsigned n, int *w, int *h)
 {
 	int comp;
 
 	return stbi_info_from_memory(data, (int)n, w, h, &comp);
 }
 
-int imgdec_argb(const uint8_t *data, unsigned n, int max_w, int max_h,
-                uint32_t **out, int *w, int *h)
+int imgdec_argb(const u8 *data, unsigned n, int max_w, int max_h,
+                u32 **out, int *w, int *h)
 {
 	unsigned char *rgb;
-	uint32_t *px;
-	size_t i, count;
+	u32 *px;
+	usize i, count;
 	int comp;
 
 	*out = NULL;
@@ -47,15 +48,15 @@ int imgdec_argb(const uint8_t *data, unsigned n, int max_w, int max_h,
 	rgb = stbi_load_from_memory(data, (int)n, w, h, &comp, 3);
 	if (rgb == NULL)
 		return -1;
-	count = (size_t)*w * *h;
+	count = (usize)*w * *h;
 	px = malloc(count * 4);
 	if (px == NULL) {
 		stbi_image_free(rgb);
 		return -1;
 	}
 	for (i = 0; i < count; i++)
-		px[i] = 0xFF000000u | (uint32_t)rgb[3 * i] << 16 |
-		        (uint32_t)rgb[3 * i + 1] << 8 | rgb[3 * i + 2];
+		px[i] = 0xFF000000u | (u32)rgb[3 * i] << 16 |
+		        (u32)rgb[3 * i + 1] << 8 | rgb[3 * i + 2];
 	stbi_image_free(rgb);
 	*out = px;
 	return 0;

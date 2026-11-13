@@ -5,6 +5,7 @@
  * 1ee679c, public domain / MIT; the licence is at its end). Only its BMP
  * writer and in-memory PNG writer are used.
  */
+#include "types.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -19,7 +20,7 @@
 
 int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h)
 {
-	unsigned char *rgb = malloc((size_t)w * h * 3), *p = rgb;
+	unsigned char *rgb = malloc((usize)w * h * 3), *p = rgb;
 	int x, y, ok;
 
 	if (rgb == NULL)
@@ -27,7 +28,7 @@ int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h
 	/* stb takes top-down rows and writes the file bottom-up; ours are
 	 * bottom-up already, so hand them over reversed. */
 	for (y = h - 1; y >= 0; y--) {
-		const unsigned char *src = rgba + (size_t)y * w * 4;
+		const unsigned char *src = rgba + (usize)y * w * 4;
 
 		for (x = 0; x < w; x++, src += 4) {
 			*p++ = src[0];
@@ -40,16 +41,16 @@ int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h
 	return ok ? 0 : -1;
 }
 
-int img_png_encode_argb(const uint32_t *px, int stride, int w, int h,
-                        unsigned char **out, size_t *len)
+int img_png_encode_argb(const u32 *px, int stride, int w, int h,
+                        unsigned char **out, usize *len)
 {
-	unsigned char *rgb = malloc((size_t)w * h * 3), *p = rgb;
+	unsigned char *rgb = malloc((usize)w * h * 3), *p = rgb;
 	int x, y, n;
 
 	if (rgb == NULL)
 		return -1;
 	for (y = 0; y < h; y++) {
-		const uint32_t *row = px + (size_t)y * stride;
+		const u32 *row = px + (usize)y * stride;
 
 		for (x = 0; x < w; x++) {
 			*p++ = (unsigned char)(row[x] >> 16);
@@ -61,14 +62,14 @@ int img_png_encode_argb(const uint32_t *px, int stride, int w, int h,
 	free(rgb);
 	if (*out == NULL)
 		return -1;
-	*len = (size_t)n;
+	*len = (usize)n;
 	return 0;
 }
 
-int img_png_write_argb(FILE *f, const uint32_t *px, int stride, int w, int h)
+int img_png_write_argb(FILE *f, const u32 *px, int stride, int w, int h)
 {
 	unsigned char *buf;
-	size_t len;
+	usize len;
 	int rc = 0;
 
 	if (img_png_encode_argb(px, stride, w, h, &buf, &len) != 0) {

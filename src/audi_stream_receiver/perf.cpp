@@ -1,6 +1,7 @@
 // perf.cpp - picture timing records, summarised and written off the hot
 // path (see perf.h).
 #include "perf.h"
+#include "types.h"
 
 #include <atomic>
 #include <cerrno>
@@ -68,7 +69,7 @@ struct Stat {
 	}
 
 	// "avg/max" in ms; n samples
-	void fmt(char *out, size_t cap, unsigned n) const
+	void fmt(char *out, usize cap, unsigned n) const
 	{
 		std::snprintf(out, cap, "%u/%u", n ? (unsigned)(sum / n / 1000) : 0, max / 1000);
 	}

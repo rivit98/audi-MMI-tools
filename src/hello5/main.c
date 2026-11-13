@@ -127,7 +127,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <stdint.h>
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,10 +166,10 @@
 /* ---- a loaded PCM clip ---- */
 struct clip {
 	unsigned char *pcm;     /* interleaved sample data (malloc'd) */
-	uint32_t       len;     /* bytes in pcm */
-	uint32_t       rate;    /* Hz */
-	uint16_t       voices;  /* channels */
-	uint16_t       bits;    /* bits per sample */
+	u32       len;     /* bytes in pcm */
+	u32       rate;    /* Hz */
+	u16       voices;  /* channels */
+	u16       bits;    /* bits per sample */
 };
 
 static struct clip beep;
@@ -199,11 +199,11 @@ static const struct {
 
 /* ---- little-endian readers (the MMI is SH4 little-endian, as are WAVs) ---- */
 
-static uint16_t rd16(const unsigned char *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
-static uint32_t rd32(const unsigned char *p)
+static u16 rd16(const unsigned char *p) { return (u16)(p[0] | (p[1] << 8)); }
+static u32 rd32(const unsigned char *p)
 {
-	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+	return (u32)p[0] | ((u32)p[1] << 8) |
+	       ((u32)p[2] << 16) | ((u32)p[3] << 24);
 }
 
 /* Parse a canonical PCM .wav: walk chunks for "fmt " and "data". */
@@ -211,8 +211,8 @@ static int clip_load(const char *path, struct clip *c)
 {
 	unsigned char *buf;
 	long size;
-	uint32_t off, fmt_off = 0, data_off = 0, data_len = 0;
-	uint16_t audio_fmt;
+	u32 off, fmt_off = 0, data_off = 0, data_len = 0;
+	u16 audio_fmt;
 	FILE *f = fopen(path, "rb");
 
 	if (f == NULL) {
@@ -228,7 +228,7 @@ static int clip_load(const char *path, struct clip *c)
 		return -1;
 	}
 	buf = malloc(size);
-	if (buf == NULL || fread(buf, 1, size, f) != (size_t)size) {
+	if (buf == NULL || fread(buf, 1, size, f) != (usize)size) {
 		log_msg("clip: read %s failed", path);
 		free(buf);
 		fclose(f);
@@ -243,8 +243,8 @@ static int clip_load(const char *path, struct clip *c)
 	}
 	/* chunks start at offset 12: id[4], size[4], payload */
 	off = 12;
-	while (off + 8 <= (uint32_t)size) {
-		uint32_t clen = rd32(buf + off + 4);
+	while (off + 8 <= (u32)size) {
+		u32 clen = rd32(buf + off + 4);
 
 		if (memcmp(buf + off, "fmt ", 4) == 0)
 			fmt_off = off + 8;
@@ -254,7 +254,7 @@ static int clip_load(const char *path, struct clip *c)
 		}
 		off += 8 + clen + (clen & 1);   /* chunks are word-aligned */
 	}
-	if (fmt_off == 0 || data_off == 0 || data_off + data_len > (uint32_t)size) {
+	if (fmt_off == 0 || data_off == 0 || data_off + data_len > (u32)size) {
 		log_msg("clip: %s missing/!bad fmt or data chunk", path);
 		free(buf);
 		return -1;
@@ -279,7 +279,7 @@ static int clip_load(const char *path, struct clip *c)
 	return 0;
 }
 
-static int sfmt_for(uint16_t bits)
+static int sfmt_for(u16 bits)
 {
 	switch (bits) {
 	case 8:  return SND_PCM_SFMT_U8;        /* WAV 8-bit is unsigned */
@@ -412,7 +412,7 @@ struct output {
 	int mixer;              /* index into mixers[], or -1 */
 };
 
-static void output_label(const struct output *o, char *buf, size_t size)
+static void output_label(const struct output *o, char *buf, usize size)
 {
 	if (o->mixer >= 0)
 		snprintf(buf, size, "m%d: %s", o->mixer, mixers[o->mixer].name);
@@ -602,7 +602,7 @@ static void *group_thread(void *arg)
 	struct group *g = arg;
 	snd_pcm_t *h;
 	unsigned k, t0, write_ms, busy_ms, shown, screen_ms;
-	ssize_t w;
+	isize w;
 	int rc;
 
 	if (g->mixer >= 0) {
@@ -625,7 +625,7 @@ static void *group_thread(void *arg)
 		t0 = log_ms();
 		w = snd_pcm_plugin_write(h, beep.pcm, beep.len);
 		write_ms = log_ms() - t0;
-		if (w < (ssize_t)beep.len) {
+		if (w < (isize)beep.len) {
 			log_msg("group %d chime %u: short write %ld/%u after %u ms",
 			        g->index, k, (long)w, beep.len, write_ms);
 			break;
@@ -758,7 +758,7 @@ static unsigned pulse_made;     /* bit n: /tmp/hello5_pulse<n>.wav written */
 
 /* Render the train of n pings into pulse_dir (falling back to the card if
  * that is not writable); its path in buf. */
-static int pulse_file(unsigned n, char *buf, size_t size)
+static int pulse_file(unsigned n, char *buf, usize size)
 {
 	unsigned t0 = log_ms();
 
@@ -797,7 +797,7 @@ static unsigned cur_up0, cur_down0, cur_drawn;
 static int cur_volume = -1;     /* step n's own volume while it plays */
 
 /* The live line under the PLAYING box; empty if the step has none. */
-static void step_note(const struct step *s, char *buf, size_t size)
+static void step_note(const struct step *s, char *buf, usize size)
 {
 	buf[0] = '\0';
 	if (s->key == 'v')
@@ -856,9 +856,9 @@ static int play_testapp(const struct step *s, const char *log_file, struct play 
                                    quieter, 0 is decisive */
 #define NATIVE_TIME_MS    500   /* TIME event period */
 
-static uint64_t rd64(const unsigned char *p)
+static u64 rd64(const unsigned char *p)
 {
-	return (uint64_t)rd32(p) | (uint64_t)rd32(p + 4) << 32;
+	return (u64)rd32(p) | (u64)rd32(p + 4) << 32;
 }
 
 static void native_error(struct iom *g, const char *what, int rc)
@@ -880,11 +880,11 @@ struct native {
 	unsigned    playing_ms; /* first STATUS state 4 (playing), since play */
 	unsigned    to_attach;  /* chain inputs still to attach */
 	int         finished;   /* FINISHED: the whole queue has played */
-	uint64_t    next_track;
+	u64    next_track;
 };
 
-static void native_event(struct native *n, uint32_t type,
-                         const unsigned char *p, uint32_t len, unsigned t)
+static void native_event(struct native *n, u32 type,
+                         const unsigned char *p, u32 len, unsigned t)
 {
 	int rc;
 
@@ -1014,9 +1014,9 @@ static int native_play(const char *file, const char *chain_file,
 			len = 0;
 		}
 		for (off = 0; off + 8 <= len; ) {
-			uint32_t size = rd32(buf + off);
+			u32 size = rd32(buf + off);
 
-			if (size < 8 || off + size > (uint32_t)len) {
+			if (size < 8 || off + size > (u32)len) {
 				log_msg("step n: bad event size %u at %d of %d bytes",
 				        (unsigned)size, off, len);
 				break;
@@ -1198,7 +1198,7 @@ static int parse_outputs(const char *s, struct output *outputs)
 
 /* The unit's testapp-file (efs-system, served by inflator), else the copy
  * `make sd` puts next to hello5 in bin/. */
-static const char *find_player(const char *argv0, char *buf, size_t size)
+static const char *find_player(const char *argv0, char *buf, usize size)
 {
 	static const char unit[] = "/mnt/efs-system/bin/testapp-file";
 	const char *slash = strrchr(argv0, '/');

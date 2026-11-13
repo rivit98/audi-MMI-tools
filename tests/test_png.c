@@ -8,7 +8,7 @@
  * (w, h as two big-endian u32, then RGB). tests/check_png.py decodes the
  * PNGs with Python's zlib and compares. Here: only the PNG structure.
  */
-#include <stdint.h>
+#include "types.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -19,24 +19,24 @@
 
 static const char *dir = "build/test_png.d";
 
-static uint32_t rng = 12345;
+static u32 rng = 12345;
 
-static uint32_t rnd(void)
+static u32 rnd(void)
 {
 	rng = rng * 1103515245u + 12345u;
 	return rng >> 8;
 }
 
-static uint32_t be32(const unsigned char *p)
+static u32 be32(const unsigned char *p)
 {
-	return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+	return (u32)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
 
 static void save(const char *name, const struct canvas *c)
 {
 	char path[256];
 	unsigned char *buf, hdr[8];
-	size_t len;
+	usize len;
 	FILE *f;
 	int x, y;
 
@@ -67,7 +67,7 @@ static void save(const char *name, const struct canvas *c)
 	fwrite(hdr, 1, 8, f);
 	for (y = 0; y < c->h; y++)
 		for (x = 0; x < c->w; x++) {
-			uint32_t p = c->px[y * c->stride + x];
+			u32 p = c->px[y * c->stride + x];
 			unsigned char rgb[3] = { p >> 16, p >> 8, p };
 
 			fwrite(rgb, 1, 3, f);
@@ -77,7 +77,7 @@ static void save(const char *name, const struct canvas *c)
 
 static struct canvas make(int w, int h)
 {
-	struct canvas c = { calloc((size_t)w * h, 4), w, h, w };
+	struct canvas c = { calloc((usize)w * h, 4), w, h, w };
 
 	CHECK(c.px != NULL);
 	return c;
@@ -87,7 +87,7 @@ int main(void)
 {
 	struct canvas c;
 	unsigned char *buf;
-	size_t len;
+	usize len;
 	int x, y;
 
 	mkdir("build", 0755);
@@ -118,7 +118,7 @@ int main(void)
 	c = make(300, 200);
 	for (y = 0; y < 200; y++)
 		for (x = 0; x < 300; x++)
-			c.px[y * 300 + x] = (uint32_t)(x << 16 | y << 8 | ((x ^ y) & 0xFF));
+			c.px[y * 300 + x] = (u32)(x << 16 | y << 8 | ((x ^ y) & 0xFF));
 	save("gradient", &c);
 	for (x = 0; x < 300 * 200; x++) {             /* matches of many lengths */
 		int back = 1 + (int)(rnd() % 3);

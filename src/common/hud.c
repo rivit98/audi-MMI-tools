@@ -2,13 +2,14 @@
  * hud.c - rectangles and seven-segment digits (see hud.h).
  */
 #include "hud.h"
+#include "types.h"
 
 /* segments a..g = bits 0..6 */
 static const unsigned char seg_mask[10] = {
 	0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f,
 };
 
-void hud_rect(float x, float y, float w, float h, const GLubyte rgba[4])
+void hud_rect(f32 x, f32 y, f32 w, f32 h, const GLubyte rgba[4])
 {
 	const GLfloat v[8] = { x, y,  x + w, y,  x, y + h,  x + w, y + h };
 	GLubyte c[16];
@@ -21,9 +22,9 @@ void hud_rect(float x, float y, float w, float h, const GLubyte rgba[4])
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-static void digit(float x, float y, unsigned d, float w, float h, const GLubyte rgba[4])
+static void digit(f32 x, f32 y, unsigned d, f32 w, f32 h, const GLubyte rgba[4])
 {
-	float t = w / 5.0f, hh = h / 2.0f;
+	f32 t = w / 5.0f, hh = h / 2.0f;
 	unsigned m = seg_mask[d % 10];
 
 	if (m & 0x01) hud_rect(x + t,     y + h - t,        w - 2 * t, t,      rgba); /* a */
@@ -35,10 +36,10 @@ static void digit(float x, float y, unsigned d, float w, float h, const GLubyte 
 	if (m & 0x40) hud_rect(x + t,     y + hh - t / 2.0f, w - 2 * t, t,     rgba); /* g */
 }
 
-float hud_number(float x, float y, unsigned value, int ndigits,
-                 float digit_w, float digit_h, const GLubyte rgba[4])
+f32 hud_number(f32 x, f32 y, unsigned value, int ndigits,
+                 f32 digit_w, f32 digit_h, const GLubyte rgba[4])
 {
-	float step = digit_w * 1.4f;
+	f32 step = digit_w * 1.4f;
 	int i;
 
 	for (i = ndigits - 1; i >= 0; i--) {

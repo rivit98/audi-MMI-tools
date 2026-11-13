@@ -2,6 +2,7 @@
  * mesh.c - cube, torus and ground grid (see mesh.h).
  */
 #include "mesh.h"
+#include "types.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -90,7 +91,7 @@ int mesh_cube(struct mesh *m)
 	return 0;
 }
 
-int mesh_torus(struct mesh *m, float R, float r, int nu, int nv)
+int mesh_torus(struct mesh *m, f32 R, f32 r, int nu, int nv)
 {
 	GLushort *idx;
 	int i, j, k = 0;
@@ -99,10 +100,10 @@ int mesh_torus(struct mesh *m, float R, float r, int nu, int nv)
 	if (mesh_alloc(m, (nu + 1) * (nv + 1), nu * nv * 6, 0))
 		return -1;
 	for (i = 0; i <= nu; i++) {
-		float th = TWO_PI * i / nu, ct = cosf(th), st = sinf(th);
+		f32 th = TWO_PI * i / nu, ct = cosf(th), st = sinf(th);
 
 		for (j = 0; j <= nv; j++, k++) {
-			float ph = TWO_PI * j / nv, cp = cosf(ph), sp = sinf(ph);
+			f32 ph = TWO_PI * j / nv, cp = cosf(ph), sp = sinf(ph);
 
 			m->pos[k * 3]     = (R + r * cp) * ct;
 			m->pos[k * 3 + 1] = (R + r * cp) * st;
@@ -111,7 +112,7 @@ int mesh_torus(struct mesh *m, float R, float r, int nu, int nv)
 			m->nrm[k * 3 + 1] = cp * st;
 			m->nrm[k * 3 + 2] = sp;
 			m->uv[k * 2]      = 4.0f * i / nu;
-			m->uv[k * 2 + 1]  = (float)j / nv;
+			m->uv[k * 2 + 1]  = (f32)j / nv;
 		}
 	}
 	/* +i then +j turns counter-clockwise around the outward normal */
@@ -123,7 +124,7 @@ int mesh_torus(struct mesh *m, float R, float r, int nu, int nv)
 	return 0;
 }
 
-int mesh_grid(struct mesh *m, float size, int n, float uv_repeat)
+int mesh_grid(struct mesh *m, f32 size, int n, f32 uv_repeat)
 {
 	GLushort *idx;
 	int i, j, k = 0;
@@ -132,9 +133,9 @@ int mesh_grid(struct mesh *m, float size, int n, float uv_repeat)
 		return -1;
 	for (i = 0; i <= n; i++) {           /* i along x */
 		for (j = 0; j <= n; j++, k++) {  /* j along z */
-			m->pos[k * 3]     = size * ((float)i / n - 0.5f);
+			m->pos[k * 3]     = size * ((f32)i / n - 0.5f);
 			m->pos[k * 3 + 1] = 0.0f;
-			m->pos[k * 3 + 2] = size * ((float)j / n - 0.5f);
+			m->pos[k * 3 + 2] = size * ((f32)j / n - 0.5f);
 			m->nrm[k * 3]     = 0.0f;
 			m->nrm[k * 3 + 1] = 1.0f;
 			m->nrm[k * 3 + 2] = 0.0f;

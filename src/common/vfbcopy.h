@@ -6,7 +6,7 @@
 #ifndef COMMON_VFBCOPY_H
 #define COMMON_VFBCOPY_H
 
-#include <stdint.h>
+#include "types.h"
 
 struct vfb_copied {
 	unsigned bytes;   /* written into dst */
@@ -20,7 +20,7 @@ struct vfb_copied {
  * row's first to last pixel that differs from the shadow, nothing for an
  * unchanged row.
  */
-struct vfb_copied vfb_copy(uint8_t *dst, unsigned dst_stride, uint32_t *shadow,
-                           const uint32_t *src, int src_stride, int w, int h, int full);
+struct vfb_copied vfb_copy(u8 *dst, unsigned dst_stride, u32 *shadow,
+                           const u32 *src, int src_stride, int w, int h, int full);
 
 #endif

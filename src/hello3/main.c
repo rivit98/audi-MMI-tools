@@ -27,6 +27,7 @@
  *
  * usage: hello3 <sd_path> [scene_seconds]
  */
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,7 @@
 
 /* openqnx ships no <math.h> (libm is not in the source leak); the device's
  * libm.so.2 exports sinf, and the sysroot has a stub for it. */
-float sinf(float x);
+f32 sinf(f32 x);
 
 #define CID             40     /* displayable id qnx-audi uses */
 #define SCENE_SECONDS   10
@@ -117,8 +118,8 @@ static void fill_plasma(GLubyte *p, int size)
 
 	for (y = 0; y < size; y++) {
 		for (x = 0; x < size; x++, p += 4) {
-			float fx = TWO_PI * x / size, fy = TWO_PI * y / size;
-			float v = (sinf(2 * fx) + sinf(3 * fy) + sinf(fx + 2 * fy) +
+			f32 fx = TWO_PI * x / size, fy = TWO_PI * y / size;
+			f32 v = (sinf(2 * fx) + sinf(3 * fy) + sinf(fx + 2 * fy) +
 			           sinf(3 * fx - fy)) * 0.25f * 3.1415927f;
 
 			p[0] = (GLubyte)(127.5f + 127.4f * sinf(v));
@@ -167,7 +168,7 @@ static void begin_flat(void)
 }
 
 /* Texture matrix: texcoord -> translate(tx,ty) . rotate(deg) . scale(s) */
-static void tex_matrix(float tx, float ty, float deg, float s)
+static void tex_matrix(f32 tx, f32 ty, f32 deg, f32 s)
 {
 	glMatrixMode(GL_TEXTURE);
 	glLoadIdentity();
@@ -178,7 +179,7 @@ static void tex_matrix(float tx, float ty, float deg, float s)
 }
 
 /* One full-screen quad; the texture spans (0,0)-(tu,tv) across it. */
-static void screen_quad(int w, int h, float tu, float tv)
+static void screen_quad(int w, int h, f32 tu, f32 tv)
 {
 	const GLfloat v[8] = { 0, 0,  (GLfloat)w, 0,  0, (GLfloat)h,  (GLfloat)w, (GLfloat)h };
 	const GLfloat t[8] = { 0, 0,  tu, 0,  0, tv,  tu, tv };
@@ -191,25 +192,25 @@ static void screen_quad(int w, int h, float tu, float tv)
 static void draw_pixels(int w, int h, unsigned ms, unsigned scene_ms)
 {
 	static unsigned step = ~0u;
-	static float ox, oy;
+	static f32 ox, oy;
 	unsigned block = block_px[ms * NBLOCKS / scene_ms];
 
 	if (ms / PIXELS_STEP_MS != step) {
 		step = ms / PIXELS_STEP_MS;
 		/* whole-texel offsets keep GL_NEAREST blocks aligned to the screen */
-		ox = (float)(rnd() % NOISE_SIZE) / NOISE_SIZE;
-		oy = (float)(rnd() % NOISE_SIZE) / NOISE_SIZE;
+		ox = (f32)(rnd() % NOISE_SIZE) / NOISE_SIZE;
+		oy = (f32)(rnd() % NOISE_SIZE) / NOISE_SIZE;
 	}
 	glDisable(GL_BLEND);
 	begin_textured(noise_tex);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	tex_matrix(ox, oy, 0.0f, 1.0f);
-	screen_quad(w, h, (float)w / block / NOISE_SIZE, (float)h / block / NOISE_SIZE);
+	screen_quad(w, h, (f32)w / block / NOISE_SIZE, (f32)h / block / NOISE_SIZE);
 }
 
 static void draw_plasma(int w, int h, unsigned ms)
 {
-	float t = ms / 1000.0f;
+	f32 t = ms / 1000.0f;
 
 	begin_textured(plasma_tex);
 	glDisable(GL_BLEND);
@@ -232,7 +233,7 @@ static void draw_plasma(int w, int h, unsigned ms)
 
 static void draw_fill(int w, int h, unsigned layers, unsigned ms)
 {
-	float t = ms / 1000.0f;
+	f32 t = ms / 1000.0f;
 	unsigned i;
 
 	begin_textured(plasma_tex);
@@ -248,7 +249,7 @@ static void draw_fill(int w, int h, unsigned layers, unsigned ms)
 	glDisable(GL_BLEND);
 }
 
-static void draw_hud(int w, int h, unsigned fps, unsigned layers, float progress)
+static void draw_hud(int w, int h, unsigned fps, unsigned layers, f32 progress)
 {
 	static const GLubyte backing[4] = { 0, 0, 0, 170 };
 	static const GLubyte green[4] = { 80, 255, 80, 255 };
@@ -361,7 +362,7 @@ static void run(struct gfx *g, unsigned scene_s)
 			draw_fill(w, h, layers, sms);
 			break;
 		}
-		draw_hud(w, h, fps_shown, layers, (float)sms / scene_ms);
+		draw_hud(w, h, fps_shown, layers, (f32)sms / scene_ms);
 
 		/* screenshot mid-scene; not in the fill scene, it would skew timing */
 		if (!shot_done && scene != SCENE_FILL && sms >= scene_ms / 2) {

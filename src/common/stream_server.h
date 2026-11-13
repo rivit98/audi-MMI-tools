@@ -20,7 +20,7 @@
 #include "live_stream.h"
 
 #include <atomic>
-#include <cstdint>
+#include "types.h"
 #include <mutex>
 #include <string>
 #include <thread>
@@ -34,16 +34,16 @@ struct StreamStats {
 	unsigned eof = 0;             // reads answered with 0 bytes
 	unsigned unblocked = 0;       // waiting reads the client gave up on
 	unsigned far = 0;             // reads > 10 s past the live edge, answered at once
-	uint64_t bytes = 0;
+	u64 bytes = 0;
 	unsigned min_read = 0, max_read = 0;
 	unsigned wait_ms_max = 0;
 	unsigned wait_win_max = 0;    // the same since the last stats_window()
-	uint64_t wait_ms_sum = 0;
-	int64_t lead_frames_max = INT64_MIN;  // how far past the newest frame a read asked
-	int64_t lead_frames_last = 0;
+	u64 wait_ms_sum = 0;
+	i64 lead_frames_max = INT64_MIN;  // how far past the newest frame a read asked
+	i64 lead_frames_last = 0;
 	// the same since the last stats_window() (INT64_MAX / INT64_MIN: no read)
-	int64_t lead_win_min = INT64_MAX, lead_win_max = INT64_MIN;
-	uint64_t served_end = 0;      // highest byte offset answered
+	i64 lead_win_min = INT64_MAX, lead_win_max = INT64_MIN;
+	u64 served_end = 0;      // highest byte offset answered
 	unsigned waiting_now = 0;
 };
 
@@ -52,10 +52,10 @@ struct StreamStats {
 struct ReadRecord {
 	unsigned seq = 0;
 	unsigned at_ms = 0;           // log_ms() when it came
-	uint64_t off = 0;
+	u64 off = 0;
 	unsigned nbytes = 0;          // asked
-	int64_t first = -1, last = -1;  // frames it covers (-1: header only)
-	int64_t lead = 0;             // frames past the newest pushed, when it came
+	i64 first = -1, last = -1;  // frames it covers (-1: header only)
+	i64 lead = 0;             // frames past the newest pushed, when it came
 	bool answered = false;        // false: still waiting
 	unsigned served = 0;          // bytes answered
 	unsigned waited_ms = 0;

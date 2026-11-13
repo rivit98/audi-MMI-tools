@@ -21,6 +21,7 @@
 // usage: hello8 <sd_path> [seconds] [check,check,...]
 //        seconds: how long the results stay up (default 20)
 //        checks: run only these (names as on screen, e.g. "map/set,threads")
+#include "types.h"
 extern "C" {
 #include "font_big.h"
 #include "font_small.h"
@@ -52,14 +53,14 @@ constexpr unsigned kDefaultSeconds = 20;
 constexpr unsigned kWatchdogSlack = 60;    // the checks run before the countdown
 constexpr int kMargin = 20;
 
-constexpr uint32_t C_BG = 0xff101820u;
-constexpr uint32_t C_TEXT = 0xffe8e8e8u;
-constexpr uint32_t C_DIM = 0xff8a929eu;
-constexpr uint32_t C_TITLE = 0xffffd040u;
-constexpr uint32_t C_PASS = 0xff40d060u;
-constexpr uint32_t C_FAIL = 0xffff5050u;
-constexpr uint32_t C_RUN = 0xffffb020u;
-constexpr uint32_t C_BAR = 0xff1c2836u;
+constexpr u32 C_BG = 0xff101820u;
+constexpr u32 C_TEXT = 0xffe8e8e8u;
+constexpr u32 C_DIM = 0xff8a929eu;
+constexpr u32 C_TITLE = 0xffffd040u;
+constexpr u32 C_PASS = 0xff40d060u;
+constexpr u32 C_FAIL = 0xffff5050u;
+constexpr u32 C_RUN = 0xffffb020u;
+constexpr u32 C_BAR = 0xff1c2836u;
 
 char exit_log_path[256];
 
@@ -104,12 +105,12 @@ void draw(const std::string &status)
 	              __VERSION__, __cplusplus / 100 % 100);
 	text_draw(c, &font_small, kMargin, 52, line, -1, C_DIM);
 
-	for (size_t i = 0; i < rows.size(); i++) {
+	for (usize i = 0; i < rows.size(); i++) {
 		const Row &row = rows[i];
 		int x = kMargin + (int)(i / nrows) * col_w;
 		int y = 80 + (int)(i % nrows) * row_h;
 		const char *tag = "    ";
-		uint32_t color = C_DIM;
+		u32 color = C_DIM;
 		std::string detail;
 
 		if (row.state == Row::RUNNING) {

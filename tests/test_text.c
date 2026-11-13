@@ -1,4 +1,5 @@
 /* test_text.c - UTF-8, glyph lookup, wrapping, drawing (src/common/text.c). */
+#include "types.h"
 #include <stdlib.h>
 
 #include "check.h"
@@ -6,13 +7,13 @@
 
 /* 4x2 test font: glyph 0 = '?' (all set), 1 = 'A' (left column), 2 = 'ż'
  * (top row). */
-static const uint8_t tbits[] = {
+static const u8 tbits[] = {
 	0xF0, 0xF0,
 	0x80, 0x80,
 	0xF0, 0x00,
 };
-static const uint16_t tcp[] = { '?', 'A', 0x017C };   /* sorted */
-static const uint16_t tgl[] = { 0, 1, 2 };
+static const u16 tcp[] = { '?', 'A', 0x017C };   /* sorted */
+static const u16 tgl[] = { 0, 1, 2 };
 static const struct font tfont = { 4, 2, 1, tbits, tcp, tgl, 3, 0 };
 
 static void test_utf8(void)
@@ -67,7 +68,7 @@ static void add_line(const char *line, int nbytes, void *arg)
 	struct lines *ls = arg;
 
 	if (ls->n < 16) {
-		memcpy(ls->l[ls->n], line, (size_t)nbytes);
+		memcpy(ls->l[ls->n], line, (usize)nbytes);
 		ls->l[ls->n][nbytes] = 0;
 	}
 	ls->n++;
@@ -135,7 +136,7 @@ static void test_wrap(void)
 
 static void test_draw(void)
 {
-	uint32_t px[6 * 3];
+	u32 px[6 * 3];
 	struct canvas c = { px, 6, 3, 6 };
 	int x;
 

@@ -3,6 +3,7 @@
  * background colour and a huge group number, so the group is readable on
  * a blurry video; the white PLAYING box is up while a chime sounds.
  */
+#include "types.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,7 +28,7 @@
 #define UI_RESHOW_MS 1000
 
 /* one per group: blue, green, purple, brown, teal, red */
-static const uint32_t group_bg[] = {
+static const u32 group_bg[] = {
 	0xff1838a0u, 0xff187028u, 0xff682088u, 0xff805010u, 0xff106870u, 0xff901818u,
 };
 
@@ -36,13 +37,13 @@ static int ui_ok;
 
 /* Text with every font pixel drawn as a scale x scale block. */
 static int draw_scaled(struct canvas *c, const struct font *f, int x, int y,
-                       int scale, const char *s, uint32_t color)
+                       int scale, const char *s, u32 color)
 {
 	const char *end = s + strlen(s);
-	uint32_t cp;
+	u32 cp;
 
 	while ((cp = utf8_next(&s, end)) != 0) {
-		const uint8_t *g = f->bits + font_glyph(f, cp) * f->h * f->row_bytes;
+		const u8 *g = f->bits + font_glyph(f, cp) * f->h * f->row_bytes;
 		int gx, gy;
 
 		for (gy = 0; gy < f->h; gy++, g += f->row_bytes)
@@ -57,7 +58,7 @@ static int draw_scaled(struct canvas *c, const struct font *f, int x, int y,
 
 /* Centered on the canvas width. */
 static void draw_centered(struct canvas *c, const struct font *f, int y,
-                          int scale, const char *s, uint32_t color)
+                          int scale, const char *s, u32 color)
 {
 	int w = utf8_count(s, (int)strlen(s)) * f->w * scale;
 
@@ -65,7 +66,7 @@ static void draw_centered(struct canvas *c, const struct font *f, int y,
 }
 
 /* Background and the title row with the log clock. */
-static struct canvas *begin(uint32_t bg, const char *title)
+static struct canvas *begin(u32 bg, const char *title)
 {
 	struct canvas *c = screen_canvas();
 	char clock[32];
@@ -197,7 +198,7 @@ unsigned ui_gap(int done, int next, const char *next_label, const char *note)
 struct wrap_ctx {
 	struct canvas *c;
 	int            y;
-	uint32_t       color;
+	u32       color;
 };
 
 static void wrap_line(const char *line, int nbytes, void *arg)

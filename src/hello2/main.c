@@ -16,6 +16,7 @@
  *
  * usage: hello2 <sd_path> [seconds]
  */
+#include "types.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,10 +84,10 @@ static void log_gl_info(void)
 }
 
 /* h in [0,1), s/v in [0,1] -> rgb in [0,1] */
-static void hsv_to_rgb(float h, float s, float v, float *r, float *g, float *b)
+static void hsv_to_rgb(f32 h, f32 s, f32 v, f32 *r, f32 *g, f32 *b)
 {
-	float f = h * 6.0f - (int)(h * 6.0f);
-	float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+	f32 f = h * 6.0f - (int)(h * 6.0f);
+	f32 p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
 
 	switch ((int)(h * 6.0f) % 6) {
 	case 0:  *r = v; *g = t; *b = p; break;
@@ -98,7 +99,7 @@ static void hsv_to_rgb(float h, float s, float v, float *r, float *g, float *b)
 	}
 }
 
-static void draw_rect(float x, float y, float w, float h, const GLubyte rgba[16])
+static void draw_rect(f32 x, f32 y, f32 w, f32 h, const GLubyte rgba[16])
 {
 	const GLfloat v[8] = { x, y,  x + w, y,  x, y + h,  x + w, y + h };
 
@@ -119,7 +120,7 @@ static void draw_frame(int w, int h, unsigned ms, unsigned run_ms)
 	static const GLubyte yellow[16] = {
 		255, 200, 0, 255, 255, 200, 0, 255, 255, 200, 0, 255, 255, 200, 0, 255,
 	};
-	float t = ms / 1000.0f, r, g, b, x;
+	f32 t = ms / 1000.0f, r, g, b, x;
 	unsigned period = 3000, phase = ms % (2 * period);
 
 	/* background: full hue cycle every 10 s */
@@ -136,17 +137,17 @@ static void draw_frame(int w, int h, unsigned ms, unsigned run_ms)
 
 	/* white block bouncing left-right along the top, 3 s per pass */
 	glLoadIdentity();
-	x = (phase < period ? phase : 2 * period - phase) / (float)period * (w - 40);
+	x = (phase < period ? phase : 2 * period - phase) / (f32)period * (w - 40);
 	draw_rect(x, h - 70.0f, 40.0f, 40.0f, white);
 
 	/* progress bar: how much of the run is left */
-	draw_rect(0.0f, 0.0f, w * (float)ms / run_ms, 10.0f, yellow);
+	draw_rect(0.0f, 0.0f, w * (f32)ms / run_ms, 10.0f, yellow);
 }
 
 static void take_screenshots(int w, int h)
 {
 	char path[256], cmd[320];
-	unsigned char *pixels = malloc((size_t)w * h * 4);
+	unsigned char *pixels = malloc((usize)w * h * 4);
 	int rc;
 
 	if (pixels != NULL) {

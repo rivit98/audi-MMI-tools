@@ -3,12 +3,12 @@
 #include "check.h"
 #include "config_gate.h"
 
-#include <cstdint>
+#include "types.h"
 #include <vector>
 
 int main()
 {
-	const std::vector<uint8_t> a = {1, 2, 3}, b = {1, 2, 4};
+	const std::vector<u8> a = {1, 2, 3}, b = {1, 2, 4};
 
 	{
 		ConfigGate g;

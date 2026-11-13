@@ -12,7 +12,7 @@
 #include "schedule.h"
 
 #include <algorithm>
-#include <cstdint>
+#include "types.h"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -29,102 +29,102 @@ namespace {
 
 // Big-endian box writer, the layout media/csmp4.py writes.
 struct Buf {
-	std::vector<uint8_t> b;
-	void u8(uint32_t v) { b.push_back((uint8_t)v); }
-	void u16(uint32_t v) { u8(v >> 8); u8(v); }
-	void u32(uint32_t v) { u16(v >> 16); u16(v & 0xffff); }
-	void u64(uint64_t v) { u32((uint32_t)(v >> 32)); u32((uint32_t)v); }
-	void tag(const char *t) { for (int i = 0; i < 4; i++) u8((uint8_t)t[i]); }
-	void zeros(int n) { b.insert(b.end(), (size_t)n, 0); }
-	size_t open(const char *t)
+	std::vector<u8> b;
+	void put8(u32 v) { b.push_back((u8)v); }
+	void put16(u32 v) { put8(v >> 8); put8(v); }
+	void put32(u32 v) { put16(v >> 16); put16(v & 0xffff); }
+	void put64(u64 v) { put32((u32)(v >> 32)); put32((u32)v); }
+	void tag(const char *t) { for (int i = 0; i < 4; i++) put8((u8)t[i]); }
+	void zeros(int n) { b.insert(b.end(), (usize)n, 0); }
+	usize open(const char *t)
 	{
-		size_t at = b.size();
-		u32(0);
+		usize at = b.size();
+		put32(0);
 		tag(t);
 		return at;
 	}
-	void close(size_t at)
+	void close(usize at)
 	{
-		uint32_t n = (uint32_t)(b.size() - at);
-		b[at] = (uint8_t)(n >> 24);
-		b[at + 1] = (uint8_t)(n >> 16);
-		b[at + 2] = (uint8_t)(n >> 8);
-		b[at + 3] = (uint8_t)n;
+		u32 n = (u32)(b.size() - at);
+		b[at] = (u8)(n >> 24);
+		b[at + 1] = (u8)(n >> 16);
+		b[at + 2] = (u8)(n >> 8);
+		b[at + 3] = (u8)n;
 	}
 };
 
 struct Spec {
-	uint32_t timescale = 12800, delta = 512;
-	uint32_t size = 4096, declared = 100;
-	uint32_t stts_entries = 1, stsc_per_chunk = 0;   // 0: = declared
+	u32 timescale = 12800, delta = 512;
+	u32 size = 4096, declared = 100;
+	u32 stts_entries = 1, stsc_per_chunk = 0;   // 0: = declared
 	bool co64 = false;
-	uint32_t present = 3;                            // frames written after the header
+	u32 present = 3;                            // frames written after the header
 	int mdat = 0;          // mdat header: 0 exact 32-bit size, 1 size 0, 2 64-bit, 3 wrong size
 };
 
-std::vector<uint8_t> make(const Spec &s, uint64_t *data_off)
+std::vector<u8> make(const Spec &s, u64 *data_off)
 {
 	Buf f;
-	size_t a = f.open("ftyp");
+	usize a = f.open("ftyp");
 	f.tag("isom");
-	f.u32(0x200);
+	f.put32(0x200);
 	f.tag("isom");
 	f.close(a);
 
-	size_t moov = f.open("moov");
-	size_t mvhd = f.open("mvhd");
+	usize moov = f.open("moov");
+	usize mvhd = f.open("mvhd");
 	f.zeros(100);
 	f.close(mvhd);
-	size_t trak = f.open("trak");
-	size_t tkhd = f.open("tkhd");
+	usize trak = f.open("trak");
+	usize tkhd = f.open("tkhd");
 	f.zeros(84);
 	f.close(tkhd);
-	size_t mdia = f.open("mdia");
-	size_t mdhd = f.open("mdhd");
-	f.u32(0);                         // version 0, flags
-	f.u32(0);
-	f.u32(0);
-	f.u32(s.timescale);
-	f.u32(s.declared * s.delta);
-	f.u32(0x55c40000);
+	usize mdia = f.open("mdia");
+	usize mdhd = f.open("mdhd");
+	f.put32(0);                         // version 0, flags
+	f.put32(0);
+	f.put32(0);
+	f.put32(s.timescale);
+	f.put32(s.declared * s.delta);
+	f.put32(0x55c40000);
 	f.close(mdhd);
-	size_t minf = f.open("minf");
-	size_t stbl = f.open("stbl");
-	size_t stsd = f.open("stsd");
-	f.u32(0);
-	f.u32(1);
-	size_t avc1 = f.open("avc1");
+	usize minf = f.open("minf");
+	usize stbl = f.open("stbl");
+	usize stsd = f.open("stsd");
+	f.put32(0);
+	f.put32(1);
+	usize avc1 = f.open("avc1");
 	f.zeros(78);
 	f.close(avc1);
 	f.close(stsd);
-	size_t stts = f.open("stts");
-	f.u32(0);
-	f.u32(s.stts_entries);
-	for (uint32_t i = 0; i < s.stts_entries; i++) {
-		f.u32(s.declared / s.stts_entries);
-		f.u32(s.delta);
+	usize stts = f.open("stts");
+	f.put32(0);
+	f.put32(s.stts_entries);
+	for (u32 i = 0; i < s.stts_entries; i++) {
+		f.put32(s.declared / s.stts_entries);
+		f.put32(s.delta);
 	}
 	f.close(stts);
-	size_t stsc = f.open("stsc");
-	f.u32(0);
-	f.u32(1);
-	f.u32(1);
-	f.u32(s.stsc_per_chunk ? s.stsc_per_chunk : s.declared);
-	f.u32(1);
+	usize stsc = f.open("stsc");
+	f.put32(0);
+	f.put32(1);
+	f.put32(1);
+	f.put32(s.stsc_per_chunk ? s.stsc_per_chunk : s.declared);
+	f.put32(1);
 	f.close(stsc);
-	size_t stsz = f.open("stsz");
-	f.u32(0);
-	f.u32(s.size);
-	f.u32(s.declared);
+	usize stsz = f.open("stsz");
+	f.put32(0);
+	f.put32(s.size);
+	f.put32(s.declared);
 	f.close(stsz);
-	size_t co = f.open(s.co64 ? "co64" : "stco");
-	f.u32(0);
-	f.u32(1);
-	size_t stco_value = f.b.size();
+	usize co = f.open(s.co64 ? "co64" : "stco");
+	f.put32(0);
+	f.put32(1);
+	usize stco_value = f.b.size();
 	if (s.co64)
-		f.u64(0);
+		f.put64(0);
 	else
-		f.u32(0);
+		f.put32(0);
 	f.close(co);
 	f.close(stbl);
 	f.close(minf);
@@ -132,32 +132,32 @@ std::vector<uint8_t> make(const Spec &s, uint64_t *data_off)
 	f.close(trak);
 	f.close(moov);
 
-	const uint64_t payload = (uint64_t)s.declared * s.size;
+	const u64 payload = (u64)s.declared * s.size;
 	if (s.mdat == 2) {
-		f.u32(1);                 // 64-bit size, as an older csmp4.py wrote
+		f.put32(1);                 // 64-bit size, as an older csmp4.py wrote
 		f.tag("mdat");
-		f.u64(16 + payload);
+		f.put64(16 + payload);
 	} else {
-		f.u32(s.mdat == 1 ? 0 : (uint32_t)(8 + payload + (s.mdat == 3 ? s.size : 0)));
+		f.put32(s.mdat == 1 ? 0 : (u32)(8 + payload + (s.mdat == 3 ? s.size : 0)));
 		f.tag("mdat");
 	}
 	*data_off = f.b.size();
 	if (!s.co64) {
-		f.b[stco_value] = (uint8_t)(*data_off >> 24);
-		f.b[stco_value + 1] = (uint8_t)(*data_off >> 16);
-		f.b[stco_value + 2] = (uint8_t)(*data_off >> 8);
-		f.b[stco_value + 3] = (uint8_t)*data_off;
+		f.b[stco_value] = (u8)(*data_off >> 24);
+		f.b[stco_value + 1] = (u8)(*data_off >> 16);
+		f.b[stco_value + 2] = (u8)(*data_off >> 8);
+		f.b[stco_value + 3] = (u8)*data_off;
 	}
-	for (uint32_t k = 0; k < s.present; k++)
-		f.b.insert(f.b.end(), s.size, (uint8_t)('A' + k));
+	for (u32 k = 0; k < s.present; k++)
+		f.b.insert(f.b.end(), s.size, (u8)('A' + k));
 	return f.b;
 }
 
 void test_parse()
 {
 	Spec s;
-	uint64_t data_off = 0;
-	std::vector<uint8_t> file = make(s, &data_off);
+	u64 data_off = 0;
+	std::vector<u8> file = make(s, &data_off);
 	csmp4::Info m;
 	std::string err = csmp4::parse(file.data(), file.size(), file.size(), m);
 
@@ -173,7 +173,7 @@ void test_parse()
 
 	// a short read of the file: only the header
 	csmp4::Info h;
-	err = csmp4::parse(file.data(), (size_t)data_off, file.size(), h);
+	err = csmp4::parse(file.data(), (usize)data_off, file.size(), h);
 	CHECK_STR(err.c_str(), "");
 	CHECK_EQ(h.present, 3);
 
@@ -193,9 +193,9 @@ void test_parse()
 
 void test_parse_rejects()
 {
-	uint64_t off;
+	u64 off;
 	csmp4::Info m;
-	std::vector<uint8_t> f;
+	std::vector<u8> f;
 	Spec s;
 
 	s.size = 0;
@@ -236,10 +236,10 @@ void test_parse_rejects()
 	s.size = 65536;
 	s.declared = 70000;                                                // 4.6 GB
 	f = make(s, &off);
-	CHECK(!csmp4::parse(f.data(), (size_t)off, f.size(), m).empty());  // over 4 GB
+	CHECK(!csmp4::parse(f.data(), (usize)off, f.size(), m).empty());  // over 4 GB
 
 	f = make(Spec(), &off);
-	CHECK(!csmp4::parse(f.data(), (size_t)off - 8, f.size(), m).empty()); // no mdat header
+	CHECK(!csmp4::parse(f.data(), (usize)off - 8, f.size(), m).empty()); // no mdat header
 	CHECK(!csmp4::parse(f.data(), 40, f.size(), m).empty());           // truncated moov
 	f[4] = 'x';
 	CHECK(!csmp4::parse(f.data(), f.size(), f.size(), m).empty());     // not ftyp
@@ -274,18 +274,18 @@ void test_schedule()
 // ---- H.264 helpers ----
 
 // x264 Baseline 3.0, 720x336 (media/mkclips.sh CS264), and its PPS
-const std::vector<uint8_t> kSps = {0x67, 0x42, 0xc0, 0x1e, 0xda, 0x02, 0xd0, 0xae,
+const std::vector<u8> kSps = {0x67, 0x42, 0xc0, 0x1e, 0xda, 0x02, 0xd0, 0xae,
                                    0xc0, 0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
                                    0x00, 0x03, 0x00, 0xc8, 0x3c, 0x58, 0xba, 0x80};
-const std::vector<uint8_t> kPps = {0x68, 0xce, 0x3c, 0x80};
+const std::vector<u8> kPps = {0x68, 0xce, 0x3c, 0x80};
 
 struct BitW {
-	std::vector<uint8_t> out;
-	uint8_t cur = 0;
+	std::vector<u8> out;
+	u8 cur = 0;
 	unsigned n = 0;
 	void bit(unsigned b)
 	{
-		cur = (uint8_t)(cur << 1 | (b & 1));
+		cur = (u8)(cur << 1 | (b & 1));
 		if (++n == 8) {
 			out.push_back(cur);
 			cur = 0;
@@ -314,7 +314,7 @@ struct BitW {
 };
 
 // A Baseline SPS with POC type 0 (x264 Baseline uses type 2): 176x144.
-std::vector<uint8_t> sps_poc0()
+std::vector<u8> sps_poc0()
 {
 	BitW w;
 	w.u(8, 66);
@@ -333,14 +333,14 @@ std::vector<uint8_t> sps_poc0()
 	w.u(1, 0);        // no cropping
 	w.u(1, 0);        // no VUI
 	w.trailing();
-	std::vector<uint8_t> nal{0x67};
+	std::vector<u8> nal{0x67};
 	h264::escape(w.out, nal);
 	return nal;
 }
 
 // A slice NAL with a valid header start and `body` bytes of 0xaa after it.
-std::vector<uint8_t> slice(const h264::Sps &sps, bool idr, unsigned ref_idc, unsigned first_mb,
-                           unsigned frame_num, unsigned poc_lsb, size_t body)
+std::vector<u8> slice(const h264::Sps &sps, bool idr, unsigned ref_idc, unsigned first_mb,
+                           unsigned frame_num, unsigned poc_lsb, usize body)
 {
 	BitW w;
 	w.ue(first_mb);
@@ -352,23 +352,23 @@ std::vector<uint8_t> slice(const h264::Sps &sps, bool idr, unsigned ref_idc, uns
 	if (sps.poc_type == 0)
 		w.u(sps.log2_max_poc_lsb, poc_lsb);
 	w.trailing();
-	std::vector<uint8_t> nal{(uint8_t)(ref_idc << 5 | (idr ? 5 : 1))};
+	std::vector<u8> nal{(u8)(ref_idc << 5 | (idr ? 5 : 1))};
 	h264::escape(w.out, nal);
 	nal.insert(nal.end(), body, 0xaa);
 	return nal;
 }
 
-void annexb(std::vector<uint8_t> &out, const std::vector<uint8_t> &nal)
+void annexb(std::vector<u8> &out, const std::vector<u8> &nal)
 {
-	static const uint8_t sc[4] = {0, 0, 0, 1};
+	static const u8 sc[4] = {0, 0, 0, 1};
 	out.insert(out.end(), sc, sc + 4);
 	out.insert(out.end(), nal.begin(), nal.end());
 }
 
-std::vector<uint8_t> idr_au(const h264::Sps &sps, const std::vector<uint8_t> &sp,
-                            const std::vector<uint8_t> &pp, size_t body = 300)
+std::vector<u8> idr_au(const h264::Sps &sps, const std::vector<u8> &sp,
+                            const std::vector<u8> &pp, usize body = 300)
 {
-	std::vector<uint8_t> au;
+	std::vector<u8> au;
 	annexb(au, {0x09, 0xf0});        // AUD: dropped
 	annexb(au, sp);
 	annexb(au, pp);
@@ -376,25 +376,25 @@ std::vector<uint8_t> idr_au(const h264::Sps &sps, const std::vector<uint8_t> &sp
 	return au;
 }
 
-std::vector<uint8_t> p_au(const h264::Sps &sps, unsigned frame_num, size_t body = 200,
+std::vector<u8> p_au(const h264::Sps &sps, unsigned frame_num, usize body = 200,
                           unsigned ref_idc = 2)
 {
-	std::vector<uint8_t> au;
+	std::vector<u8> au;
 	annexb(au, slice(sps, false, ref_idc, 0, frame_num, frame_num * 2, body));
 	return au;
 }
 
 void test_bits()
 {
-	std::vector<uint8_t> e;
+	std::vector<u8> e;
 	h264::escape({0, 0, 1}, e);
-	CHECK(e == std::vector<uint8_t>({0, 0, 3, 1}));
+	CHECK(e == std::vector<u8>({0, 0, 3, 1}));
 	e.clear();
 	h264::escape({0, 0, 0, 0}, e);
-	CHECK(e == std::vector<uint8_t>({0, 0, 3, 0, 0}));
+	CHECK(e == std::vector<u8>({0, 0, 3, 0, 0}));
 	e.clear();
 	h264::escape({0, 0, 4}, e);
-	CHECK(e == std::vector<uint8_t>({0, 0, 4}));
+	CHECK(e == std::vector<u8>({0, 0, 4}));
 
 	h264::Sps s;
 	h264::Pps p;
@@ -423,7 +423,7 @@ void test_bits()
 	// a skip slice parses back as what it should be
 	CHECK_OK(h264::parse_sps(kSps.data(), kSps.size(), s));
 	unsigned fn = 3 % (1u << s.log2_max_frame_num);
-	std::vector<uint8_t> skip = h264::skip_slice(s, p, fn, 0);
+	std::vector<u8> skip = h264::skip_slice(s, p, fn, 0);
 	h264::Slice sl;
 	CHECK_OK(h264::parse_slice(skip.data(), skip.size(), s, p, sl));
 	CHECK_EQ(sl.nal_type, 1);
@@ -434,7 +434,7 @@ void test_bits()
 	CHECK(skip.size() < 16);
 
 	// POC type 0: the skip carries its POC LSB
-	std::vector<uint8_t> sp0 = sps_poc0();
+	std::vector<u8> sp0 = sps_poc0();
 	h264::Sps s0;
 	CHECK_OK(h264::parse_sps(sp0.data(), sp0.size(), s0));
 	CHECK_EQ(s0.poc_type, 0);
@@ -447,7 +447,7 @@ void test_bits()
 	CHECK_EQ(sl.poc_lsb, 21);
 
 	// the test slice writer, read back
-	std::vector<uint8_t> idr = slice(s, true, 3, 0, 0, 0, 10);
+	std::vector<u8> idr = slice(s, true, 3, 0, 0, 0, 10);
 	CHECK_OK(h264::parse_slice(idr.data(), idr.size(), s, p, sl));
 	CHECK(sl.idr());
 	CHECK_EQ(sl.ref_idc, 3);
@@ -458,7 +458,7 @@ void test_crop()
 {
 	h264::Sps s, c;
 	CHECK_OK(h264::parse_sps(kSps.data(), kSps.size(), s));
-	std::vector<uint8_t> out, back;
+	std::vector<u8> out, back;
 	CHECK_OK(h264::crop_sps(kSps.data(), kSps.size(), 640, 320, 31, out));
 	CHECK_OK(h264::parse_sps(out.data(), out.size(), c));
 	CHECK_EQ(c.width, 640);
@@ -481,7 +481,7 @@ void test_crop()
 	CHECK_EQ(c.level, s.level);
 	CHECK_EQ(c.height, 330);
 	// POC type 0 with its own fields
-	std::vector<uint8_t> sp0 = sps_poc0();
+	std::vector<u8> sp0 = sps_poc0();
 	h264::Sps s0, c0;
 	CHECK_OK(h264::parse_sps(sp0.data(), sp0.size(), s0));
 	CHECK_OK(h264::crop_sps(sp0.data(), sp0.size(), 160, 120, 0, out));
@@ -496,12 +496,12 @@ void test_crop()
 	CHECK(!h264::crop_sps(kPps.data(), kPps.size(), 640, 320, 0, out).empty());
 
 	// a whole access unit: the SPS is rewritten, the rest copied
-	std::vector<uint8_t> au = idr_au(s, kSps, kPps, 50), au2;
+	std::vector<u8> au = idr_au(s, kSps, kPps, 50), au2;
 	CHECK_OK(h264::crop_sps_annexb(au.data(), au.size(), 640, 320, 30, au2));
 	std::vector<h264::Nal> a = h264::split_annexb(au.data(), au.size());
 	std::vector<h264::Nal> b = h264::split_annexb(au2.data(), au2.size());
 	CHECK_EQ(a.size(), b.size());
-	for (size_t i = 0; i < a.size() && i < b.size(); i++) {
+	for (usize i = 0; i < a.size() && i < b.size(); i++) {
 		CHECK_EQ(a[i].type(), b[i].type());
 		if (a[i].type() == h264::kSps) {
 			CHECK_OK(h264::parse_sps(b[i].p, b[i].n, c));
@@ -521,13 +521,13 @@ void test_split()
 {
 	h264::Sps s;
 	h264::parse_sps(kSps.data(), kSps.size(), s);
-	std::vector<uint8_t> st = idr_au(s, kSps, kPps, 20);
-	size_t au1 = st.size();
-	std::vector<uint8_t> p1 = p_au(s, 1, 20);
+	std::vector<u8> st = idr_au(s, kSps, kPps, 20);
+	usize au1 = st.size();
+	std::vector<u8> p1 = p_au(s, 1, 20);
 	st.insert(st.end(), p1.begin(), p1.end());
 	annexb(st, slice(s, false, 2, 5, 1, 0, 20));     // a second slice of frame 1
-	size_t au2 = st.size();
-	std::vector<uint8_t> p2 = p_au(s, 2, 20);
+	usize au2 = st.size();
+	std::vector<u8> p2 = p_au(s, 2, 20);
 	st.insert(st.end(), p2.begin(), p2.end());
 
 	std::vector<h264::Nal> nals = h264::split_annexb(st.data(), st.size());
@@ -550,9 +550,9 @@ void test_split()
 
 void test_header()
 {
-	std::vector<uint8_t> hdr;
+	std::vector<u8> hdr;
 	CHECK_OK(csmp4::build_header(kSps, kPps, 25, 28672, 15000, hdr));
-	std::vector<uint8_t> file = hdr;
+	std::vector<u8> file = hdr;
 	file.insert(file.end(), 28672, 0);
 	csmp4::Info m;
 	CHECK_OK(csmp4::parse(file.data(), file.size(), file.size(), m));
@@ -570,8 +570,8 @@ void test_header()
 	CHECK_OK(csmp4::parse(file.data(), file.size(), file.size(), m));
 	CHECK_EQ(m.present, 10);
 
-	uint32_t most = csmp4::max_frames(28672);
-	CHECK((uint64_t)most * 28672 + 4096 < ((uint64_t)1 << 32));
+	u32 most = csmp4::max_frames(28672);
+	CHECK((u64)most * 28672 + 4096 < ((u64)1 << 32));
 	CHECK(most > 25 * 3600);                                // over an hour at 25 fps
 	CHECK_OK(csmp4::build_header(kSps, kPps, 25, 28672, most, hdr));
 	CHECK(!csmp4::build_header(kSps, kPps, 25, 65536, 70000, hdr).empty());   // 4.6 GB
@@ -583,27 +583,27 @@ void test_sample()
 {
 	h264::Sps s;
 	h264::parse_sps(kSps.data(), kSps.size(), s);
-	std::vector<uint8_t> au = idr_au(s, kSps, kPps, 100);
-	std::vector<uint8_t> out;
+	std::vector<u8> au = idr_au(s, kSps, kPps, 100);
+	std::vector<u8> out;
 	CHECK_OK(csmp4::make_sample(au.data(), au.size(), 4096, out));
 	CHECK_EQ(out.size(), 4096);
 	// SPS first (the AUD is dropped), with its length
 	CHECK_EQ(out[3], kSps.size());
 	CHECK_EQ(out[4], 0x67);
-	size_t used = 4 + kSps.size() + 4 + kPps.size() + 4 + slice(s, true, 3, 0, 0, 0, 100).size();
+	usize used = 4 + kSps.size() + 4 + kPps.size() + 4 + slice(s, true, 3, 0, 0, 0, 100).size();
 	CHECK_EQ(out[used + 4], h264::kFiller);
-	uint32_t flen = (uint32_t)out[used] << 24 | out[used + 1] << 16 | out[used + 2] << 8 | out[used + 3];
+	u32 flen = (u32)out[used] << 24 | out[used + 1] << 16 | out[used + 2] << 8 | out[used + 3];
 	CHECK_EQ(flen, 4096 - used - 4);
 	CHECK_EQ(out[4095], 0x80);
 	CHECK_EQ(out[4094], 0xff);
 
 	// exactly S: no filler; 1..5 bytes short of S: can't be padded
-	CHECK_OK(csmp4::make_sample(au.data(), au.size(), (uint32_t)used, out));
+	CHECK_OK(csmp4::make_sample(au.data(), au.size(), (u32)used, out));
 	CHECK_EQ(out.size(), used);
-	CHECK(!csmp4::make_sample(au.data(), au.size(), (uint32_t)used + 3, out).empty());
-	CHECK(!csmp4::make_sample(au.data(), au.size(), (uint32_t)used - 1, out).empty());
-	CHECK_OK(csmp4::make_sample(au.data(), au.size(), (uint32_t)used + 6, out));
-	const uint8_t aud[] = {0, 0, 1, 9, 0xf0};
+	CHECK(!csmp4::make_sample(au.data(), au.size(), (u32)used + 3, out).empty());
+	CHECK(!csmp4::make_sample(au.data(), au.size(), (u32)used - 1, out).empty());
+	CHECK_OK(csmp4::make_sample(au.data(), au.size(), (u32)used + 6, out));
+	const u8 aud[] = {0, 0, 1, 9, 0xf0};
 	CHECK(!csmp4::make_sample(aud, sizeof(aud), 4096, out).empty());     // nothing left
 
 	csmp4::filler_sample(4096, out);
@@ -612,7 +612,7 @@ void test_sample()
 	CHECK_EQ(out[4], h264::kFiller);
 }
 
-live::Config cfg(uint32_t s, uint32_t declared, bool fill, unsigned ring)
+live::Config cfg(u32 s, u32 declared, bool fill, unsigned ring)
 {
 	live::Config c;
 	c.sps = kSps;
@@ -625,9 +625,9 @@ live::Config cfg(uint32_t s, uint32_t declared, bool fill, unsigned ring)
 	return c;
 }
 
-uint8_t frame_byte(live::Stream &st, uint64_t k, uint32_t j)
+u8 frame_byte(live::Stream &st, u64 k, u32 j)
 {
-	uint8_t b = 0;
+	u8 b = 0;
 	st.read(st.data_off() + k * st.sample_size() + j, &b, 1);
 	return b;
 }
@@ -644,7 +644,7 @@ void test_stream()
 	CHECK_EQ(st.total(), st.data_off() + 20 * 8192);
 	CHECK_EQ(st.available(), st.data_off());                            // the header only
 
-	std::vector<uint8_t> f = p_au(s, 1);
+	std::vector<u8> f = p_au(s, 1);
 	CHECK((int)st.push(f.data(), f.size(), 0) == (int)live::Push::WaitIdr);
 	f = idr_au(s, kSps, kPps);
 	CHECK((int)st.push(f.data(), f.size(), 0, &why) == (int)live::Push::Ok);
@@ -654,7 +654,7 @@ void test_stream()
 	f = p_au(s, 1);
 	CHECK((int)st.push(f.data(), f.size(), 40) == (int)live::Push::Ok);
 
-	uint8_t head[8];
+	u8 head[8];
 	CHECK_EQ(st.read(0, head, 8), 8);
 	CHECK(std::memcmp(head + 4, "ftyp", 4) == 0);
 	CHECK_EQ(frame_byte(st, 0, 4), 0x67);                               // frame 0: SPS first
@@ -680,7 +680,7 @@ void test_stream()
 	CHECK((int)st.push(f.data(), f.size(), 240) == (int)live::Push::Ok);
 
 	// in-band SPS that differs from the config
-	std::vector<uint8_t> sps2 = kSps;
+	std::vector<u8> sps2 = kSps;
 	sps2[3] = 0x1f;                                                     // level 3.1
 	f = idr_au(s, sps2, kPps);
 	CHECK((int)st.push(f.data(), f.size(), 280) == (int)live::Push::ConfigChanged);
@@ -704,12 +704,12 @@ void test_stream()
 	CHECK_EQ(st.push_ms(0), -1);
 	CHECK_EQ(frame_byte(st, 12, 4), 0x41);
 	CHECK_EQ(frame_byte(st, 15, 4), h264::kFiller);                    // not there yet: filler
-	uint8_t b;
+	u8 b;
 	CHECK_EQ(st.read(st.total(), &b, 1), 0);                            // past the end
 	// what a read served as filler, frame by frame: 0..4 gone (ring of 8 of
 	// 13), 5..12 kept, 13..15 not pushed yet
 	{
-		std::vector<uint8_t> span(16 * 8192);
+		std::vector<u8> span(16 * 8192);
 		live::Stream::ReadInfo info;
 		CHECK_EQ(st.read(st.data_off(), span.data(), span.size(), &info), span.size());
 		CHECK_EQ(info.evicted, 5);
@@ -741,7 +741,7 @@ void test_fill()
 	CHECK_OK(st.configure(cfg(8192, 0, true, 64)));
 	CHECK(st.skips_possible());
 	CHECK_EQ(st.fill(1000), 0);                                         // not started
-	std::vector<uint8_t> f = idr_au(s, kSps, kPps);
+	std::vector<u8> f = idr_au(s, kSps, kPps);
 	st.push(f.data(), f.size(), 0);
 	f = p_au(s, 1);
 	st.push(f.data(), f.size(), 40);
@@ -756,9 +756,9 @@ void test_fill()
 	// the skip: one non-reference P slice, frame_num = last reference + 1
 	h264::Pps p;
 	h264::parse_pps(kPps.data(), kPps.size(), p);
-	std::vector<uint8_t> smp(8192);
+	std::vector<u8> smp(8192);
 	st.read(st.data_off() + 3 * 8192, smp.data(), smp.size());
-	uint32_t len = (uint32_t)smp[0] << 24 | smp[1] << 16 | smp[2] << 8 | smp[3];
+	u32 len = (u32)smp[0] << 24 | smp[1] << 16 | smp[2] << 8 | smp[3];
 	CHECK(len < 32);
 	h264::Slice sl;
 	CHECK_OK(h264::parse_slice(smp.data() + 4, len, s, p, sl));
@@ -826,7 +826,7 @@ void test_shed()
 {
 	h264::Sps s;
 	h264::parse_sps(kSps.data(), kSps.size(), s);
-	std::vector<uint8_t> f;
+	std::vector<u8> f;
 
 	// off (0): the stream just gets further ahead
 	live::Stream off;
@@ -848,7 +848,7 @@ void test_shed()
 	unsigned sync_asks = 0, idr_sent = 0, max_ahead = 0;
 	bool want_idr = false;
 	for (unsigned k = 0; k < 26 * 60; k++) {
-		uint64_t t = k * 1000 / 26;
+		u64 t = k * 1000 / 26;
 		bool idr = k == 0 || want_idr;
 		f = idr ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
 		live::Push p = on.push(f.data(), f.size(), t);
@@ -862,8 +862,8 @@ void test_shed()
 			want_idr = true;                 // the phone's next frame is an IDR
 		}
 		on.fill(t + 1);
-		int64_t ahead = (int64_t)(on.frames() * 40) - (int64_t)t;
-		if (ahead > (int64_t)max_ahead)
+		i64 ahead = (i64)(on.frames() * 40) - (i64)t;
+		if (ahead > (i64)max_ahead)
 			max_ahead = (unsigned)ahead;
 	}
 	live::Stats st = on.stats();
@@ -919,7 +919,7 @@ void test_burst()
 const char kDir[] = "build/test_live.d";
 constexpr unsigned kCropW = 288, kCropH = 208;   // check_live.py's CROP
 
-bool read_file(const std::string &path, std::vector<uint8_t> &out)
+bool read_file(const std::string &path, std::vector<u8> &out)
 {
 	FILE *f = std::fopen(path.c_str(), "rb");
 	if (f == nullptr)
@@ -927,13 +927,13 @@ bool read_file(const std::string &path, std::vector<uint8_t> &out)
 	std::fseek(f, 0, SEEK_END);
 	long n = std::ftell(f);
 	std::fseek(f, 0, SEEK_SET);
-	out.resize(n > 0 ? (size_t)n : 0);
+	out.resize(n > 0 ? (usize)n : 0);
 	bool ok = std::fread(out.data(), 1, out.size(), f) == out.size();
 	std::fclose(f);
 	return ok;
 }
 
-bool write_file(const std::string &path, const std::vector<uint8_t> &data)
+bool write_file(const std::string &path, const std::vector<u8> &data)
 {
 	FILE *f = std::fopen(path.c_str(), "wb");
 	if (f == nullptr)
@@ -944,7 +944,7 @@ bool write_file(const std::string &path, const std::vector<uint8_t> &data)
 
 void test_with_clip()
 {
-	std::vector<uint8_t> clip, ref;
+	std::vector<u8> clip, ref;
 	if (!read_file(std::string(kDir) + "/in.h264", clip) ||
 	    !read_file(std::string(kDir) + "/ref.mp4", ref)) {
 		std::printf("test_live: no %s/in.h264 + ref.mp4: clip checks skipped "
@@ -952,10 +952,10 @@ void test_with_clip()
 		return;
 	}
 	std::vector<h264::Range> aus = h264::split_access_units(clip.data(), clip.size());
-	std::vector<uint8_t> sps, pps;
-	size_t biggest = 0;
+	std::vector<u8> sps, pps;
+	usize biggest = 0;
 	for (const h264::Range &r : aus) {
-		size_t bytes = 0;
+		usize bytes = 0;
 		for (const h264::Nal &n : h264::split_annexb(clip.data() + r.begin, r.end - r.begin)) {
 			if (n.type() == h264::kSps && sps.empty())
 				sps.assign(n.p, n.p + n.n);
@@ -967,21 +967,21 @@ void test_with_clip()
 		biggest = std::max(biggest, bytes);
 	}
 	CHECK(!sps.empty() && !pps.empty() && aus.size() > 40);
-	uint32_t s = (uint32_t)((biggest + csmp4::kFillerMin + 4095) / 4096 * 4096);
+	u32 s = (u32)((biggest + csmp4::kFillerMin + 4095) / 4096 * 4096);
 
 	// our header = media/csmp4.py's (declared 600 s), byte for byte
 	csmp4::Info m;
 	CHECK_OK(csmp4::parse(ref.data(), ref.size(), ref.size(), m));
 	CHECK_EQ(m.sample_size, s);
 	CHECK_EQ(m.present, aus.size());
-	std::vector<uint8_t> hdr;
+	std::vector<u8> hdr;
 	CHECK_OK(csmp4::build_header(sps, pps, 25, s, m.declared, hdr));
 	CHECK_EQ(hdr.size(), m.data_off);
 	CHECK(hdr.size() <= ref.size() && std::memcmp(hdr.data(), ref.data(), hdr.size()) == 0);
 	// and the frames: the same samples
-	std::vector<uint8_t> smp;
+	std::vector<u8> smp;
 	bool same = true;
-	for (size_t k = 0; k < aus.size(); k++) {
+	for (usize k = 0; k < aus.size(); k++) {
 		csmp4::make_sample(clip.data() + aus[k].begin, aus[k].end - aus[k].begin, s, smp);
 		same = same && std::memcmp(smp.data(), ref.data() + m.data_off + k * s, s) == 0;
 	}
@@ -998,9 +998,9 @@ void test_with_clip()
 	c.ring_frames = 1000;
 	live::Stream st;
 	CHECK_OK(st.configure(c));
-	uint64_t t = 0;
-	for (size_t k = 0; k < aus.size(); k++) {
-		uint64_t due = k * 40 + (k >= 30 ? 600 : 0);
+	u64 t = 0;
+	for (usize k = 0; k < aus.size(); k++) {
+		u64 due = k * 40 + (k >= 30 ? 600 : 0);
 		for (; t < due; t += 10)
 			st.fill(t);
 		CHECK((int)st.push(clip.data() + aus[k].begin, aus[k].end - aus[k].begin, due) ==
@@ -1010,23 +1010,23 @@ void test_with_clip()
 	CHECK(ls.skips >= 12 && ls.skips <= 15);
 	CHECK_EQ(ls.real, aus.size());
 
-	std::vector<uint8_t> es, mp4;
+	std::vector<u8> es, mp4;
 	std::string skips;
-	CHECK_OK(csmp4::build_header(sps, pps, 25, s, (uint32_t)st.frames(), mp4, true));
-	for (uint64_t k = 0; k < st.frames(); k++) {
+	CHECK_OK(csmp4::build_header(sps, pps, 25, s, (u32)st.frames(), mp4, true));
+	for (u64 k = 0; k < st.frames(); k++) {
 		st.read(st.data_off() + k * s, smp.data(), s);
 		mp4.insert(mp4.end(), smp.begin(), smp.end());
 		bool skip = false;
-		for (uint32_t at = 0; at + 4 <= s;) {
-			uint32_t len = (uint32_t)smp[at] << 24 | smp[at + 1] << 16 | smp[at + 2] << 8 | smp[at + 3];
+		for (u32 at = 0; at + 4 <= s;) {
+			u32 len = (u32)smp[at] << 24 | smp[at + 1] << 16 | smp[at + 2] << 8 | smp[at + 3];
 			if (len == 0 || at + 4 + len > s)
 				break;
-			uint8_t type = smp[at + 4] & 0x1f;
+			u8 type = smp[at + 4] & 0x1f;
 			if (type == h264::kFiller)
 				break;
 			if (type == h264::kSlice && (smp[at + 4] >> 5) == 0)
 				skip = true;
-			std::vector<uint8_t> nal(smp.begin() + at + 4, smp.begin() + at + 4 + len);
+			std::vector<u8> nal(smp.begin() + at + 4, smp.begin() + at + 4 + len);
 			annexb(es, nal);
 			at += 4 + len;
 		}
@@ -1037,7 +1037,7 @@ void test_with_clip()
 	CHECK(write_file(std::string(kDir) + "/gap.mp4", mp4));
 	std::string hdr_line = std::to_string(st.frames()) + "\n" + skips;
 	CHECK(write_file(std::string(kDir) + "/gap_skips.txt",
-	                 std::vector<uint8_t>(hdr_line.begin(), hdr_line.end())));
+	                 std::vector<u8>(hdr_line.begin(), hdr_line.end())));
 	std::printf("test_live: %zu clip frames, header = csmp4.py's (%zu bytes), gap stream: %llu "
 	            "frames, %u skips -> %s/gap.*\n",
 	            aus.size(), hdr.size(), (unsigned long long)st.frames(), ls.skips, kDir);
@@ -1045,13 +1045,13 @@ void test_with_clip()
 	// the clip with its SPS cropped to the top-left 288x208 (hello10's
 	// 800 -> 720), raw and as a CS-MP4: check_live.py decodes both and
 	// compares them with ffmpeg's own crop of the original
-	std::vector<uint8_t> crop_es, crop_mp4, au, csps;
+	std::vector<u8> crop_es, crop_mp4, au, csps;
 	CHECK_OK(h264::crop_sps(sps.data(), sps.size(), kCropW, kCropH, 30, csps));
 	h264::Sps cs;
 	CHECK_OK(h264::parse_sps(csps.data(), csps.size(), cs));
 	CHECK_EQ(cs.width, kCropW);
 	CHECK_EQ(cs.height, kCropH);
-	CHECK_OK(csmp4::build_header(csps, pps, 25, s, (uint32_t)aus.size(), crop_mp4, true));
+	CHECK_OK(csmp4::build_header(csps, pps, 25, s, (u32)aus.size(), crop_mp4, true));
 	for (const h264::Range &r : aus) {
 		CHECK_OK(h264::crop_sps_annexb(clip.data() + r.begin, r.end - r.begin, kCropW, kCropH, 30, au));
 		crop_es.insert(crop_es.end(), au.begin(), au.end());

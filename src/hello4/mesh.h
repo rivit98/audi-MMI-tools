@@ -10,12 +10,13 @@
 #ifndef HELLO4_MESH_H
 #define HELLO4_MESH_H
 
+#include "types.h"
 #include <GLES/gl.h>
 
 /* openqnx ships no <math.h> (libm is not in the source leak); the device's
  * libm.so.2 exports these, and the sysroot has stubs for them. */
-float sinf(float x);
-float cosf(float x);
+f32 sinf(f32 x);
+f32 cosf(f32 x);
 
 /* Vertex arrays mesh_draw() enables besides positions. */
 enum { MESH_NORMAL = 1, MESH_UV = 2, MESH_COLOR = 4 };
@@ -32,11 +33,11 @@ struct mesh {
 int  mesh_cube(struct mesh *m);
 
 /* Torus around the z axis: major radius R, tube radius r, nu x nv quads. */
-int  mesh_torus(struct mesh *m, float R, float r, int nu, int nv);
+int  mesh_torus(struct mesh *m, f32 R, f32 r, int nu, int nv);
 
 /* size x size square in the y=0 plane, facing +y, split into n x n quads;
  * the texture repeats uv_repeat times across it. */
-int  mesh_grid(struct mesh *m, float size, int n, float uv_repeat);
+int  mesh_grid(struct mesh *m, f32 size, int n, f32 uv_repeat);
 
 void mesh_free(struct mesh *m);
 

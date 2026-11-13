@@ -1,6 +1,7 @@
 /*
  * cpumon.c - CPU load of this app and of the unit (see cpumon.h).
  */
+#include "types.h"
 #include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -164,7 +165,7 @@ static void diff(const struct snap *a, const struct snap *b, struct cpustat_samp
 /* " | mem free 141 MB, heap 3.2 MB": the unit's free RAM (QNX: the size of
  * /proc is the free memory) and this process's heap in use (mallinfo).
  * Once a window: a stat() and a walk of our own small heap. */
-static void mem_text(char *out, size_t cap, unsigned *free_mb)
+static void mem_text(char *out, usize cap, unsigned *free_mb)
 {
 	struct stat st;
 	struct mallinfo mi = mallinfo();

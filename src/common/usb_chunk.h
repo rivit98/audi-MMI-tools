@@ -10,13 +10,14 @@
 #ifndef COMMON_USB_CHUNK_H
 #define COMMON_USB_CHUNK_H
 
+#include "types.h"
 #include <cstddef>
 
 // The length of the next transfer out of `left` bytes; max_xfer = the
 // transfer buffer, packet = wMaxPacketSize (0: unknown).
-inline size_t usb_chunk(size_t left, size_t max_xfer, unsigned packet)
+inline usize usb_chunk(usize left, usize max_xfer, unsigned packet)
 {
-	size_t n = left < max_xfer ? left : max_xfer;
+	usize n = left < max_xfer ? left : max_xfer;
 	if (packet != 0 && n > 1 && n % packet == 0)
 		n--;
 	return n;

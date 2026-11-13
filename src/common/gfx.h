@@ -9,6 +9,7 @@
 #ifndef COMMON_GFX_H
 #define COMMON_GFX_H
 
+#include "types.h"
 #include <EGL/egl.h>
 #include <gf/gf3d.h>
 
@@ -51,7 +52,7 @@ void gfx_shutdown(struct gfx *g);
  * 1/(end-start) on every fog state change, with no guard for end == start,
  * and on QNX/SH a divide by zero is a fatal SIGFPE rather than an inf
  * (docs/qnx-sh-fpu-div0.md). start == end is clamped, not divided. */
-void gfx_fog_linear(float start, float end);
+void gfx_fog_linear(f32 start, f32 end);
 
 const char *gf_format_name(gf_format_t f);
 const char *gf_err_name(int err);

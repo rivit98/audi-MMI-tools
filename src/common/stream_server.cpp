@@ -5,6 +5,7 @@
 // libc.so.2). <sys/iomsg.h> needs <sys/pm.h>, which the sysroot lacks:
 // src/common/qnx/sys/pm.h stands in.
 #include "stream_server.h"
+#include "types.h"
 
 extern "C" {
 #include "log.h"
@@ -35,7 +36,7 @@ constexpr unsigned kNoteReads = 40;     // reads noted in detail
 // would otherwise wait for the declared last frame, hours away, with the
 // player's attach call stuck behind it. Counted as far reads.
 constexpr unsigned kFarS = 10;
-constexpr size_t kMaxNotes = 400;
+constexpr usize kMaxNotes = 400;
 constexpr long kTickNs = 10 * 1000000L; // dispatch timeout: serve the queue
 
 // Our attribute: the iofunc one first, so the library's pointer is ours.
@@ -47,7 +48,7 @@ struct Attr {
 struct Pending {
 	int rcvid;
 	iofunc_ocb_t *ocb;
-	uint64_t off;
+	u64 off;
 	unsigned nbytes;
 	bool pread;
 	unsigned since_ms;
@@ -58,8 +59,8 @@ struct Pending {
 
 struct StreamServer::Impl {
 	live::Stream *stream = nullptr;
-	uint64_t data_off = 0, total = 0;
-	uint32_t sample_size = 0;
+	u64 data_off = 0, total = 0;
+	u32 sample_size = 0;
 	unsigned fps = 25;
 
 	dispatch_t *dpp = nullptr;
@@ -72,14 +73,14 @@ struct StreamServer::Impl {
 	std::atomic<bool> stopping{false};
 
 	std::deque<Pending> pending;             // server thread only
-	std::vector<uint8_t> buf;
+	std::vector<u8> buf;
 
 	std::mutex mu;                           // stats + notes + history
 	StreamStats st;
 	std::vector<std::string> notes;
 	ReadRecord history[StreamServer::kReadHistory];   // by seq % kReadHistory
 
-	uint64_t frame_of(uint64_t off) const { return (off - data_off) / sample_size; }
+	u64 frame_of(u64 off) const { return (off - data_off) / sample_size; }
 
 	void note(const char *fmt, ...) __attribute__((format(printf, 2, 3)))
 	{
@@ -99,14 +100,14 @@ struct StreamServer::Impl {
 	{
 		if (p.off < data_off || p.off >= total || stream->finished())
 			return false;
-		return frame_of(p.off) > stream->frames() + (uint64_t)kFarS * fps;
+		return frame_of(p.off) > stream->frames() + (u64)kFarS * fps;
 	}
 
 	// Answer one read with what is available, n bytes at most; 0 = EOF. A
 	// far read gets its bytes regardless (see kFarMs).
 	void reply(const Pending &p)
 	{
-		uint64_t avail = far(p) ? total : stream->available(), n = p.nbytes;
+		u64 avail = far(p) ? total : stream->available(), n = p.nbytes;
 
 		if (p.off >= avail)
 			n = 0;
@@ -114,7 +115,7 @@ struct StreamServer::Impl {
 			n = avail - p.off;
 		buf.resize(n);
 		live::Stream::ReadInfo info;
-		n = stream->read(p.off, buf.data(), (size_t)n, &info);
+		n = stream->read(p.off, buf.data(), (usize)n, &info);
 		MsgReply(p.rcvid, (int)n, buf.data(), (int)n);
 		if (!p.pread)
 			p.ocb->offset = (off_t)(p.off + n);
@@ -154,7 +155,7 @@ struct StreamServer::Impl {
 	// will be.
 	bool ready(const Pending &p) const
 	{
-		uint64_t end = p.off + p.nbytes;
+		u64 end = p.off + p.nbytes;
 		if (end > total)
 			end = total;
 		return stream->finished() || p.off >= total || end <= stream->available() || far(p);
@@ -185,10 +186,10 @@ struct StreamServer::Impl {
 		Pending p{};
 		switch (msg->i.xtype & _IO_XTYPE_MASK) {
 		case _IO_XTYPE_NONE:
-			p.off = (uint64_t)ocb->offset;
+			p.off = (u64)ocb->offset;
 			break;
 		case _IO_XTYPE_OFFSET:
-			p.off = (uint64_t)reinterpret_cast<struct _xtype_offset *>(&msg->i + 1)->offset;
+			p.off = (u64)reinterpret_cast<struct _xtype_offset *>(&msg->i + 1)->offset;
 			p.pread = true;
 			break;
 		default:
@@ -199,13 +200,13 @@ struct StreamServer::Impl {
 		p.nbytes = (unsigned)msg->i.nbytes;
 		p.since_ms = log_ms();
 
-		uint64_t end = p.off + p.nbytes;
+		u64 end = p.off + p.nbytes;
 		if (end > total)
 			end = total;
 		// frames [0, needed) must exist for the whole read; lead = how many
 		// past what exists now
-		uint64_t needed = end <= data_off ? 0 : (end - data_off + sample_size - 1) / sample_size;
-		int64_t lead = (int64_t)needed - (int64_t)stream->frames();
+		u64 needed = end <= data_off ? 0 : (end - data_off + sample_size - 1) / sample_size;
+		i64 lead = (i64)needed - (i64)stream->frames();
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			p.seq = ++st.reads;
@@ -230,8 +231,8 @@ struct StreamServer::Impl {
 			r.at_ms = p.since_ms;
 			r.off = p.off;
 			r.nbytes = p.nbytes;
-			r.first = p.off < data_off ? -1 : (int64_t)frame_of(p.off);
-			r.last = needed ? (int64_t)needed - 1 : -1;
+			r.first = p.off < data_off ? -1 : (i64)frame_of(p.off);
+			r.last = needed ? (i64)needed - 1 : -1;
 			r.lead = lead;
 		}
 		if (p.seq <= kNoteReads)

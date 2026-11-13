@@ -9,7 +9,7 @@
 #ifndef AUDI_STREAM_RECEIVER_CONFIG_GATE_H
 #define AUDI_STREAM_RECEIVER_CONFIG_GATE_H
 
-#include <cstdint>
+#include "types.h"
 #include <vector>
 
 class ConfigGate {
@@ -18,7 +18,7 @@ public:
 
 	// A config from the phone. true: new, the stream must (re)start from
 	// it. false: a copy of the newest one.
-	bool offer(const std::vector<uint8_t> &payload)
+	bool offer(const std::vector<u8> &payload)
 	{
 		asked_ = false;
 		if (payload == current_)
@@ -36,7 +36,7 @@ public:
 
 	// A config was taken: a stream is running or on its way.
 	bool taken() const { return !current_.empty(); }
-	const std::vector<uint8_t> &current() const { return current_; }
+	const std::vector<u8> &current() const { return current_; }
 
 	// The phone should send its config (again): true at most once per
 	// kAskEveryMs. now_ms may wrap.
@@ -50,7 +50,7 @@ public:
 	}
 
 private:
-	std::vector<uint8_t> current_;
+	std::vector<u8> current_;
 	bool asked_ = false;
 	unsigned asked_ms_ = 0;
 };

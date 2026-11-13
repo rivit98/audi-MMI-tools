@@ -1,5 +1,6 @@
 // camera.cpp - see camera.h.
 #include "camera.h"
+#include "types.h"
 
 #include "camera_log.h"
 
@@ -36,7 +37,7 @@ int buffer[4096];                       // the biggest event is 258 ints
 bool drain()
 {
 	for (;;) {
-		ssize_t n = read(fd, buffer, sizeof(buffer));
+		isize n = read(fd, buffer, sizeof(buffer));
 		if (n < 0) {
 			if (errno == EAGAIN)
 				return true;
@@ -48,7 +49,7 @@ bool drain()
 		}
 		if (n == 0)
 			return true;
-		tracker.events(buffer, (size_t)n / sizeof(int), log_ms());
+		tracker.events(buffer, (usize)n / sizeof(int), log_ms());
 		if (tracker.ended())
 			ended_at = tracker.ended_ms();
 		has_ended = tracker.ended();

@@ -32,6 +32,7 @@
  *
  * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default "v")
  */
+#include "types.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -63,7 +64,7 @@ const char *sd_card_path(void)
 	return sd_path;
 }
 
-void out_path(char *buf, size_t n, const char *name)
+void out_path(char *buf, usize n, const char *name)
 {
 	snprintf(buf, n, "%s/hello6/%s", var_dir(sd_path), name);
 }

@@ -13,7 +13,7 @@
 #define ANDROID_AUTO_TLS_H
 
 #include <cstddef>
-#include <cstdint>
+#include "types.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,14 +35,14 @@ public:
 
 	// Feed the phone's handshake bytes (none for the first call); appends
 	// what to send back to out, possibly nothing.
-	Step handshake(const uint8_t *in, size_t n, std::vector<uint8_t> &out);
+	Step handshake(const u8 *in, usize n, std::vector<u8> &out);
 	bool done() const;
 
 	// Appends the TLS records for p[0..n) to out.
-	bool encrypt(const uint8_t *p, size_t n, std::vector<uint8_t> &out);
+	bool encrypt(const u8 *p, usize n, std::vector<u8> &out);
 	// Appends the plaintext of whatever complete records p[0..n) finishes
 	// (a record may span calls) to out.
-	bool decrypt(const uint8_t *p, size_t n, std::vector<uint8_t> &out);
+	bool decrypt(const u8 *p, usize n, std::vector<u8> &out);
 
 	// The last mbedTLS error as text, and the negotiated suite.
 	const std::string &error() const { return error_; }
@@ -62,7 +62,7 @@ private:
 
 // Entropy for the random generator; platform-specific (tls.cpp). The unit
 // has no /dev/random.
-int entropy_source(void *data, unsigned char *out, size_t len, size_t *olen);
+int entropy_source(void *data, unsigned char *out, usize len, usize *olen);
 
 } // namespace aa
 

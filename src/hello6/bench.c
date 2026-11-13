@@ -22,7 +22,7 @@
  * 256x256 -> 800x120 -> 800x480 with a glFinish after each: the last line
  * on the card names the call, size and format that hung.
  */
-#include <stdint.h>
+#include "types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +50,7 @@
 #define BAND_H   120
 #define PIPE_MS  4000
 
-static uint32_t rng = 1;
+static u32 rng = 1;
 
 static unsigned rnd(void)
 {
@@ -60,21 +60,21 @@ static unsigned rnd(void)
 
 /* MB/s; elapsed ms is never 0 here (a 0 would be a fatal SIGFPE on this
  * platform, docs/qnx-sh-fpu-div0.md). */
-static double mbps(double bytes, unsigned ms)
+static f64 mbps(f64 bytes, unsigned ms)
 {
 	return bytes / 1048576.0 * 1000.0 / (ms ? ms : 1);
 }
 
-static uint16_t rgb565(unsigned r, unsigned g, unsigned b)
+static u16 rgb565(unsigned r, unsigned g, unsigned b)
 {
-	return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3));
+	return (u16)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3));
 }
 
 /* ------------------------------------------------------------------ */
 /* test frames                                                         */
 
 /* UI-like: flat background, flat panels, rows of glyph-like 1-bit cells. */
-static void frame_ui(uint16_t *f)
+static void frame_ui(u16 *f)
 {
 	int i, x, y, k;
 
@@ -82,7 +82,7 @@ static void frame_ui(uint16_t *f)
 		f[i] = rgb565(16, 24, 40);
 	for (k = 0; k < 12; k++) {
 		int x0 = (int)(rnd() % (W - 200)), y0 = (int)(rnd() % (H - 100));
-		uint16_t c = rgb565(rnd() & 255, rnd() & 255, rnd() & 255);
+		u16 c = rgb565(rnd() & 255, rnd() & 255, rnd() & 255);
 
 		for (y = y0; y < y0 + 60 + (int)(rnd() % 40); y++)
 			for (x = x0; x < x0 + 100 + (int)(rnd() % 100); x++)
@@ -102,7 +102,7 @@ static void frame_ui(uint16_t *f)
 }
 
 /* Photo-like: smooth gradients plus sensor-style noise in the low bits. */
-static void frame_photo(uint16_t *f)
+static void frame_photo(u16 *f)
 {
 	int x, y;
 
@@ -113,19 +113,19 @@ static void frame_photo(uint16_t *f)
 			                      ((x + y) * 255 / (W + H) + (rnd() & 7)) & 255);
 }
 
-static void frame_random(uint16_t *f)
+static void frame_random(u16 *f)
 {
 	int i;
 
 	for (i = 0; i < PIX; i++)
-		f[i] = (uint16_t)rnd();
+		f[i] = (u16)rnd();
 }
 
 /* Visible pattern for the GL pipeline: colour bars with a moving checker
  * strip, variant v shifts everything so consecutive frames differ. */
-static void frame_bars(uint16_t *f, int v)
+static void frame_bars(u16 *f, int v)
 {
-	static const uint16_t bars[8] = {
+	static const u16 bars[8] = {
 		0xffff, 0xffe0, 0x07ff, 0x07e0, 0xf81f, 0xf800, 0x001f, 0x0000,
 	};
 	int x, y;
@@ -142,27 +142,27 @@ static void frame_bars(uint16_t *f, int v)
 
 /* DXT1 blocks (4x4 texels, 8 bytes): colour0 from a block gradient,
  * colour1 black, 2-bit indices drawing diagonal stripes; v moves them. */
-static void frame_dxt1(uint8_t *d, int v)
+static void frame_dxt1(u8 *d, int v)
 {
 	int bx, by;
 
 	for (by = 0; by < H / 4; by++)
 		for (bx = 0; bx < W / 4; bx++) {
-			uint16_t c0 = rgb565(bx * 255 / (W / 4), by * 255 / (H / 4), 160);
-			uint32_t idx = 0;
+			u16 c0 = rgb565(bx * 255 / (W / 4), by * 255 / (H / 4), 160);
+			u32 idx = 0;
 			int t;
 
 			if (c0 == 0)
 				c0 = 1;                 /* c0 > c1: 4-colour mode */
 			for (t = 0; t < 16; t++)
-				idx |= (uint32_t)(((t % 4 + t / 4 + bx + by + v) / 2) & 3) << (2 * t);
-			d[0] = (uint8_t)c0;
-			d[1] = (uint8_t)(c0 >> 8);
+				idx |= (u32)(((t % 4 + t / 4 + bx + by + v) / 2) & 3) << (2 * t);
+			d[0] = (u8)c0;
+			d[1] = (u8)(c0 >> 8);
 			d[2] = d[3] = 0;
-			d[4] = (uint8_t)idx;
-			d[5] = (uint8_t)(idx >> 8);
-			d[6] = (uint8_t)(idx >> 16);
-			d[7] = (uint8_t)(idx >> 24);
+			d[4] = (u8)idx;
+			d[5] = (u8)(idx >> 8);
+			d[6] = (u8)(idx >> 16);
+			d[7] = (u8)(idx >> 24);
 			d += 8;
 		}
 }
@@ -170,15 +170,15 @@ static void frame_dxt1(uint8_t *d, int v)
 /* ------------------------------------------------------------------ */
 /* CPU                                                                 */
 
-static void lz4_case(const char *name, const uint16_t *frame, uint8_t *cbuf,
-                     int ccap, uint8_t *dbuf)
+static void lz4_case(const char *name, const u16 *frame, u8 *cbuf,
+                     int ccap, u8 *dbuf)
 {
 	const int n = PIX * 2;
 	unsigned t0, cms, dms;
 	int clen, dlen = 0, i, reps = 0;
 
 	t0 = log_ms();
-	clen = lz4mini_compress((const uint8_t *)frame, n, cbuf, ccap);
+	clen = lz4mini_compress((const u8 *)frame, n, cbuf, ccap);
 	cms = log_ms() - t0;
 	if (clen < 0) {
 		log_msg("FAIL lz4 %s: compress returned %d", name, clen);
@@ -191,25 +191,25 @@ static void lz4_case(const char *name, const uint16_t *frame, uint8_t *cbuf,
 		reps += 4;
 	} while (log_ms() - t0 < 300);
 	dms = log_ms() - t0;
-	if (dlen != n || memcmp(dbuf, frame, (size_t)n) != 0) {
+	if (dlen != n || memcmp(dbuf, frame, (usize)n) != 0) {
 		log_msg("FAIL lz4 %s: round trip mismatch (%d of %d bytes)", name, dlen, n);
 		return;
 	}
 	log_msg("RESULT lz4_%s: %d -> %d bytes (%.1f%%), compress %u ms, "
 	        "decompress %.1f MB/s (%.1f ms/frame)",
-	        name, n, clen, 100.0 * clen / n, cms, mbps((double)n * reps, dms),
-	        (double)dms / reps);
+	        name, n, clen, 100.0 * clen / n, cms, mbps((f64)n * reps, dms),
+	        (f64)dms / reps);
 	summary_add("lz4 %-6s %4.1f%% of size, decode %5.1f ms/frame (%.0f MB/s)",
-	            name, 100.0 * clen / n, (double)dms / reps,
-	            mbps((double)n * reps, dms));
+	            name, 100.0 * clen / n, (f64)dms / reps,
+	            mbps((f64)n * reps, dms));
 }
 
 void bench_cpu(void)
 {
 	const int ccap = LZ4MINI_BOUND(PIX * 2);
-	uint8_t *a = malloc(PIX * 4), *b = malloc(PIX * 4);
-	uint8_t *cbuf = malloc((size_t)ccap), *dbuf = malloc(PIX * 2);
-	uint16_t *f = malloc(PIX * 2);
+	u8 *a = malloc(PIX * 4), *b = malloc(PIX * 4);
+	u8 *cbuf = malloc((usize)ccap), *dbuf = malloc(PIX * 2);
+	u16 *f = malloc(PIX * 2);
 	unsigned t0, ms;
 	int i, reps;
 
@@ -229,24 +229,24 @@ void bench_cpu(void)
 	}
 	ms = log_ms() - t0;
 	log_msg("RESULT ram_memcpy: %.1f MB/s (%d x %d bytes in %u ms)",
-	        mbps((double)PIX * 4 * reps, ms), reps, PIX * 4, ms);
-	summary_add("RAM memcpy        %6.1f MB/s", mbps((double)PIX * 4 * reps, ms));
+	        mbps((f64)PIX * 4 * reps, ms), reps, PIX * 4, ms);
+	summary_add("RAM memcpy        %6.1f MB/s", mbps((f64)PIX * 4 * reps, ms));
 
 	t0 = log_ms();
 	for (reps = 0; reps < 1 || log_ms() - t0 < 300; reps++) {
-		uint32_t *p = (uint32_t *)b;
+		u32 *p = (u32 *)b;
 
 		for (i = 0; i < PIX; i++)
-			p[i] = (uint32_t)i;
+			p[i] = (u32)i;
 		__asm__ __volatile__("" : : "r"(p) : "memory");
 	}
 	ms = log_ms() - t0;
-	log_msg("RESULT ram_store32: %.1f MB/s", mbps((double)PIX * 4 * reps, ms));
+	log_msg("RESULT ram_store32: %.1f MB/s", mbps((f64)PIX * 4 * reps, ms));
 
 	frame_ui(f);
 	t0 = log_ms();
 	for (reps = 0; reps < 1 || log_ms() - t0 < 300; reps++) {
-		uint32_t *p = (uint32_t *)b;
+		u32 *p = (u32 *)b;
 
 		for (i = 0; i < PIX; i++) {
 			unsigned c = f[i];
@@ -256,8 +256,8 @@ void bench_cpu(void)
 		__asm__ __volatile__("" : : "r"(p) : "memory");
 	}
 	ms = log_ms() - t0;
-	log_msg("RESULT rgb565_to_bgra: %.1f ms per 800x480 frame", (double)ms / reps);
-	summary_add("RGB565->BGRA      %6.1f ms/frame", (double)ms / reps);
+	log_msg("RESULT rgb565_to_bgra: %.1f ms per 800x480 frame", (f64)ms / reps);
+	summary_add("RGB565->BGRA      %6.1f ms/frame", (f64)ms / reps);
 
 	lz4_case("ui", f, cbuf, ccap, dbuf);
 	frame_photo(f);
@@ -275,7 +275,7 @@ out:
 /* ------------------------------------------------------------------ */
 /* VFB (CPU access to the layer manager frame buffer)                  */
 
-static void bench_vfb(struct gfx *g, const uint8_t *ram)
+static void bench_vfb(struct gfx *g, const u8 *ram)
 {
 	gf_surface_info_t si;
 	unsigned t0, ms;
@@ -292,16 +292,16 @@ static void bench_vfb(struct gfx *g, const uint8_t *ram)
 	t0 = log_ms();
 	for (reps = 0; reps < 3 || log_ms() - t0 < 300; reps++)
 		for (y = 0; y < H; y++) {
-			uint32_t *row = (uint32_t *)(si.vaddr + (unsigned)y * si.stride);
+			u32 *row = (u32 *)(si.vaddr + (unsigned)y * si.stride);
 
 			for (x = 0; x < W; x++)
 				row[x] = 0xff000000u | (unsigned)(x + reps * 64);
 		}
 	ms = log_ms() - t0;
 	log_msg("RESULT vfb_store32: %.1f MB/s, %.1f ms per frame",
-	        mbps((double)PIX * 4 * reps, ms), (double)ms / reps);
+	        mbps((f64)PIX * 4 * reps, ms), (f64)ms / reps);
 	summary_add("VFB CPU store32   %6.1f MB/s (%.0f ms/frame)",
-	            mbps((double)PIX * 4 * reps, ms), (double)ms / reps);
+	            mbps((f64)PIX * 4 * reps, ms), (f64)ms / reps);
 
 	t0 = log_ms();
 	for (reps = 0; reps < 3 || log_ms() - t0 < 300; reps++)
@@ -309,17 +309,17 @@ static void bench_vfb(struct gfx *g, const uint8_t *ram)
 			memcpy(si.vaddr + (unsigned)y * si.stride, ram + y * W * 4, W * 4);
 	ms = log_ms() - t0;
 	log_msg("RESULT vfb_memcpy_in: %.1f MB/s, %.1f ms per frame",
-	        mbps((double)PIX * 4 * reps, ms), (double)ms / reps);
+	        mbps((f64)PIX * 4 * reps, ms), (f64)ms / reps);
 	summary_add("VFB memcpy in     %6.1f MB/s (%.0f ms/frame)",
-	            mbps((double)PIX * 4 * reps, ms), (double)ms / reps);
+	            mbps((f64)PIX * 4 * reps, ms), (f64)ms / reps);
 
 	t0 = log_ms();
 	for (reps = 0; reps < 2 || log_ms() - t0 < 300; reps++)
 		for (y = 0; y < H; y++)
-			memcpy((uint8_t *)ram + y * W * 4, si.vaddr + (unsigned)y * si.stride, W * 4);
+			memcpy((u8 *)ram + y * W * 4, si.vaddr + (unsigned)y * si.stride, W * 4);
 	ms = log_ms() - t0;
-	log_msg("RESULT vfb_memcpy_out: %.1f MB/s", mbps((double)PIX * 4 * reps, ms));
-	summary_add("VFB memcpy out    %6.1f MB/s", mbps((double)PIX * 4 * reps, ms));
+	log_msg("RESULT vfb_memcpy_out: %.1f MB/s", mbps((f64)PIX * 4 * reps, ms));
+	summary_add("VFB memcpy out    %6.1f MB/s", mbps((f64)PIX * 4 * reps, ms));
 	log_msg("gl: lm_update_vfb(%d)", g->cid);
 	log_msg("gl:   rc=%d", lm_update_vfb(g->cid));
 }
@@ -382,14 +382,14 @@ static void upload_case(const char *name, GLenum fmt, GLenum type, int bpp,
 	ms = log_ms() - t0;
 	err = glGetError();
 	log_msg("RESULT upload_%s: %.1f MB/s, %.1f ms per 800x480 frame, glError 0x%04x",
-	        name, mbps((double)PIX * bpp * reps, ms), (double)ms / reps, err);
+	        name, mbps((f64)PIX * bpp * reps, ms), (f64)ms / reps, err);
 	summary_add("upload %-8s   %6.1f MB/s (%.1f ms/frame)%s", name,
-	            mbps((double)PIX * bpp * reps, ms), (double)ms / reps,
+	            mbps((f64)PIX * bpp * reps, ms), (f64)ms / reps,
 	            err ? " GL ERROR" : "");
 	glDeleteTextures(1, &t);
 }
 
-static void upload_dxt1(const uint8_t *d0, const uint8_t *d1, const void *zero)
+static void upload_dxt1(const u8 *d0, const u8 *d1, const void *zero)
 {
 	const int full = TEX_W * TEX_H / 2, part = PIX / 2;
 	GLuint t = new_texture();
@@ -433,10 +433,10 @@ static void upload_dxt1(const uint8_t *d0, const uint8_t *d1, const void *zero)
 	err = glGetError();
 	log_msg("RESULT upload_dxt1 (%s): %.1f MB/s, %.1f ms per frame, glError 0x%04x",
 	        sub ? "sub-image 800x480, 192000 B" : "full 1024x512, 262144 B",
-	        mbps((double)(sub ? part : full) * reps, ms), (double)ms / reps, err);
+	        mbps((f64)(sub ? part : full) * reps, ms), (f64)ms / reps, err);
 	summary_add("upload dxt1%s %6.1f MB/s (%.1f ms/frame)",
-	            sub ? "      " : "(full)", mbps((double)(sub ? part : full) * reps, ms),
-	            (double)ms / reps);
+	            sub ? "      " : "(full)", mbps((f64)(sub ? part : full) * reps, ms),
+	            (f64)ms / reps);
 	glDeleteTextures(1, &t);
 }
 
@@ -457,8 +457,8 @@ static void draw_frame_quad(void)
 enum { PIPE_RGB565_FULL, PIPE_RGB565_BAND, PIPE_DXT1_FULL };
 
 /* Upload + draw + swap for PIPE_MS; logs fps. */
-static void pipeline(struct gfx *g, int mode, uint16_t *const bars[2],
-                     uint8_t *const dxt[2], const void *zero)
+static void pipeline(struct gfx *g, int mode, u16 *const bars[2],
+                     u8 *const dxt[2], const void *zero)
 {
 	static const char *const names[] = { "rgb565_full", "rgb565_band120", "dxt1_full" };
 	GLuint t = new_texture();
@@ -515,9 +515,9 @@ static void pipeline(struct gfx *g, int mode, uint16_t *const bars[2],
 void bench_gpu(void)
 {
 	struct gfx g;
-	uint16_t *bars[2] = { malloc(PIX * 2), malloc(PIX * 2) };
-	uint8_t *dxt[2] = { malloc(PIX / 2), malloc(PIX / 2) };
-	uint8_t *rgba[2] = { malloc(PIX * 4), malloc(PIX * 4) };
+	u16 *bars[2] = { malloc(PIX * 2), malloc(PIX * 2) };
+	u8 *dxt[2] = { malloc(PIX / 2), malloc(PIX / 2) };
+	u8 *rgba[2] = { malloc(PIX * 4), malloc(PIX * 4) };
 	void *zero = calloc(TEX_W * TEX_H, 4);
 	int i, m;
 

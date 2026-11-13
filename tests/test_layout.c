@@ -1,6 +1,7 @@
 /*
  * test_layout.c - pngondemand's layout language (make test).
  */
+#include "types.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,13 +18,13 @@ static int render(const char *src)
 	return layout_render(src, &r);
 }
 
-static uint32_t px(int x, int y)
+static u32 px(int x, int y)
 {
 	return r.canvas.px[y * r.canvas.stride + x];
 }
 
 /* Foreground pixels of colour rgb in the rectangle. */
-static int count(int x0, int y0, int w, int h, uint32_t rgb)
+static int count(int x0, int y0, int w, int h, u32 rgb)
 {
 	int x, y, n = 0;
 
@@ -138,7 +139,7 @@ static void test_flow_limits(void)
 	CHECK_EQ(px(0, 29), 0xFF000000u);
 }
 
-static int lines_with(uint32_t rgb, int x0, int w, int h)
+static int lines_with(u32 rgb, int x0, int w, int h)
 {
 	int y, n = 0;
 

@@ -1,5 +1,6 @@
 // video.cpp - picture hand-over, decode and acks (see video.h).
 #include "video.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -42,10 +43,10 @@ std::string stop_why;
 
 // --- main loop only -----------------------------------------------------
 struct Free {
-	void operator()(uint32_t *p) const { std::free(p); }
+	void operator()(u32 *p) const { std::free(p); }
 };
 View      cur;
-std::unique_ptr<uint32_t, Free> cur_px;   // cur.frame.px (imgdec's malloc)
+std::unique_ptr<u32, Free> cur_px;   // cur.frame.px (imgdec's malloc)
 bool      have_view;
 bool      unacked;                // cur.id decoded, not on screen yet
 bool      held;                   // cur.id on screen, its ack held back by the cap
@@ -116,10 +117,10 @@ void init(int screen_w, int screen_h)
 	        land_w, land_h, port_w, port_h, (unsigned)kMaxBytes);
 }
 
-std::array<uint8_t, proto::kVideoCapsLen> caps()
+std::array<u8, proto::kVideoCapsLen> caps()
 {
-	std::array<uint8_t, proto::kVideoCapsLen> a;
-	uint8_t *out = a.data();
+	std::array<u8, proto::kVideoCapsLen> a;
+	u8 *out = a.data();
 
 	proto::put_u16(out, (unsigned)land_w);
 	proto::put_u16(out + 2, (unsigned)land_h);
@@ -242,7 +243,7 @@ bool poll()
 	bool portrait = pic.w < pic.h;
 	int max_w = portrait ? port_w : land_w, max_h = portrait ? port_h : land_h;
 	int w, h;
-	uint32_t *px;
+	u32 *px;
 	unsigned t0 = log_us();
 	if (imgdec_argb(pic.data.get(), pic.size, max_w, max_h, &px, &w, &h) != 0) {
 		imgdec_info(pic.data.get(), pic.size, &w, &h);

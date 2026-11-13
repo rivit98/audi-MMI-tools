@@ -1,4 +1,5 @@
 #include "gfx.h"
+#include "types.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -341,7 +342,7 @@ int gfx_swap(struct gfx *g)
  * recompute only divides by a constant) while the range is written. That
  * makes the degenerate state unreachable even when the new start equals the
  * old end, which is what killed hello4 at probe "fog". */
-void gfx_fog_linear(float start, float end)
+void gfx_fog_linear(f32 start, f32 end)
 {
 	if (end == start)
 		end = start + 1.0f;     /* never hand the driver a zero divisor */

@@ -14,6 +14,7 @@
 // (There are no text messages from the phone: the phone's screen is what
 // the app is for.)
 #include "ui.h"
+#include "types.h"
 
 #include <cstdio>
 #include <cstring>
@@ -41,14 +42,14 @@ constexpr int kFooterH = 24;
 constexpr int kMargin = 12;
 constexpr int kMaxLines = 16;
 
-constexpr uint32_t kBg = 0xFF101820u;
-constexpr uint32_t kText = 0xFFE8E8E8u;
-constexpr uint32_t kDim = 0xFF8A929Eu;
-constexpr uint32_t kFooterBg = 0xFF1C2836u;
-constexpr uint32_t kRule = 0xFF2A3644u;
-constexpr uint32_t kVideoBg = 0xFF000000u;
+constexpr u32 kBg = 0xFF101820u;
+constexpr u32 kText = 0xFFE8E8E8u;
+constexpr u32 kDim = 0xFF8A929Eu;
+constexpr u32 kFooterBg = 0xFF1C2836u;
+constexpr u32 kRule = 0xFF2A3644u;
+constexpr u32 kVideoBg = 0xFF000000u;
 
-uint32_t state_colour(LinkState s)
+u32 state_colour(LinkState s)
 {
 	switch (s) {
 	case LinkState::NoStack:   return 0xFFA03028u;
@@ -103,7 +104,7 @@ struct Wrapped {
 
 // Word-wrapped text from y down, in [x0, x0 + pw); stops above y_max.
 void draw_wrapped(canvas *c, const font *f, int x0, int pw, int y, int y_max, const char *s,
-                  uint32_t colour)
+                  u32 colour)
 {
 	Wrapped w;
 
@@ -123,7 +124,7 @@ void draw_wrapped(canvas *c, const font *f, int x0, int pw, int y, int y_max, co
 
 // "cpu 27% unit 55%" (cpumon.h; " HIGH" when the last window was), the
 // last second.
-void cpu_text(char *out, size_t cap)
+void cpu_text(char *out, usize cap)
 {
 	int self, unit, high;
 
@@ -136,7 +137,7 @@ void cpu_text(char *out, size_t cap)
 		std::snprintf(out, cap, "cpu %d%% unit %d%%%s", self, unit, high ? " HIGH" : "");
 }
 
-void video_stats(char *out, size_t cap, const video::View *v)
+void video_stats(char *out, usize cap, const video::View *v)
 {
 	char cpu[48];
 
@@ -182,7 +183,7 @@ void blit(canvas *c, const canvas *src, int x, int y)
 		if (y + row < 0 || y + row >= c->h)
 			continue;
 		std::memcpy(c->px + (y + row) * c->stride + x + x0,
-		            src->px + row * src->stride + x0, (size_t)w * 4);
+		            src->px + row * src->stride + x0, (usize)w * 4);
 	}
 }
 

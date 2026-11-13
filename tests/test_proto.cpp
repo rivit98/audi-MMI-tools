@@ -1,5 +1,6 @@
 // test_proto.cpp - frame encoder/decoder (src/audi_stream_receiver/proto.h),
 // video picture reassembly (vasm.h) and the VIDEO_ACKS batch (ack_batch.h).
+#include "types.h"
 #include <vector>
 
 #include "check.h"
@@ -12,18 +13,18 @@ using namespace proto;
 namespace {
 
 struct Frame {
-	uint8_t type;
-	std::vector<uint8_t> payload;
+	u8 type;
+	std::vector<u8> payload;
 };
 
 std::vector<Frame> got;
 Decoder *dec;
-uint8_t buf[3 * kMaxFrame];
+u8 buf[3 * kMaxFrame];
 
-void feed(const uint8_t *p, unsigned n)
+void feed(const u8 *p, unsigned n)
 {
-	dec->feed(p, n, [](uint8_t type, const uint8_t *payload, unsigned len) {
-		got.push_back(Frame{type, std::vector<uint8_t>(payload, payload + len)});
+	dec->feed(p, n, [](u8 type, const u8 *payload, unsigned len) {
+		got.push_back(Frame{type, std::vector<u8>(payload, payload + len)});
 	});
 }
 
@@ -38,7 +39,7 @@ void reset()
 
 static void test_encode(void)
 {
-	uint8_t big[kMaxPayload + 1] = { 0 };
+	u8 big[kMaxPayload + 1] = { 0 };
 	unsigned n = encode(buf, sizeof(buf), kVideoData, "\x05\x00hi", 4);
 
 	CHECK_EQ(n, 7);
@@ -136,7 +137,7 @@ static void test_oversized_skipped(void)
 static void test_max_payload_accepted(void)
 {
 	unsigned n;
-	static uint8_t p[kMaxPayload];
+	static u8 p[kMaxPayload];
 
 	reset();
 	memset(p, 'x', sizeof(p));
@@ -149,18 +150,18 @@ static void test_max_payload_accepted(void)
 
 /* --- vasm ------------------------------------------------------------- */
 
-static unsigned start(uint8_t *p, unsigned id, unsigned w, unsigned h,
-                      unsigned format, uint32_t size)
+static unsigned start(u8 *p, unsigned id, unsigned w, unsigned h,
+                      unsigned format, u32 size)
 {
 	put_u16(p, id);
 	put_u16(p + 2, w);
 	put_u16(p + 4, h);
-	p[6] = (uint8_t)format;
+	p[6] = (u8)format;
 	put_u32(p + 7, size);
 	return kVideoStartLen;
 }
 
-static unsigned data(uint8_t *p, unsigned id, const char *bytes, unsigned n)
+static unsigned data(u8 *p, unsigned id, const char *bytes, unsigned n)
 {
 	put_u16(p, id);
 	memcpy(p + 2, bytes, n);
@@ -169,7 +170,7 @@ static unsigned data(uint8_t *p, unsigned id, const char *bytes, unsigned n)
 
 static void test_u32_le(void)
 {
-	uint8_t b[4];
+	u8 b[4];
 
 	put_u32(b, 0x12345678u);
 	CHECK_EQ(b[0], 0x78);
@@ -180,7 +181,7 @@ static void test_u32_le(void)
 static void test_vasm_whole_picture(void)
 {
 	Assembler a(100);
-	uint8_t p[64];
+	u8 p[64];
 	unsigned n;
 
 	n = start(p, 7, 640, 360, kFmtJpeg, 10);
@@ -209,7 +210,7 @@ static void test_vasm_whole_picture(void)
 static void test_vasm_refusals(void)
 {
 	Assembler a(100);
-	uint8_t p[64];
+	u8 p[64];
 	unsigned n;
 
 	n = start(p, 1, 640, 360, kFmtJpeg, 101);    // over max_bytes
@@ -245,7 +246,7 @@ static void test_vasm_refusals(void)
 static void test_vasm_phone_ms(void)
 {
 	Assembler a(100);
-	uint8_t p[64];
+	u8 p[64];
 	unsigned n;
 
 	n = start(p, 20, 800, 368, kFmtJpeg, 2);
@@ -270,7 +271,7 @@ static void test_vasm_phone_ms(void)
 static void test_vasm_cut_short(void)
 {
 	Assembler a(100);
-	uint8_t p[64];
+	u8 p[64];
 	unsigned n;
 
 	n = start(p, 10, 10, 20, kFmtJpeg, 4);
@@ -294,9 +295,9 @@ static void test_vasm_cut_short(void)
 static void test_h264(void)
 {
 	Assembler a(100);
-	uint8_t p[64];
+	u8 p[64];
 	unsigned n;
-	const uint8_t cfg[] = {25, 0x00, 0x70, 0x00, 0x00,     // 25 fps, 28672 bytes
+	const u8 cfg[] = {25, 0x00, 0x70, 0x00, 0x00,     // 25 fps, 28672 bytes
 	                       3, 0, 0x67, 0x42, 0xc0,          // SPS, 3 bytes
 	                       2, 0, 0x68, 0xce};               // PPS, 2 bytes
 
@@ -322,7 +323,7 @@ static void test_h264(void)
 	c = parse_h264_config(p, sizeof(cfg) + 1);
 	CHECK(c.has_value());
 	CHECK_EQ(c->vcap_mode, kVcapOddOnly);
-	for (uint8_t m : {0, 1, kVcapOddOnly + 1}) {        // retired (unchanged, BOB), unknown
+	for (u8 m : {0, 1, kVcapOddOnly + 1}) {        // retired (unchanged, BOB), unknown
 		p[sizeof(cfg)] = m;
 		c = parse_h264_config(p, sizeof(cfg) + 1);
 		CHECK(c.has_value());
@@ -376,13 +377,13 @@ static void test_ack_batch(void)
 static void test_ack_layout(void)
 {
 	AckBatch::Counts c;
-	uint8_t p[kVideoAcksLen];
+	u8 p[kVideoAcksLen];
 
 	c.shown = 0x0102;
 	c.bad = 3;
 	c.dropped = 0x0405;
 	c.encode(p);
-	const uint8_t want[kVideoAcksLen] = {0x02, 0x01, 3, 0, 0x05, 0x04};
+	const u8 want[kVideoAcksLen] = {0x02, 0x01, 3, 0, 0x05, 0x04};
 	CHECK(memcmp(p, want, sizeof(p)) == 0);
 	CHECK_EQ(kVideoAcks, 0x0D);
 }

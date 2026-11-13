@@ -1,6 +1,7 @@
 /*
  * cpustat.c - CPU-load windows and the "cpu:" line (see cpustat.h).
  */
+#include "types.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -59,7 +60,7 @@ unsigned cpustat_self_pct(const struct cpustat_win *w)
 	return cpustat_pct(w->self_us, w->wall_us);
 }
 
-int cpustat_format(const struct cpustat_win *w, char *out, size_t cap,
+int cpustat_format(const struct cpustat_win *w, char *out, usize cap,
                    const char *(*name)(int tid))
 {
 	struct cpustat_thread t[CPUSTAT_THREADS], tmp;
@@ -85,7 +86,7 @@ int cpustat_format(const struct cpustat_win *w, char *out, size_t cap,
 		unsigned p = cpustat_pct(t[i].us, w->wall_us);
 		const char *nm = name != NULL ? name(t[i].tid) : NULL;
 
-		if (p == 0 || len < 0 || (size_t)len >= cap)
+		if (p == 0 || len < 0 || (usize)len >= cap)
 			break;
 		if (nm != NULL)
 			len += snprintf(out + len, cap - len, "%s%s %u%%", i ? ", " : " | ", nm, p);

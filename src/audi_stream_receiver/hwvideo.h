@@ -16,7 +16,7 @@
 #ifndef AUDI_STREAM_HWVIDEO_H
 #define AUDI_STREAM_HWVIDEO_H
 
-#include <cstdint>
+#include "types.h"
 
 #include "proto.h"
 
@@ -26,18 +26,18 @@ namespace hwvideo {
 constexpr unsigned kMaxW = 720;
 constexpr unsigned kMaxH = 576;
 constexpr unsigned kFps = 25;
-constexpr uint32_t kMaxFrame = 256u * 1024;
+constexpr u32 kMaxFrame = 256u * 1024;
 
 void start();
 void shutdown();
 
-void config(const uint8_t *payload, unsigned n);
+void config(const u8 *payload, unsigned n);
 // One frame (Annex-B). Returns how it went, for VIDEO_ACKS.
-proto::PicStatus frame(const uint8_t *data, unsigned size);
+proto::PicStatus frame(const u8 *data, unsigned size);
 void stop(const char *why);
 
 // Manager thread: next H264_STATUS code, true if there was one.
-bool status_pop(uint8_t *code);
+bool status_pop(u8 *code);
 // Main loop: the video has (or is about to have) the screen.
 bool active();
 

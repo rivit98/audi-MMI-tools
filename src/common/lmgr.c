@@ -3,7 +3,7 @@
 #include <devctl.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
+#include "types.h"
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -17,12 +17,12 @@ static int lm_fd = -1;
 /* devctl() returns EOK or an errno value; the HMI retries on EINTR.
  * TimerTimeout() arms a timeout for the next blocking kernel call, which is
  * devctl's MsgSendv: a hung layer manager gives ETIMEDOUT, not a hang. */
-static int lm_devctl(unsigned dcmd, void *data, size_t nbytes)
+static int lm_devctl(unsigned dcmd, void *data, usize nbytes)
 {
 	int tries = 10, rc;
 
 	do {
-		uint64_t timeout = LM_TIMEOUT_NS;
+		u64 timeout = LM_TIMEOUT_NS;
 
 		if (TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
 		                 NULL, &timeout, NULL) == -1)
@@ -105,7 +105,7 @@ int lm_show_displayables(int display, const int *cids, int n)
 int lm_text_command(const char *cmd)
 {
 	int fd = open(LM_PATH, O_WRONLY);
-	ssize_t len = (ssize_t)strlen(cmd), n;
+	isize len = (isize)strlen(cmd), n;
 
 	if (fd < 0)
 		return errno;

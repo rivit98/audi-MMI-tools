@@ -3,7 +3,7 @@
  * The VFB here is plain memory with a wider stride than the canvas, as on
  * the car (stride 3200 for 800 pixels, here padded further).
  */
-#include <stdint.h>
+#include "types.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,12 +15,12 @@
 #define SS (W + 5)              /* canvas stride, pixels */
 #define DS ((W + 3) * 4)        /* VFB stride, bytes */
 
-static uint32_t src[H * SS], shadow[W * H];
-static uint8_t  vfb[H * DS];
+static u32 src[H * SS], shadow[W * H];
+static u8  vfb[H * DS];
 
-static uint32_t vfb_px(int x, int y)
+static u32 vfb_px(int x, int y)
 {
-	uint32_t v;
+	u32 v;
 
 	memcpy(&v, vfb + y * DS + x * 4, 4);
 	return v;
@@ -58,7 +58,7 @@ int main(void)
 	srand(7);
 	memset(vfb, 0xAB, sizeof(vfb));
 	for (i = 0; i < H * SS; i++)
-		src[i] = (uint32_t)rand();
+		src[i] = (u32)rand();
 
 	/* full: every row whole */
 	c = vfb_copy(vfb, DS, shadow, src, SS, W, H, 1);
@@ -111,7 +111,7 @@ int main(void)
 		int n = rand() % 20;
 
 		while (n-- > 0)
-			src[(rand() % H) * SS + rand() % W] = (uint32_t)rand();
+			src[(rand() % H) * SS + rand() % W] = (u32)rand();
 		vfb_copy(vfb, DS, shadow, src, SS, W, H, 0);
 		if (!in_step())
 			break;

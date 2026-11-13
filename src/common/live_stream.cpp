@@ -1,5 +1,6 @@
 // live_stream.cpp - see live_stream.h.
 #include "live_stream.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cstring>
@@ -9,7 +10,7 @@ namespace live {
 
 namespace {
 
-bool same(const h264::Nal &nal, const std::vector<uint8_t> &v)
+bool same(const h264::Nal &nal, const std::vector<u8> &v)
 {
 	return nal.n == v.size() && std::memcmp(nal.p, v.data(), nal.n) == 0;
 }
@@ -79,7 +80,7 @@ std::string Stream::configure(const Config &c)
 		return "sample size must be 4 KB..1 MB";
 	skip_ok_ = h264::skip_supported(sps_, pps_).empty();
 
-	uint32_t most = csmp4::max_frames(c.sample_size);
+	u32 most = csmp4::max_frames(c.sample_size);
 	declared_ = c.declared == 0 || c.declared > most ? most : c.declared;
 	err = csmp4::build_header(c.sps, c.pps, c.fps, c.sample_size, declared_, header_);
 	if (!err.empty()) {
@@ -87,22 +88,22 @@ std::string Stream::configure(const Config &c)
 		return err;
 	}
 	data_off_ = header_.size();
-	ring_.assign((size_t)cfg_.ring_frames * c.sample_size, 0);
+	ring_.assign((usize)cfg_.ring_frames * c.sample_size, 0);
 	ring_ms_.assign(cfg_.ring_frames, -1);
 	csmp4::filler_sample(c.sample_size, filler_);
 	return "";
 }
 
-void Stream::store(const std::vector<uint8_t> &sample, uint64_t now_ms)
+void Stream::store(const std::vector<u8> &sample, u64 now_ms)
 {
-	size_t slot = (size_t)(frames_ % cfg_.ring_frames);
+	usize slot = (usize)(frames_ % cfg_.ring_frames);
 	std::memcpy(ring_.data() + slot * cfg_.sample_size, sample.data(), cfg_.sample_size);
-	ring_ms_[slot] = (int64_t)now_ms;
+	ring_ms_[slot] = (i64)now_ms;
 	frames_++;
-	st_.frames = (uint32_t)frames_;
+	st_.frames = (u32)frames_;
 }
 
-Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string *why)
+Push Stream::push(const u8 *annexb, usize n, u64 now_ms, std::string *why)
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	auto fail = [&](Push p, const std::string &w) {
@@ -122,7 +123,7 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 	const h264::Nal *first = nullptr;
 	bool ref = false;
 	for (const h264::Nal &nal : nals) {
-		uint8_t t = nal.type();
+		u8 t = nal.type();
 		if ((t == h264::kSps && !same(nal, cfg_.sps)) || (t == h264::kPps && !same(nal, cfg_.pps))) {
 			st_.config_changed++;
 			return fail(Push::ConfigChanged, t == h264::kSps ? "in-band SPS differs"
@@ -146,8 +147,8 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 	// ahead of the frame clock (frame k due k / fps after the first): drop
 	// until it is back on it, then go on from an IDR
 	if (started_ && cfg_.shed_ahead_ms != 0) {
-		int64_t ahead = (int64_t)(frames_ * 1000 / cfg_.fps) - (int64_t)(now_ms - t0_ms_);
-		if (!shedding_ && ahead > (int64_t)cfg_.shed_ahead_ms) {
+		i64 ahead = (i64)(frames_ * 1000 / cfg_.fps) - (i64)(now_ms - t0_ms_);
+		if (!shedding_ && ahead > (i64)cfg_.shed_ahead_ms) {
 			shedding_ = true;
 			st_.sheds++;
 		}
@@ -166,15 +167,15 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 		return fail(Push::WaitIdr, started_ ? "after dropped frames" : "before the first");
 	}
 
-	std::vector<std::pair<const uint8_t *, size_t>> parts;
-	size_t bytes = 0;
+	std::vector<std::pair<const u8 *, usize>> parts;
+	usize bytes = 0;
 	for (const h264::Nal &nal : nals) {
 		parts.emplace_back(nal.p, nal.n);
 		if (nal.type() != h264::kAud)
 			bytes += 4 + nal.n;
 	}
 	if (bytes > st_.max_frame)
-		st_.max_frame = (uint32_t)bytes;
+		st_.max_frame = (u32)bytes;
 	err = csmp4::make_sample_nals(parts, cfg_.sample_size, sample_);
 	if (!err.empty()) {
 		st_.too_big++;
@@ -191,7 +192,7 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 	}
 	need_idr_ = false;
 	if (started_) {
-		int64_t ahead = (int64_t)(frames_ * 1000 / cfg_.fps) - (int64_t)(now_ms - t0_ms_);
+		i64 ahead = (i64)(frames_ * 1000 / cfg_.fps) - (i64)(now_ms - t0_ms_);
 		if (ahead > st_.ahead_ms_max)
 			st_.ahead_ms_max = ahead;
 	}
@@ -207,7 +208,7 @@ Push Stream::push(const uint8_t *annexb, size_t n, uint64_t now_ms, std::string 
 	return Push::Ok;
 }
 
-unsigned Stream::fill(uint64_t now_ms)
+unsigned Stream::fill(u64 now_ms)
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	unsigned added = 0;
@@ -219,14 +220,14 @@ unsigned Stream::fill(uint64_t now_ms)
 		return 0;
 	// frames due by now on the frame clock (frame k at k / fps after the
 	// first); fill up to one short of it, never past
-	uint64_t due = (now_ms - t0_ms_) * cfg_.fps / 1000 + 1;
+	u64 due = (now_ms - t0_ms_) * cfg_.fps / 1000 + 1;
 	while (frames_ + 1 < due && frames_ < declared_) {
 		unsigned max_fn = 1u << sps_.log2_max_frame_num;
 		unsigned max_poc = 1u << sps_.log2_max_poc_lsb;
 		last_poc_lsb_ = (last_poc_lsb_ + 1) % max_poc;
-		std::vector<uint8_t> nal =
+		std::vector<u8> nal =
 			h264::skip_slice(sps_, pps_, (prev_ref_frame_num_ + 1) % max_fn, last_poc_lsb_);
-		std::vector<std::pair<const uint8_t *, size_t>> parts{{nal.data(), nal.size()}};
+		std::vector<std::pair<const u8 *, usize>> parts{{nal.data(), nal.size()}};
 		if (!csmp4::make_sample_nals(parts, cfg_.sample_size, sample_).empty())
 			break;
 		if (!filling_) {
@@ -261,7 +262,7 @@ bool Stream::sync_wanted()
 	return s;
 }
 
-uint64_t Stream::available() const
+u64 Stream::available() const
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	if (header_.empty())
@@ -269,33 +270,33 @@ uint64_t Stream::available() const
 	return data_off_ + frames_ * cfg_.sample_size;
 }
 
-uint64_t Stream::frames() const
+u64 Stream::frames() const
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	return frames_;
 }
 
-size_t Stream::read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info)
+usize Stream::read(u64 off, u8 *dst, usize n, ReadInfo *info)
 {
 	std::lock_guard<std::mutex> lock(mu_);
-	const uint64_t end_all = data_off_ + (uint64_t)declared_ * cfg_.sample_size;
+	const u64 end_all = data_off_ + (u64)declared_ * cfg_.sample_size;
 
 	if (header_.empty() || off >= end_all)
 		return 0;
 	if (off + n > end_all)
-		n = (size_t)(end_all - off);
-	size_t done = 0;
+		n = (usize)(end_all - off);
+	usize done = 0;
 	while (done < n) {
-		uint64_t at = off + done;
-		size_t len;
+		u64 at = off + done;
+		usize len;
 		if (at < data_off_) {
-			len = std::min<size_t>(n - done, (size_t)(data_off_ - at));
+			len = std::min<usize>(n - done, (usize)(data_off_ - at));
 			std::memcpy(dst + done, header_.data() + at, len);
 		} else {
-			uint64_t k = (at - data_off_) / cfg_.sample_size;
-			uint32_t j = (uint32_t)((at - data_off_) % cfg_.sample_size);
-			len = std::min<size_t>(n - done, cfg_.sample_size - j);
-			const uint8_t *src;
+			u64 k = (at - data_off_) / cfg_.sample_size;
+			u32 j = (u32)((at - data_off_) % cfg_.sample_size);
+			len = std::min<usize>(n - done, cfg_.sample_size - j);
+			const u8 *src;
 			if (k >= frames_) {
 				src = filler_.data();                 // far read
 				if (info != nullptr)
@@ -306,7 +307,7 @@ size_t Stream::read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info)
 				if (info != nullptr)
 					info->evicted++;
 			} else {
-				src = ring_.data() + (size_t)(k % cfg_.ring_frames) * cfg_.sample_size;
+				src = ring_.data() + (usize)(k % cfg_.ring_frames) * cfg_.sample_size;
 			}
 			std::memcpy(dst + done, src + j, len);
 		}
@@ -315,12 +316,12 @@ size_t Stream::read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info)
 	return n;
 }
 
-int64_t Stream::push_ms(uint64_t k) const
+i64 Stream::push_ms(u64 k) const
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	if (k >= frames_ || k + cfg_.ring_frames < frames_ || ring_ms_.empty())
 		return -1;
-	return ring_ms_[(size_t)(k % cfg_.ring_frames)];
+	return ring_ms_[(usize)(k % cfg_.ring_frames)];
 }
 
 bool Stream::started() const
@@ -329,7 +330,7 @@ bool Stream::started() const
 	return started_;
 }
 
-uint64_t Stream::start_ms() const
+u64 Stream::start_ms() const
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	return t0_ms_;

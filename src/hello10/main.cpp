@@ -29,6 +29,7 @@
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
 // usage: hello10 <sd_path> [test,test,...]   (default: c5,crop,cropnav,slow)
+#include "types.h"
 extern "C" {
 #include "log.h"
 #include "proc.h"
@@ -67,7 +68,7 @@ constexpr unsigned kStartMs = 1000;     // play -> video displayable
 constexpr unsigned kQueryMs = 2500;
 constexpr unsigned kPageMs = 12000;
 constexpr unsigned kFps = 25;
-constexpr uint8_t kLevel = 30;          // what the stream says after the rewrite
+constexpr u8 kLevel = 30;          // what the stream says after the rewrite
 constexpr const char *kLivePath = "/dev/hello10/live.mp4";
 constexpr const char *kRawClip = "c12_h264_800.h264";
 constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
@@ -81,7 +82,7 @@ struct Test {
 	Kind kind;
 	const char *clip;                 // File: the MP4 to play
 	unsigned watch_ms;
-	double fps;                       // Live: the rate frames come at
+	f64 fps;                       // Live: the rate frames come at
 	unsigned crop_w, crop_h;          // Live: what the SPS says after the rewrite
 };
 
@@ -166,13 +167,13 @@ std::string tool_path(const char *name)
 // ---- the raw clip, as the phone would send it, and cropped ----
 
 struct Clip {
-	std::vector<uint8_t> data;
+	std::vector<u8> data;
 	std::vector<h264::Range> frames;
-	std::vector<uint8_t> sps, pps;
-	uint32_t sample_size = 0;          // S: the biggest frame + filler, in 4 KB steps
+	std::vector<u8> sps, pps;
+	u32 sample_size = 0;          // S: the biggest frame + filler, in 4 KB steps
 };
 
-std::string read_file(const std::string &path, std::vector<uint8_t> &out)
+std::string read_file(const std::string &path, std::vector<u8> &out)
 {
 	FILE *f = std::fopen(path.c_str(), "rb");
 	if (f == nullptr)
@@ -180,8 +181,8 @@ std::string read_file(const std::string &path, std::vector<uint8_t> &out)
 	std::fseek(f, 0, SEEK_END);
 	long size = std::ftell(f);
 	std::fseek(f, 0, SEEK_SET);
-	out.resize(size > 0 ? (size_t)size : 0);
-	size_t got = std::fread(out.data(), 1, out.size(), f);
+	out.resize(size > 0 ? (usize)size : 0);
+	usize got = std::fread(out.data(), 1, out.size(), f);
 	std::fclose(f);
 	if (got != out.size() || out.empty())
 		return path + ": short read";
@@ -194,9 +195,9 @@ std::string index_clip(Clip &c)
 	c.frames = h264::split_access_units(c.data.data(), c.data.size());
 	c.sps.clear();
 	c.pps.clear();
-	size_t biggest = 0;
+	usize biggest = 0;
 	for (const h264::Range &r : c.frames) {
-		size_t bytes = 0;
+		usize bytes = 0;
 		for (const h264::Nal &n : h264::split_annexb(c.data.data() + r.begin, r.end - r.begin)) {
 			if (n.type() == h264::kSps && c.sps.empty())
 				c.sps.assign(n.p, n.p + n.n);
@@ -209,7 +210,7 @@ std::string index_clip(Clip &c)
 	}
 	if (c.sps.empty() || c.pps.empty() || c.frames.empty())
 		return "no SPS/PPS or no frames";
-	c.sample_size = (uint32_t)((biggest + csmp4::kFillerMin + 4095) / 4096 * 4096);
+	c.sample_size = (u32)((biggest + csmp4::kFillerMin + 4095) / 4096 * 4096);
 	return "";
 }
 
@@ -217,7 +218,7 @@ std::string index_clip(Clip &c)
 std::string crop_clip(const Clip &in, unsigned w, unsigned h, Clip &out)
 {
 	out = Clip();
-	std::vector<uint8_t> au;
+	std::vector<u8> au;
 	for (const h264::Range &r : in.frames) {
 		std::string err = h264::crop_sps_annexb(in.data.data() + r.begin, r.end - r.begin, w, h,
 		                                        kLevel, au);
@@ -228,7 +229,7 @@ std::string crop_clip(const Clip &in, unsigned w, unsigned h, Clip &out)
 	return index_clip(out);
 }
 
-std::string sps_str(const std::vector<uint8_t> &sps)
+std::string sps_str(const std::vector<u8> &sps)
 {
 	h264::Sps s;
 	std::string err = h264::parse_sps(sps.data(), sps.size(), s);
@@ -245,7 +246,7 @@ std::string sps_str(const std::vector<uint8_t> &sps)
 // from its own thread, as the receiver's USB thread would.
 class Feeder {
 public:
-	Feeder(HwStream &hw, const Clip &clip, double fps) : hw_(hw), clip_(clip), fps_(fps) {}
+	Feeder(HwStream &hw, const Clip &clip, f64 fps) : hw_(hw), clip_(clip), fps_(fps) {}
 	~Feeder() { stop(); }
 
 	void start()
@@ -259,8 +260,8 @@ public:
 		if (thread_.joinable())
 			thread_.join();
 	}
-	uint32_t pushed() const { return pushed_; }
-	uint32_t refused() const { return refused_; }
+	u32 pushed() const { return pushed_; }
+	u32 refused() const { return refused_; }
 	std::string first_refusal()
 	{
 		std::lock_guard<std::mutex> lock(mu_);
@@ -272,7 +273,7 @@ private:
 	{
 		while (!stop_) {
 			// frame k is due at k / fps
-			uint64_t due = (uint64_t)((double)(log_ms() - t0_) * fps_ / 1000.0) + 1;
+			u64 due = (u64)((f64)(log_ms() - t0_) * fps_ / 1000.0) + 1;
 			while (next_ < due && !stop_) {
 				const h264::Range &r = clip_.frames[next_ % clip_.frames.size()];
 				std::string why;
@@ -294,10 +295,10 @@ private:
 
 	HwStream &hw_;
 	const Clip &clip_;
-	double fps_;
+	f64 fps_;
 	unsigned t0_ = 0;
-	uint64_t next_ = 0;
-	std::atomic<uint32_t> pushed_{0}, refused_{0};
+	u64 next_ = 0;
+	std::atomic<u32> pushed_{0}, refused_{0};
 	std::atomic<bool> stop_{false};
 	std::thread thread_;
 	std::mutex mu_;
@@ -348,9 +349,9 @@ Query query_graph(const std::string &graph, const std::string &log_name)
 // ---- one test ----
 
 struct Lags {
-	std::vector<int64_t> v;
-	int64_t last = 0;
-	void add(int64_t x)
+	std::vector<i64> v;
+	i64 last = 0;
+	void add(i64 x)
 	{
 		v.push_back(x);
 		last = x;
@@ -359,7 +360,7 @@ struct Lags {
 	{
 		if (v.empty())
 			return "none";
-		std::vector<int64_t> s = v;
+		std::vector<i64> s = v;
 		std::sort(s.begin(), s.end());
 		char b[96];
 		std::snprintf(b, sizeof(b), "%lld/%lld/%lld/%lld ms", (long long)s.front(),
@@ -415,7 +416,7 @@ bool run_file(const Test &t, const std::string &graph)
 		player.close();
 		return quit_poll() == QUIT_NONE;
 	}
-	auto on_time = [&](unsigned since_play, int64_t pos) { o.lags.add((int64_t)since_play - pos); };
+	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
 	std::thread query;
 	bool stop = false;
 	while (!stop) {
@@ -470,7 +471,7 @@ bool run_live(const Test &t, const std::string &graph, const Clip &raw)
 	o.cfg.sample_size = clip.sample_size;
 	o.cfg.declared = 600 * kFps;
 	// frames kept for io-media: 8 MB, as audi_stream_receiver (hwvideo.cpp)
-	o.cfg.ring_frames = std::min<uint32_t>(128, std::max<uint32_t>(16, (8u << 20) / o.cfg.sample_size));
+	o.cfg.ring_frames = std::min<u32>(128, std::max<u32>(16, (8u << 20) / o.cfg.sample_size));
 	o.cfg.fill = true;
 	o.path = kLivePath;
 	o.graph = graph;
@@ -488,8 +489,8 @@ bool run_live(const Test &t, const std::string &graph, const Clip &raw)
 	feeder.start();
 
 	Outcome out;
-	auto on_time = [&](unsigned, int64_t pos) {
-		int64_t lag = hw.lag_ms(pos);
+	auto on_time = [&](unsigned, i64 pos) {
+		i64 lag = hw.lag_ms(pos);
 		if (lag != INT64_MIN)
 			out.lags.add(lag);
 	};

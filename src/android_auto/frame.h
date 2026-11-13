@@ -23,7 +23,7 @@
 #define ANDROID_AUTO_FRAME_H
 
 #include <cstddef>
-#include <cstdint>
+#include "types.h"
 #include <cstring>
 #include <vector>
 
@@ -31,45 +31,45 @@
 
 namespace aap {
 
-constexpr uint8_t kFirst = 1 << 0;
-constexpr uint8_t kLast = 1 << 1;
-constexpr uint8_t kBulk = kFirst | kLast;
-constexpr uint8_t kControl = 1 << 2;
-constexpr uint8_t kEncrypted = 1 << 3;
+constexpr u8 kFirst = 1 << 0;
+constexpr u8 kLast = 1 << 1;
+constexpr u8 kBulk = kFirst | kLast;
+constexpr u8 kControl = 1 << 2;
+constexpr u8 kEncrypted = 1 << 3;
 
 // Largest plaintext per frame the head unit sends (aasdk's
 // cMaxFramePayloadSize); the phone uses the same.
-constexpr size_t kMaxFramePlain = 0x4000;
+constexpr usize kMaxFramePlain = 0x4000;
 // Largest frame payload accepted from the phone: 16 KB of plaintext plus
 // TLS record overhead, with room to spare.
-constexpr size_t kMaxFramePayload = 0x4000 + 2048;
+constexpr usize kMaxFramePayload = 0x4000 + 2048;
 
 struct Frame {
-	uint8_t        channel;
-	uint8_t        flags;
-	uint32_t       total;       // FIRST-only frames, else 0
-	const uint8_t *payload;
-	size_t         size;
+	u8        channel;
+	u8        flags;
+	u32       total;       // FIRST-only frames, else 0
+	const u8 *payload;
+	usize         size;
 };
 
-inline size_t header_size(uint8_t flags)
+inline usize header_size(u8 flags)
 {
 	return (flags & kBulk) == kFirst ? 8 : 4;
 }
 
 // One frame: header + payload into out (appended).
-inline void put_frame(std::vector<uint8_t> &out, uint8_t channel, uint8_t flags, uint32_t total,
-                      const uint8_t *payload, size_t size)
+inline void put_frame(std::vector<u8> &out, u8 channel, u8 flags, u32 total,
+                      const u8 *payload, usize size)
 {
 	out.push_back(channel);
 	out.push_back(flags);
-	out.push_back((uint8_t)(size >> 8));
-	out.push_back((uint8_t)size);
+	out.push_back((u8)(size >> 8));
+	out.push_back((u8)size);
 	if (header_size(flags) == 8) {
-		out.push_back((uint8_t)(total >> 24));
-		out.push_back((uint8_t)(total >> 16));
-		out.push_back((uint8_t)(total >> 8));
-		out.push_back((uint8_t)total);
+		out.push_back((u8)(total >> 24));
+		out.push_back((u8)(total >> 16));
+		out.push_back((u8)(total >> 8));
+		out.push_back((u8)total);
 	}
 	out.insert(out.end(), payload, payload + size);
 }
@@ -83,18 +83,18 @@ public:
 	// so far. Bad: a frame larger than kMaxFramePayload (the stream is out
 	// of step; the session drops the link).
 	template <class F>
-	Result feed(const uint8_t *p, size_t n, F &&on_frame)
+	Result feed(const u8 *p, usize n, F &&on_frame)
 	{
 		buf_.insert(buf_.end(), p, p + n);
-		size_t off = 0;
+		usize off = 0;
 		Result r = Result::Ok;
 		for (;;) {
-			size_t avail = buf_.size() - off;
+			usize avail = buf_.size() - off;
 			if (avail < 4)
 				break;
-			const uint8_t *h = buf_.data() + off;
-			size_t hs = header_size(h[1]);
-			size_t size = (size_t)h[2] << 8 | h[3];
+			const u8 *h = buf_.data() + off;
+			usize hs = header_size(h[1]);
+			usize size = (usize)h[2] << 8 | h[3];
 			if (size > kMaxFramePayload) {
 				r = Result::Bad;
 				off = buf_.size();
@@ -105,21 +105,21 @@ public:
 			Frame f;
 			f.channel = h[0];
 			f.flags = h[1];
-			f.total = hs == 8 ? (uint32_t)h[4] << 24 | (uint32_t)h[5] << 16 |
-			                    (uint32_t)h[6] << 8 | h[7] : 0;
+			f.total = hs == 8 ? (u32)h[4] << 24 | (u32)h[5] << 16 |
+			                    (u32)h[6] << 8 | h[7] : 0;
 			f.payload = h + hs;
 			f.size = size;
 			on_frame(f);
 			off += hs + size;
 		}
-		buf_.erase(buf_.begin(), buf_.begin() + (ptrdiff_t)off);
+		buf_.erase(buf_.begin(), buf_.begin() + (isize)off);
 		return r;
 	}
 	void reset() { buf_.clear(); }
-	size_t pending() const { return buf_.size(); }
+	usize pending() const { return buf_.size(); }
 
 private:
-	std::vector<uint8_t> buf_;
+	std::vector<u8> buf_;
 };
 
 // Reassembles the frames of each channel into messages (after decryption).
@@ -129,7 +129,7 @@ public:
 
 	// plain = this frame's plaintext. Done: message(channel) holds the
 	// whole message, until the next add() on that channel.
-	Result add(uint8_t channel, uint8_t flags, const uint8_t *plain, size_t n)
+	Result add(u8 channel, u8 flags, const u8 *plain, usize n)
 	{
 		Chan &c = ch_[channel];
 		if (flags & kFirst) {
@@ -149,7 +149,7 @@ public:
 		}
 		return Result::Partial;
 	}
-	const std::vector<uint8_t> &message(uint8_t channel) const { return ch_[channel].msg; }
+	const std::vector<u8> &message(u8 channel) const { return ch_[channel].msg; }
 	void reset()
 	{
 		for (Chan &c : ch_) {
@@ -159,22 +159,22 @@ public:
 	}
 
 	// A video frame at 800x480 stays far below this.
-	static constexpr size_t kMaxMessage = 4u << 20;
+	static constexpr usize kMaxMessage = 4u << 20;
 
 private:
 	struct Chan {
-		std::vector<uint8_t> msg;
+		std::vector<u8> msg;
 		bool                 open = false;
 	};
 	Chan ch_[256];
 };
 
 // Message id (16-bit BE) at the start of a message; false if too short.
-inline bool message_id(const std::vector<uint8_t> &m, uint16_t &id)
+inline bool message_id(const std::vector<u8> &m, u16 &id)
 {
 	if (m.size() < 2)
 		return false;
-	id = (uint16_t)(m[0] << 8 | m[1]);
+	id = (u16)(m[0] << 8 | m[1]);
 	return true;
 }
 

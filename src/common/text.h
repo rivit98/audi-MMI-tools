@@ -9,41 +9,41 @@
 #ifndef COMMON_TEXT_H
 #define COMMON_TEXT_H
 
-#include <stdint.h>
+#include "types.h"
 
 struct font {
 	int             w, h;
 	int             row_bytes;
-	const uint8_t  *bits;       /* nglyphs * h * row_bytes */
-	const uint16_t *map_cp;     /* sorted codepoints ...         */
-	const uint16_t *map_glyph;  /* ... and their glyph indices   */
+	const u8  *bits;       /* nglyphs * h * row_bytes */
+	const u16 *map_cp;     /* sorted codepoints ...         */
+	const u16 *map_glyph;  /* ... and their glyph indices   */
 	int             nmap;
 	int             fallback;   /* glyph index for unknown codepoints */
 };
 
 /* Pixels are 0xAARRGGBB; stride is in pixels. */
 struct canvas {
-	uint32_t *px;
+	u32 *px;
 	int       w, h, stride;
 };
 
 /* Decode one codepoint from *s (stopping at end, which may be NULL for a
  * NUL-terminated string) and advance *s. Returns 0 at the end. Malformed
  * or truncated sequences give U+FFFD and consume one byte. */
-uint32_t utf8_next(const char **s, const char *end);
+u32 utf8_next(const char **s, const char *end);
 
 /* Number of codepoints in s[0..nbytes). */
 int utf8_count(const char *s, int nbytes);
 
-int font_glyph(const struct font *f, uint32_t cp);
+int font_glyph(const struct font *f, u32 cp);
 
 /* Clipped to the canvas. */
-void canvas_fill(struct canvas *c, int x, int y, int w, int h, uint32_t color);
+void canvas_fill(struct canvas *c, int x, int y, int w, int h, u32 color);
 
 /* Draw s[0..nbytes) (nbytes < 0: up to NUL) with its top-left at x,y; only
  * foreground pixels are written. Clipped. Returns the x after the text. */
 int text_draw(struct canvas *c, const struct font *f, int x, int y,
-              const char *s, int nbytes, uint32_t color);
+              const char *s, int nbytes, u32 color);
 
 /* Word-wrap s (NUL-terminated UTF-8) into lines of at most cols
  * codepoints. '\n' ends a line; lines break after the last space that fits,

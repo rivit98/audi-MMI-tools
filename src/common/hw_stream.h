@@ -24,7 +24,7 @@
 #include "stream_server.h"
 #include "vout.h"
 
-#include <cstdint>
+#include "types.h"
 #include <functional>
 #include <string>
 
@@ -49,11 +49,11 @@ public:
 	// failed.
 	std::string start(const HwOptions &o);
 	// One frame (an access unit, Annex-B). Any thread.
-	live::Push push(const uint8_t *annexb, size_t n, std::string *why = nullptr);
+	live::Push push(const u8 *annexb, usize n, std::string *why = nullptr);
 	// Owner thread, every ~20 ms. on_time(ms since play, position ms) for
 	// every io-media TIME event. Returns "" or what failed (the graph would
 	// not play; the caller stops).
-	std::string poll(const std::function<void(unsigned, int64_t)> &on_time = {});
+	std::string poll(const std::function<void(unsigned, i64)> &on_time = {});
 	// Picture off, graph gone, stream ended, server gone. Safe to repeat.
 	// keep_video: the displayable and VCAP stay as they are, for the next
 	// stream (HwOptions::video_on_already) or vout::hide(false).
@@ -72,7 +72,7 @@ public:
 
 	// How long after frame (position pos_ms) was pushed io-media reports
 	// playing it, in ms; INT64_MIN if that frame is unknown.
-	int64_t lag_ms(int64_t pos_ms) const;
+	i64 lag_ms(i64 pos_ms) const;
 
 	live::Stream &stream() { return stream_; }
 	StreamServer &server() { return server_; }

@@ -15,7 +15,7 @@
 #include <complex>
 #include <condition_variable>
 #include <cstdarg>
-#include <cstdint>
+#include "types.h"
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -103,11 +103,11 @@ unsigned us_since(Clock::time_point t0)
 
 // deterministic test data, the same on the car and the host
 struct Lcg {
-	uint32_t s;
-	uint32_t operator()() { s = s * 1664525u + 1013904223u; return s >> 8; }
+	u32 s;
+	u32 operator()() { s = s * 1664525u + 1013904223u; return s >> 8; }
 };
 
-bool near(double a, double b, double eps) { return std::fabs(a - b) <= eps; }
+bool near(f64 a, f64 b, f64 eps) { return std::fabs(a - b) <= eps; }
 
 // ---- static initialisation ------------------------------------------------
 
@@ -367,10 +367,10 @@ void check_new_delete(Result &r)
 	// C++17 aligned new (operator new(size_t, align_val_t))
 	Wide *w = new Wide;
 	alloc_sink = w;
-	EXPECT(((uintptr_t)w & 63) == 0);
+	EXPECT(((usize)w & 63) == 0);
 	delete w;
 
-	volatile size_t huge = std::numeric_limits<size_t>::max() / 2;
+	volatile usize huge = std::numeric_limits<usize>::max() / 2;
 	void *q = ::operator new(huge, std::nothrow);
 	EXPECT(q == nullptr);
 
@@ -429,7 +429,7 @@ void check_strings(Result &r)
 	EXPECT(std::to_string(-9223372036854775807LL - 1) == "-9223372036854775808");
 	EXPECT(std::to_string(1.5) == "1.500000");          // vsnprintf %f, QNX's libc
 
-	size_t pos = 0;
+	usize pos = 0;
 	EXPECT(std::stoi("  -42abc", &pos) == -42 && pos == 5);
 	EXPECT(std::stoi("ff", nullptr, 16) == 255);
 	EXPECT(std::stol("2147483647") == 2147483647L);
@@ -458,8 +458,8 @@ void check_strings(Result &r)
 	EXPECT(sv.starts_with("ab") && sv.ends_with("ef"));
 	EXPECT(std::hash<std::string>{}("abc") == std::hash<std::string_view>{}("abc"));
 
-	std::u16string u16 = u"héllo";
-	EXPECT(u16.size() == 5);
+	std::u16string s16 = u"héllo";
+	EXPECT(s16.size() == 5);
 	std::wstring ws = L"wide";
 	ws += L'!';
 	EXPECT(ws.size() == 5 && ws.find(L'!') == 4);
@@ -501,7 +501,7 @@ void check_algorithms(Result &r)
 	std::stable_sort(st.begin(), st.end(),
 	                 [](const auto &a, const auto &b) { return a.first < b.first; });
 	bool stable = true;
-	for (size_t i = 1; i < st.size(); i++)
+	for (usize i = 1; i < st.size(); i++)
 		if (st[i - 1].first == st[i].first && st[i - 1].second > st[i].second)
 			stable = false;
 	EXPECT(stable);
@@ -696,7 +696,7 @@ struct Point {
 };
 
 struct PointHash {
-	size_t operator()(const Point &p) const { return std::hash<int>{}(p.x) * 31 + std::hash<int>{}(p.y); }
+	usize operator()(const Point &p) const { return std::hash<int>{}(p.x) * 31 + std::hash<int>{}(p.y); }
 };
 
 void check_unordered(Result &r)
@@ -788,11 +788,11 @@ void check_containers(Result &r)
 	EXPECT(bs.count() == 8 && bs.test(4) && !bs.test(0));
 	EXPECT(bs.to_string().substr(48) == "1111000011110000");
 
-	std::tuple<int, std::string, double> t{1, "two", 3.0};
+	std::tuple<int, std::string, f64> t{1, "two", 3.0};
 	auto [ti, ts, td] = t;
 	EXPECT(ti == 1 && ts == "two" && td == 3.0 && std::get<1>(t) == "two");
 	EXPECT(std::tuple_size_v<decltype(t)> == 3);
-	EXPECT(std::apply([](int a, const std::string &b, double c) { return a + (int)b.size() + (int)c; }, t) == 7);
+	EXPECT(std::apply([](int a, const std::string &b, f64 c) { return a + (int)b.size() + (int)c; }, t) == 7);
 	EXPECT(std::make_pair(1, 2) < std::make_pair(1, 3));
 
 	std::optional<int> o;
@@ -1063,14 +1063,14 @@ void check_math(Result &r)
 	EXPECT(std::abs(-3) == 3 && std::abs(-2.5) == 2.5);
 	EXPECT(std::isnan(std::nan("")) && std::isinf(HUGE_VAL) && std::isfinite(1.0));
 	EXPECT(std::signbit(-0.0) && std::fpclassify(0.0) == FP_ZERO);
-	EXPECT(std::numeric_limits<double>::epsilon() == std::ldexp(1.0, -52));
+	EXPECT(std::numeric_limits<f64>::epsilon() == std::ldexp(1.0, -52));
 	EXPECT(std::numeric_limits<int>::max() == INT_MAX);
-	EXPECT(std::isinf(std::numeric_limits<float>::infinity()));
+	EXPECT(std::isinf(std::numeric_limits<f32>::infinity()));
 
-	std::complex<double> z(3, 4);
+	std::complex<f64> z(3, 4);
 	EXPECT(std::abs(z) == 5.0);
-	EXPECT(z * std::conj(z) == std::complex<double>(25, 0));
-	auto root = std::sqrt(std::complex<double>(-4, 0));
+	EXPECT(z * std::conj(z) == std::complex<f64>(25, 0));
+	auto root = std::sqrt(std::complex<f64>(-4, 0));
 	EXPECT(near(root.real(), 0, 1e-15) && near(root.imag(), 2, 1e-15));
 	EXPECT(std::midpoint(1, 3) == 2);
 	note(r, fmt("sizeof(long double)=%u", (unsigned)sizeof(long double)));
@@ -1102,24 +1102,24 @@ void check_random(Result &r)
 			fair = false;
 	EXPECT(fair && faces[0] == 0);
 
-	std::uniform_real_distribution<double> unit(0.0, 1.0);
+	std::uniform_real_distribution<f64> unit(0.0, 1.0);
 	bool in_range = true;
 	for (int i = 0; i < 1000; i++) {
-		double x = unit(g);
+		f64 x = unit(g);
 		if (x < 0.0 || x >= 1.0)
 			in_range = false;
 	}
 	EXPECT(in_range);
 
-	std::normal_distribution<double> nd(0.0, 1.0);
-	double sum = 0, sum2 = 0;
+	std::normal_distribution<f64> nd(0.0, 1.0);
+	f64 sum = 0, sum2 = 0;
 	const int n = 20000;
 	for (int i = 0; i < n; i++) {
-		double x = nd(g);
+		f64 x = nd(g);
 		sum += x;
 		sum2 += x * x;
 	}
-	double mean = sum / n, sd = std::sqrt(sum2 / n - mean * mean);
+	f64 mean = sum / n, sd = std::sqrt(sum2 / n - mean * mean);
 	EXPECT(near(mean, 0.0, 0.05) && near(sd, 1.0, 0.05));
 	note(r, fmt("normal mean %.3f sd %.3f", mean, sd));
 }
@@ -1155,7 +1155,7 @@ void check_chrono(Result &r)
 	EXPECT(steady_clock::now() >= t0);
 
 	EXPECT(duration_cast<milliseconds>(2s + 500ms).count() == 2500);
-	EXPECT(1h == 3600s && duration<double>(1500ms).count() == 1.5);
+	EXPECT(1h == 3600s && duration<f64>(1500ms).count() == 1.5);
 
 	// C++20 calendar
 	EXPECT(weekday{sys_days{2000y / January / 1}} == Saturday);
@@ -1205,7 +1205,7 @@ void check_threads(Result &r)
 	unsigned mutex_ms = ms_since(t0);
 	EXPECT(locked == (long)nthreads * iter);
 	std::set<std::thread::id> distinct(ids.begin(), ids.end());
-	EXPECT(distinct.size() == (size_t)nthreads && !distinct.contains(std::this_thread::get_id()));
+	EXPECT(distinct.size() == (usize)nthreads && !distinct.contains(std::this_thread::get_id()));
 
 	int out = 0;
 	std::thread args([](int a, std::string s, int &o) { o = a + (int)s.size(); }, 5, std::string("abc"), std::ref(out));

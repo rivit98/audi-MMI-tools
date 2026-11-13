@@ -4,7 +4,7 @@
 #ifndef COMMON_PLAYER_H
 #define COMMON_PLAYER_H
 
-#include <cstdint>
+#include "types.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -13,7 +13,7 @@ struct PlayStats {
 	unsigned playing_ms = 0;       // first STATUS state 4 (playing), after play()
 	unsigned first_time_ms = 0;    // first TIME event
 	unsigned time_events = 0;
-	int64_t max_pos_ms = -1;
+	i64 max_pos_ms = -1;
 	unsigned error_events = 0;
 	std::string first_error;
 	bool input_eof = false, finished = false;
@@ -22,8 +22,8 @@ struct PlayStats {
 // One io-media event, for the dump after an error (Player::recent_events).
 struct PlayEvent {
 	unsigned at_ms = 0;            // log_ms() when read
-	uint32_t type = 0;
-	int64_t a = 0, b = 0;          // TIME: position, total; STATUS: state, speed;
+	u32 type = 0;
+	i64 a = 0, b = 0;          // TIME: position, total; STATUS: state, speed;
 	                               // ERROR: iom_errno, value
 };
 
@@ -39,7 +39,7 @@ public:
 	std::string play();
 	// Read and log the events waiting. on_time(ms since play, position ms)
 	// for every TIME event.
-	void poll(const std::function<void(unsigned, int64_t)> &on_time);
+	void poll(const std::function<void(unsigned, i64)> &on_time);
 	void close();
 
 	const PlayStats &stats() const { return st_; }
@@ -53,10 +53,10 @@ public:
 private:
 	struct iom_state;
 	std::string fail(const char *what, int rc);
-	void event(uint32_t type, const unsigned char *p, uint32_t len,
-	           const std::function<void(unsigned, int64_t)> &on_time);
+	void event(u32 type, const unsigned char *p, u32 len,
+	           const std::function<void(unsigned, i64)> &on_time);
 
-	void remember(uint32_t type, int64_t a, int64_t b);
+	void remember(u32 type, i64 a, i64 b);
 
 	PlayEvent events_[kEventHistory];
 	unsigned events_n_ = 0;

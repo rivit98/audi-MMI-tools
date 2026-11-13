@@ -1,5 +1,6 @@
 // csmp4.cpp - see csmp4.h.
 #include "csmp4.h"
+#include "types.h"
 
 #include "h264.h"
 
@@ -10,17 +11,17 @@ namespace csmp4 {
 
 namespace {
 
-uint32_t be32(const uint8_t *p)
+u32 be32(const u8 *p)
 {
-	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+	return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
 }
 
-uint64_t be64(const uint8_t *p)
+u64 be64(const u8 *p)
 {
-	return (uint64_t)be32(p) << 32 | be32(p + 4);
+	return (u64)be32(p) << 32 | be32(p + 4);
 }
 
-bool is(const uint8_t *type, const char *name)
+bool is(const u8 *type, const char *name)
 {
 	return std::memcmp(type, name, 4) == 0;
 }
@@ -29,18 +30,18 @@ bool is(const uint8_t *type, const char *name)
 
 struct Found {
 	bool mdhd = false, stts = false, stsc = false, stsz = false, stco = false, co64 = false;
-	uint32_t timescale = 0, delta = 0, stts_n = 0, stsc_n = 0, per_chunk = 0, first_chunk = 0;
-	uint32_t size = 0, count = 0, stco_n = 0;
-	uint64_t chunk_off = 0;
+	u32 timescale = 0, delta = 0, stts_n = 0, stsc_n = 0, per_chunk = 0, first_chunk = 0;
+	u32 size = 0, count = 0, stco_n = 0;
+	u64 chunk_off = 0;
 };
 
 // Walk the boxes in [p, end); descend into the containers on the path to
 // the sample table. Returns false if a box runs past end.
-bool walk(const uint8_t *p, const uint8_t *end, Found &f)
+bool walk(const u8 *p, const u8 *end, Found &f)
 {
 	while (p + 8 <= end) {
-		uint64_t size = be32(p);
-		const uint8_t *type = p + 4, *body = p + 8;
+		u64 size = be32(p);
+		const u8 *type = p + 4, *body = p + 8;
 
 		if (size == 1) {
 			if (p + 16 > end)
@@ -48,12 +49,12 @@ bool walk(const uint8_t *p, const uint8_t *end, Found &f)
 			size = be64(p + 8);
 			body = p + 16;
 		} else if (size == 0) {
-			size = (uint64_t)(end - p);
+			size = (u64)(end - p);
 		}
-		if (size < (uint64_t)(body - p) || size > (uint64_t)(end - p))
+		if (size < (u64)(body - p) || size > (u64)(end - p))
 			return false;
-		const uint8_t *next = p + size;
-		const size_t n = (size_t)(next - body);
+		const u8 *next = p + size;
+		const usize n = (usize)(next - body);
 
 		if (is(type, "moov") || is(type, "trak") || is(type, "mdia") || is(type, "minf") ||
 		    is(type, "stbl")) {
@@ -94,161 +95,161 @@ bool walk(const uint8_t *p, const uint8_t *end, Found &f)
 // ---- build ----
 
 struct Buf {
-	std::vector<uint8_t> b;
-	void u8(uint32_t v) { b.push_back((uint8_t)v); }
-	void u16(uint32_t v) { u8(v >> 8); u8(v); }
-	void u32(uint32_t v) { u16(v >> 16); u16(v & 0xffff); }
+	std::vector<u8> b;
+	void put8(u32 v) { b.push_back((u8)v); }
+	void put16(u32 v) { put8(v >> 8); put8(v); }
+	void put32(u32 v) { put16(v >> 16); put16(v & 0xffff); }
 	void tag(const char *t) { b.insert(b.end(), t, t + 4); }
-	void zeros(size_t n) { b.insert(b.end(), n, 0); }
-	void bytes(const std::vector<uint8_t> &v) { b.insert(b.end(), v.begin(), v.end()); }
-	void str(const char *s, size_t n) { b.insert(b.end(), s, s + n); }
-	size_t open(const char *t)
+	void zeros(usize n) { b.insert(b.end(), n, 0); }
+	void bytes(const std::vector<u8> &v) { b.insert(b.end(), v.begin(), v.end()); }
+	void str(const char *s, usize n) { b.insert(b.end(), s, s + n); }
+	usize open(const char *t)
 	{
-		size_t at = b.size();
-		u32(0);
+		usize at = b.size();
+		put32(0);
 		tag(t);
 		return at;
 	}
-	size_t open_full(const char *t, uint32_t version, uint32_t flags)
+	usize open_full(const char *t, u32 version, u32 flags)
 	{
-		size_t at = open(t);
-		u32(version << 24 | flags);
+		usize at = open(t);
+		put32(version << 24 | flags);
 		return at;
 	}
-	void close(size_t at)
+	void close(usize at)
 	{
-		uint32_t n = (uint32_t)(b.size() - at);
-		b[at] = (uint8_t)(n >> 24);
-		b[at + 1] = (uint8_t)(n >> 16);
-		b[at + 2] = (uint8_t)(n >> 8);
-		b[at + 3] = (uint8_t)n;
+		u32 n = (u32)(b.size() - at);
+		b[at] = (u8)(n >> 24);
+		b[at + 1] = (u8)(n >> 16);
+		b[at + 2] = (u8)(n >> 8);
+		b[at + 3] = (u8)n;
 	}
 	void matrix()
 	{
-		const uint32_t m[9] = {0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000};
-		for (uint32_t v : m)
-			u32(v);
+		const u32 m[9] = {0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000};
+		for (u32 v : m)
+			put32(v);
 	}
 };
 
 struct Layout {
 	unsigned width, height;
-	uint32_t timescale, delta, declared, size, dur_ms, dur_media;
+	u32 timescale, delta, declared, size, dur_ms, dur_media;
 };
 
-void moov(Buf &f, const std::vector<uint8_t> &sps, const std::vector<uint8_t> &pps,
-          const Layout &l, uint32_t chunk_offset)
+void moov(Buf &f, const std::vector<u8> &sps, const std::vector<u8> &pps,
+          const Layout &l, u32 chunk_offset)
 {
-	size_t moov = f.open("moov");
+	usize moov = f.open("moov");
 
-	size_t mvhd = f.open_full("mvhd", 0, 0);
-	f.u32(0);
-	f.u32(0);
-	f.u32(1000);
-	f.u32(l.dur_ms);
-	f.u32(0x10000);
-	f.u16(0x100);
+	usize mvhd = f.open_full("mvhd", 0, 0);
+	f.put32(0);
+	f.put32(0);
+	f.put32(1000);
+	f.put32(l.dur_ms);
+	f.put32(0x10000);
+	f.put16(0x100);
 	f.zeros(10);
 	f.matrix();
 	f.zeros(24);
-	f.u32(2);
+	f.put32(2);
 	f.close(mvhd);
 
-	size_t trak = f.open("trak");
-	size_t tkhd = f.open_full("tkhd", 0, 3);
-	f.u32(0);
-	f.u32(0);
-	f.u32(1);
-	f.u32(0);
-	f.u32(l.dur_ms);
+	usize trak = f.open("trak");
+	usize tkhd = f.open_full("tkhd", 0, 3);
+	f.put32(0);
+	f.put32(0);
+	f.put32(1);
+	f.put32(0);
+	f.put32(l.dur_ms);
 	f.zeros(8);
-	f.u16(0);
-	f.u16(0);
-	f.u16(0);
-	f.u16(0);
+	f.put16(0);
+	f.put16(0);
+	f.put16(0);
+	f.put16(0);
 	f.matrix();
-	f.u32(l.width << 16);
-	f.u32(l.height << 16);
+	f.put32(l.width << 16);
+	f.put32(l.height << 16);
 	f.close(tkhd);
 
-	size_t mdia = f.open("mdia");
-	size_t mdhd = f.open_full("mdhd", 0, 0);
-	f.u32(0);
-	f.u32(0);
-	f.u32(l.timescale);
-	f.u32(l.dur_media);
-	f.u16(0x55c4);
-	f.u16(0);
+	usize mdia = f.open("mdia");
+	usize mdhd = f.open_full("mdhd", 0, 0);
+	f.put32(0);
+	f.put32(0);
+	f.put32(l.timescale);
+	f.put32(l.dur_media);
+	f.put16(0x55c4);
+	f.put16(0);
 	f.close(mdhd);
-	size_t hdlr = f.open_full("hdlr", 0, 0);
-	f.u32(0);
+	usize hdlr = f.open_full("hdlr", 0, 0);
+	f.put32(0);
 	f.tag("vide");
 	f.zeros(12);
 	f.str("VideoHandler", 13);
 	f.close(hdlr);
 
-	size_t minf = f.open("minf");
-	size_t vmhd = f.open_full("vmhd", 0, 1);
+	usize minf = f.open("minf");
+	usize vmhd = f.open_full("vmhd", 0, 1);
 	f.zeros(8);
 	f.close(vmhd);
-	size_t dinf = f.open("dinf");
-	size_t dref = f.open_full("dref", 0, 0);
-	f.u32(1);
-	size_t url = f.open_full("url ", 0, 1);
+	usize dinf = f.open("dinf");
+	usize dref = f.open_full("dref", 0, 0);
+	f.put32(1);
+	usize url = f.open_full("url ", 0, 1);
 	f.close(url);
 	f.close(dref);
 	f.close(dinf);
 
-	size_t stbl = f.open("stbl");
-	size_t stsd = f.open_full("stsd", 0, 0);
-	f.u32(1);
-	size_t avc1 = f.open("avc1");
+	usize stbl = f.open("stbl");
+	usize stsd = f.open_full("stsd", 0, 0);
+	f.put32(1);
+	usize avc1 = f.open("avc1");
 	f.zeros(6);
-	f.u16(1);
+	f.put16(1);
 	f.zeros(16);
-	f.u16(l.width);
-	f.u16(l.height);
-	f.u32(0x480000);
-	f.u32(0x480000);
-	f.u32(0);
-	f.u16(1);
+	f.put16(l.width);
+	f.put16(l.height);
+	f.put32(0x480000);
+	f.put32(0x480000);
+	f.put32(0);
+	f.put16(1);
 	f.zeros(32);
-	f.u16(0x18);
-	f.u16(0xffff);
-	size_t avcc = f.open("avcC");
-	f.u8(1);
-	f.u8(sps[1]);
-	f.u8(sps[2]);
-	f.u8(sps[3]);
-	f.u8(0xff);
-	f.u8(0xe1);
-	f.u16((uint32_t)sps.size());
+	f.put16(0x18);
+	f.put16(0xffff);
+	usize avcc = f.open("avcC");
+	f.put8(1);
+	f.put8(sps[1]);
+	f.put8(sps[2]);
+	f.put8(sps[3]);
+	f.put8(0xff);
+	f.put8(0xe1);
+	f.put16((u32)sps.size());
 	f.bytes(sps);
-	f.u8(1);
-	f.u16((uint32_t)pps.size());
+	f.put8(1);
+	f.put16((u32)pps.size());
 	f.bytes(pps);
 	f.close(avcc);
 	f.close(avc1);
 	f.close(stsd);
 
-	size_t stts = f.open_full("stts", 0, 0);
-	f.u32(1);
-	f.u32(l.declared);
-	f.u32(l.delta);
+	usize stts = f.open_full("stts", 0, 0);
+	f.put32(1);
+	f.put32(l.declared);
+	f.put32(l.delta);
 	f.close(stts);
-	size_t stsc = f.open_full("stsc", 0, 0);
-	f.u32(1);
-	f.u32(1);
-	f.u32(l.declared);
-	f.u32(1);
+	usize stsc = f.open_full("stsc", 0, 0);
+	f.put32(1);
+	f.put32(1);
+	f.put32(l.declared);
+	f.put32(1);
 	f.close(stsc);
-	size_t stsz = f.open_full("stsz", 0, 0);
-	f.u32(l.size);
-	f.u32(l.declared);
+	usize stsz = f.open_full("stsz", 0, 0);
+	f.put32(l.size);
+	f.put32(l.declared);
 	f.close(stsz);
-	size_t stco = f.open_full("stco", 0, 0);
-	f.u32(1);
-	f.u32(chunk_offset);
+	usize stco = f.open_full("stco", 0, 0);
+	f.put32(1);
+	f.put32(chunk_offset);
 	f.close(stco);
 	f.close(stbl);
 	f.close(minf);
@@ -257,14 +258,14 @@ void moov(Buf &f, const std::vector<uint8_t> &sps, const std::vector<uint8_t> &p
 	f.close(moov);
 }
 
-void put_filler(uint8_t *p, uint32_t pad)
+void put_filler(u8 *p, u32 pad)
 {
 	// length, then forbidden 0 / nal_ref_idc 0 / type 12, ff..ff, 80
-	uint32_t len = pad - 4;
-	p[0] = (uint8_t)(len >> 24);
-	p[1] = (uint8_t)(len >> 16);
-	p[2] = (uint8_t)(len >> 8);
-	p[3] = (uint8_t)len;
+	u32 len = pad - 4;
+	p[0] = (u8)(len >> 24);
+	p[1] = (u8)(len >> 16);
+	p[2] = (u8)(len >> 8);
+	p[3] = (u8)len;
 	p[4] = h264::kFiller;
 	std::memset(p + 5, 0xff, pad - 6);
 	p[pad - 1] = 0x80;
@@ -272,29 +273,29 @@ void put_filler(uint8_t *p, uint32_t pad)
 
 } // namespace
 
-std::string parse(const uint8_t *head, size_t len, uint64_t file_size, Info &out)
+std::string parse(const u8 *head, usize len, u64 file_size, Info &out)
 {
 	out = Info();
 	if (len < 8 || !is(head + 4, "ftyp"))
 		return "no ftyp box at the start";
 
 	// top level: ftyp, (free/skip ...), moov, mdat; stop after moov
-	const uint8_t *p = head, *end = head + len, *moov_end = nullptr;
+	const u8 *p = head, *end = head + len, *moov_end = nullptr;
 	Found f;
 	while (p + 8 <= end && moov_end == nullptr) {
-		uint64_t size = be32(p);
+		u64 size = be32(p);
 		if (size == 1 && p + 16 <= end)
 			size = be64(p + 8);
 		if (size < 8)
 			return "bad top-level box size";
 		if (is(p + 4, "moov")) {
-			if (size > (uint64_t)(end - p))
+			if (size > (u64)(end - p))
 				return "moov is cut off (read more of the file)";
 			if (!walk(p, p + size, f))
 				return "a box inside moov runs past its end";
 			moov_end = p + size;
 		}
-		if (size > (uint64_t)(end - p))
+		if (size > (u64)(end - p))
 			break;
 		p += size;
 	}
@@ -309,8 +310,8 @@ std::string parse(const uint8_t *head, size_t len, uint64_t file_size, Info &out
 		return "no mdat header after moov (read more of the file)";
 	if (!is(p + 4, "mdat"))
 		return "moov must be followed by mdat";
-	const uint32_t mdat_size = be32(p);
-	const uint64_t mdat_off = (uint64_t)(p - head);
+	const u32 mdat_size = be32(p);
+	const u64 mdat_off = (u64)(p - head);
 	if (mdat_size == 1)
 		return "mdat has a 64-bit size: io-media reads 32-bit box sizes only";
 	if (f.co64)
@@ -335,12 +336,12 @@ std::string parse(const uint8_t *head, size_t len, uint64_t file_size, Info &out
 	out.declared = f.count;
 	out.timescale = f.timescale;
 	out.delta = f.delta;
-	if (out.total() >= (uint64_t)1 << 32)
+	if (out.total() >= (u64)1 << 32)
 		return "the stream is 4 GB or more: io-media's box sizes are 32-bit";
 	if (mdat_size != 0 && mdat_off + mdat_size != out.total())
 		return "mdat must be size 0 or end where the declared frames end";
 	if (file_size > out.data_off)
-		out.present = (uint32_t)((file_size - out.data_off) / out.sample_size);
+		out.present = (u32)((file_size - out.data_off) / out.sample_size);
 	if (out.present > out.declared)
 		out.present = out.declared;
 	if (out.present == 0)
@@ -348,17 +349,17 @@ std::string parse(const uint8_t *head, size_t len, uint64_t file_size, Info &out
 	return "";
 }
 
-uint32_t max_frames(uint32_t sample_size, uint32_t hdr_max)
+u32 max_frames(u32 sample_size, u32 hdr_max)
 {
 	if (sample_size == 0)
 		return 0;
-	uint64_t room = ((uint64_t)1 << 32) - 1 - hdr_max;
-	return (uint32_t)(room / sample_size);
+	u64 room = ((u64)1 << 32) - 1 - hdr_max;
+	return (u32)(room / sample_size);
 }
 
-std::string build_header(const std::vector<uint8_t> &sps, const std::vector<uint8_t> &pps,
-                         unsigned fps, uint32_t sample_size, uint32_t declared,
-                         std::vector<uint8_t> &out, bool exact_mdat)
+std::string build_header(const std::vector<u8> &sps, const std::vector<u8> &pps,
+                         unsigned fps, u32 sample_size, u32 declared,
+                         std::vector<u8> &out, bool exact_mdat)
 {
 	out.clear();
 	h264::Sps s;
@@ -384,32 +385,32 @@ std::string build_header(const std::vector<uint8_t> &sps, const std::vector<uint
 	l.delta = 512;
 	l.declared = declared;
 	l.size = sample_size;
-	l.dur_ms = (uint32_t)((uint64_t)declared * 1000 / fps);
-	l.dur_media = (uint32_t)((uint64_t)declared * l.delta);
+	l.dur_ms = (u32)((u64)declared * 1000 / fps);
+	l.dur_media = (u32)((u64)declared * l.delta);
 
 	Buf f;
-	size_t ftyp = f.open("ftyp");
+	usize ftyp = f.open("ftyp");
 	f.tag("isom");
-	f.u32(0x200);
+	f.put32(0x200);
 	f.str("isomiso2avc1mp41", 16);
 	f.close(ftyp);
-	size_t head = f.b.size();
+	usize head = f.b.size();
 	moov(f, sps, pps, l, 0);                // once to learn its size
-	uint32_t chunk_offset = (uint32_t)(f.b.size() + 8);
+	u32 chunk_offset = (u32)(f.b.size() + 8);
 	f.b.resize(head);
 	moov(f, sps, pps, l, chunk_offset);
-	if ((uint64_t)chunk_offset + (uint64_t)declared * sample_size >= (uint64_t)1 << 32)
+	if ((u64)chunk_offset + (u64)declared * sample_size >= (u64)1 << 32)
 		return "the declared stream is 4 GB or more; declare fewer frames";
-	f.u32(exact_mdat ? 8 + declared * sample_size : 0);
+	f.put32(exact_mdat ? 8 + declared * sample_size : 0);
 	f.tag("mdat");
 	out.swap(f.b);
 	return "";
 }
 
-std::string make_sample_nals(const std::vector<std::pair<const uint8_t *, size_t>> &nals,
-                             uint32_t sample_size, std::vector<uint8_t> &out)
+std::string make_sample_nals(const std::vector<std::pair<const u8 *, usize>> &nals,
+                             u32 sample_size, std::vector<u8> &out)
 {
-	size_t used = 0;
+	usize used = 0;
 	unsigned kept = 0;
 
 	for (const auto &n : nals)
@@ -423,32 +424,32 @@ std::string make_sample_nals(const std::vector<std::pair<const uint8_t *, size_t
 		return "frame too big: " + std::to_string(used) + " bytes, sample size " +
 		       std::to_string(sample_size);
 	out.resize(sample_size);
-	uint8_t *p = out.data();
+	u8 *p = out.data();
 	for (const auto &n : nals) {
 		if (n.second == 0 || (n.first[0] & 0x1f) == h264::kAud)
 			continue;
-		p[0] = (uint8_t)(n.second >> 24);
-		p[1] = (uint8_t)(n.second >> 16);
-		p[2] = (uint8_t)(n.second >> 8);
-		p[3] = (uint8_t)n.second;
+		p[0] = (u8)(n.second >> 24);
+		p[1] = (u8)(n.second >> 16);
+		p[2] = (u8)(n.second >> 8);
+		p[3] = (u8)n.second;
 		std::memcpy(p + 4, n.first, n.second);
 		p += 4 + n.second;
 	}
 	if (used < sample_size)
-		put_filler(p, (uint32_t)(sample_size - used));
+		put_filler(p, (u32)(sample_size - used));
 	return "";
 }
 
-std::string make_sample(const uint8_t *annexb, size_t n, uint32_t sample_size,
-                        std::vector<uint8_t> &out)
+std::string make_sample(const u8 *annexb, usize n, u32 sample_size,
+                        std::vector<u8> &out)
 {
-	std::vector<std::pair<const uint8_t *, size_t>> nals;
+	std::vector<std::pair<const u8 *, usize>> nals;
 	for (const h264::Nal &nal : h264::split_annexb(annexb, n))
 		nals.emplace_back(nal.p, nal.n);
 	return make_sample_nals(nals, sample_size, out);
 }
 
-void filler_sample(uint32_t sample_size, std::vector<uint8_t> &out)
+void filler_sample(u32 sample_size, std::vector<u8> &out)
 {
 	out.resize(sample_size);
 	put_filler(out.data(), sample_size);
