@@ -123,6 +123,8 @@ class CaptureService : Service() {
 
     // what the last status line counted (capture thread)
     private var statusAt = 0L
+    private var settingsLink: AccessoryLink? = null   // the link the settings went to
+    private var settingsSent = ""                     // and what they were
     private var statusDisplayFrames = 0
     private var statusEncoded = 0
     private var statusDropped = 0
@@ -280,6 +282,7 @@ class CaptureService : Service() {
         }
         logStatus()
         try {
+            sendSettings(wantH264())
             if (wantH264()) {
                 next = h264Tick()
             } else {
@@ -291,6 +294,31 @@ class CaptureService : Service() {
             Streaming.status = "capture error: ${e.message}"
         }
         if (projection != null) handler.postDelayed(::tick, next)
+    }
+
+    /** What streaming runs with, for the MMI's log (STREAM_SETTINGS) and ours:
+     * the user's settings, what is sent (JPEG after a REFUSED) and the frame size. */
+    private fun settingsText(sendingH264: Boolean): String {
+        fun on(b: Boolean) = if (b) 1 else 0
+        return "format=${Streaming.format} sending=${if (sendingH264) "H264" else "JPEG"} " +
+            "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
+            "sharp=${on(Streaming.sharp)} capture_mode=${Streaming.vcapMode} " +
+            "hide_nav_bar=${on(Streaming.hideNavBar)} keep_screen_on=${on(Streaming.keepScreenOn)} " +
+            "frame_kb=${frameBytes / 1024} jpeg_q=$QUALITY android=${Build.VERSION.SDK_INT}"
+    }
+
+    /** STREAM_SETTINGS to the link when streaming starts on it or a setting
+     * changes; up= (ms since the phone booted) lines its log up with ours. */
+    private fun sendSettings(sendingH264: Boolean) {
+        val link = Streaming.link ?: return
+        if (link.videoCaps == null) return                    // no MMI app yet
+        val text = settingsText(sendingH264)
+        if (link === settingsLink && text == settingsSent) return
+        settingsLink = link
+        settingsSent = text
+        val line = "up=${SystemClock.elapsedRealtime()} $text"
+        link.sendSettings(line)
+        AppLog.i("settings sent: $line")
     }
 
     /** The phone's and the stream's state, for the log. */

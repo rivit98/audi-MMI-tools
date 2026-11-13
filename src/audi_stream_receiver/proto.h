@@ -51,6 +51,12 @@
 //                            goes out alone, at once: shown = on screen,
 //                            and the phone keeps at most two in flight.
 //                            H.264 frames go out in batches (ack_batch.h).
+//   STREAM_SETTINGS 0x0E phone  ASCII "key=value key=value ...": the phone
+//                            app's streaming settings (format, max fps, bit
+//                            rate, ...) and its uptime, for the MMI's log
+//                            only. Sent when streaming starts on a link and
+//                            whenever a setting changes. An older MMI logs
+//                            it as an unknown type and ignores it.
 //
 // Hardware H.264 (docs/phone-mirroring.md 7.10): the
 // unit's DM642 decodes, io-media plays, nothing is drawn by the CPU.
@@ -113,6 +119,7 @@ enum Type : uint8_t {
 	kH264Config = 0x0B,
 	kH264Status = 0x0C,
 	kVideoAcks = 0x0D,
+	kStreamSettings = 0x0E,
 };
 
 constexpr unsigned kFmtJpeg = 1;

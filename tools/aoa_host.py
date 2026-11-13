@@ -69,7 +69,7 @@ HANDSHAKE_FIRST_S, HANDSHAKE_RETRY_S, HANDSHAKE_TRIES = 4, 5, 5
 SYS_USB_DEVICES = "/sys/bus/usb/devices"
 HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired
 VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_STOP, VIDEO_DETAILS = 5, 6, 7, 9, 10  # 8: VIDEO_ACK, retired
-H264_CONFIG, H264_STATUS, VIDEO_ACKS = 11, 12, 13
+H264_CONFIG, H264_STATUS, VIDEO_ACKS, STREAM_SETTINGS = 11, 12, 13, 14
 H264_PLAYING, H264_SYNC, H264_REFUSED, H264_CONFIG_WANTED = 0, 1, 2, 3
 VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
@@ -82,7 +82,8 @@ CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, M
 EXT = {FMT_JPEG: "jpg"}
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 GAP_S = 1.0
-PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, VIDEO_DETAILS, H264_CONFIG}
+PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, VIDEO_DETAILS, H264_CONFIG,
+               STREAM_SETTINGS}
 RESWITCH_TRIES = 3
 SWITCHED_ENV = "AOA_HOST_SWITCHED"  # "1": the accessory is ours (survives the re-exec)
 PIPE_BYTES = 1024 * 1024
@@ -552,6 +553,8 @@ def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
     elif ftype == VIDEO_DETAILS and len(payload) >= 1:
         log(f"VIDEO_DETAILS: status bar over landscape {'on' if payload[0] else 'off'}")
         SCREEN.send("details", on=payload[0] != 0)
+    elif ftype == STREAM_SETTINGS:
+        log(f"STREAM_SETTINGS: {payload.decode('ascii', errors='replace')}")
     else:
         log(f"frame type {ftype}, {len(payload)} bytes ignored")
 

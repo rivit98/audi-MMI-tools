@@ -37,6 +37,14 @@ class ProtoTest {
     }
 
     @Test
+    fun streamSettingsIsPrintableAscii() {
+        val f = Proto.streamSettings("format=H264 fps=25 é")
+        assertArrayEquals(byteArrayOf(0x0E, 20, 0), f.copyOfRange(0, 3))
+        assertEquals("format=H264 fps=25 ?", String(f, 3, f.size - 3, Charsets.US_ASCII))
+        assertEquals(3 + Proto.MAX_PAYLOAD, Proto.streamSettings("x".repeat(5000)).size)
+    }
+
+    @Test
     fun helloCarriesUtf8() {
         val f = Proto.encode(Proto.HELLO, "zażółć".toByteArray())
         val got = decodeAll(Proto.Decoder(), f, 1)

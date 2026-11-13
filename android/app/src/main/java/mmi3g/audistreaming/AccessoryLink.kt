@@ -131,6 +131,11 @@ class AccessoryLink(
         write(frame)
     }
 
+    /** The phone's streaming settings, for the MMI's log (Proto.streamSettings). */
+    fun sendSettings(text: String) {
+        write(Proto.streamSettings(text))
+    }
+
     /** The MMI's status bar over a landscape picture on / off. */
     fun sendDetails(show: Boolean) {
         write(Proto.videoDetails(show))

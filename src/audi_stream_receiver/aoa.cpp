@@ -441,6 +441,9 @@ void Link::on_frame(uint8_t type, const uint8_t *p, unsigned n)
 		if (n >= proto::kVideoDetailsLen)
 			model::set_details(p[0] != 0);
 		break;
+	case proto::kStreamSettings:
+		log_text("rx STREAM_SETTINGS", p, n);
+		break;
 	default:
 		log_msg("rx unknown frame type 0x%02x, %u bytes, ignored", type, n);
 		break;

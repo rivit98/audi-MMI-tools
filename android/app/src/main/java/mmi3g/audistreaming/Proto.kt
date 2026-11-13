@@ -19,7 +19,9 @@ package mmi3g.audistreaming
  *   the MMI's status bar over a landscape picture, 0 = the picture alone),
  *   VIDEO_ACKS 0x0D (MMI: shown u16, bad u16, dropped u16: this many more
  *   pictures are done; a JPEG at once, H.264 frames in batches). 0x08 was
- *   VIDEO_ACK, one per picture, retired.
+ *   VIDEO_ACK, one per picture, retired. STREAM_SETTINGS 0x0E (phone: ASCII
+ *   "key=value ...", the settings streaming runs with, for the MMI's log
+ *   only; older MMI apps log it as unknown and ignore it).
  *
  *   Hardware H.264 (MMI apps with H.264; proto.h has the details):
  *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
@@ -41,6 +43,7 @@ object Proto {
     const val H264_CONFIG = 0x0B
     const val H264_STATUS = 0x0C
     const val VIDEO_ACKS = 0x0D
+    const val STREAM_SETTINGS = 0x0E
 
     const val FMT_JPEG = 1
     const val FMT_H264 = 3
@@ -106,6 +109,14 @@ object Proto {
 
     fun videoAcksOrNull(p: ByteArray): VideoAcks? =
         if (p.size < 6) null else VideoAcks(u16(p, 0), u16(p, 2), u16(p, 4))
+
+    /** STREAM_SETTINGS: [text] as ASCII (anything else as '?'), cut at MAX_PAYLOAD. */
+    fun streamSettings(text: String): ByteArray {
+        val b = ByteArray(minOf(text.length, MAX_PAYLOAD)) { i ->
+            text[i].code.let { if (it in 0x20..0x7e) it.toByte() else '?'.code.toByte() }
+        }
+        return encode(STREAM_SETTINGS, b)
+    }
 
     fun videoDetails(show: Boolean): ByteArray =
         encode(VIDEO_DETAILS, byteArrayOf(if (show) 1 else 0))
