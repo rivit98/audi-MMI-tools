@@ -40,8 +40,27 @@ struct StreamStats {
 	uint64_t wait_ms_sum = 0;
 	int64_t lead_frames_max = INT64_MIN;  // how far past the newest frame a read asked
 	int64_t lead_frames_last = 0;
+	// the same since the last stats_window() (INT64_MAX / INT64_MIN: no read)
+	int64_t lead_win_min = INT64_MAX, lead_win_max = INT64_MIN;
 	uint64_t served_end = 0;      // highest byte offset answered
 	unsigned waiting_now = 0;
+};
+
+// One read request, for the dump after an io-media error (the last
+// StreamServer::kReadHistory of them).
+struct ReadRecord {
+	unsigned seq = 0;
+	unsigned at_ms = 0;           // log_ms() when it came
+	uint64_t off = 0;
+	unsigned nbytes = 0;          // asked
+	int64_t first = -1, last = -1;  // frames it covers (-1: header only)
+	int64_t lead = 0;             // frames past the newest pushed, when it came
+	bool answered = false;        // false: still waiting
+	unsigned served = 0;          // bytes answered
+	unsigned waited_ms = 0;
+	bool far = false;             // answered at once with filler (kFarS)
+	unsigned evicted = 0;         // frames in it no longer kept: filler
+	unsigned ahead = 0;           // frames in it not pushed yet: filler
 };
 
 class StreamServer {
@@ -59,9 +78,15 @@ public:
 	void stop();
 	bool running() const { return impl_ != nullptr; }
 
+	static constexpr unsigned kReadHistory = 32;
+
 	// Live while serving; after stop(), what it ended with, until the next
 	// start().
 	StreamStats stats();
+	// The same, and a new window starts for lead_win_min / max.
+	StreamStats stats_window();
+	// The last kReadHistory reads, oldest first (waiting ones included).
+	std::vector<ReadRecord> recent_reads();
 	// Notes from the server thread (the first reads in detail, unblocks,
 	// errors) since the last call. The server never writes the log itself:
 	// log.c fsyncs every line, which would hold up its replies.

@@ -83,6 +83,8 @@ void keep_previous_run(const char *sd_path)
 		std::snprintf(prev, sizeof(prev), "usb_slog_prev_%d.txt", n);
 		keep(var, name, prev);
 	}
+	keep(var, "usb_slog_periodic_a.txt", "usb_slog_periodic_prev_a.txt");
+	keep(var, "usb_slog_periodic_b.txt", "usb_slog_periodic_prev_b.txt");
 }
 
 } // namespace

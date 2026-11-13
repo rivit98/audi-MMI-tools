@@ -74,9 +74,10 @@ struct StreamServer::Impl {
 	std::deque<Pending> pending;             // server thread only
 	std::vector<uint8_t> buf;
 
-	std::mutex mu;                           // stats + notes
+	std::mutex mu;                           // stats + notes + history
 	StreamStats st;
 	std::vector<std::string> notes;
+	ReadRecord history[StreamServer::kReadHistory];   // by seq % kReadHistory
 
 	uint64_t frame_of(uint64_t off) const { return (off - data_off) / sample_size; }
 
@@ -112,13 +113,22 @@ struct StreamServer::Impl {
 		else if (p.off + n > avail)
 			n = avail - p.off;
 		buf.resize(n);
-		n = stream->read(p.off, buf.data(), (size_t)n);
+		live::Stream::ReadInfo info;
+		n = stream->read(p.off, buf.data(), (size_t)n, &info);
 		MsgReply(p.rcvid, (int)n, buf.data(), (int)n);
 		if (!p.pread)
 			p.ocb->offset = (off_t)(p.off + n);
 
 		unsigned waited = log_ms() - p.since_ms;
 		std::lock_guard<std::mutex> lock(mu);
+		ReadRecord &r = history[p.seq % StreamServer::kReadHistory];
+		if (r.seq == p.seq) {
+			r.answered = true;
+			r.served = (unsigned)n;
+			r.waited_ms = waited;
+			r.evicted = info.evicted;
+			r.ahead = info.ahead;
+		}
 		st.bytes += n;
 		if (n == 0)
 			st.eof++;
@@ -207,7 +217,20 @@ struct StreamServer::Impl {
 				st.lead_frames_last = lead;
 				if (lead > st.lead_frames_max)
 					st.lead_frames_max = lead;
+				if (lead > st.lead_win_max)
+					st.lead_win_max = lead;
+				if (lead < st.lead_win_min)
+					st.lead_win_min = lead;
 			}
+			ReadRecord &r = history[p.seq % StreamServer::kReadHistory];
+			r = ReadRecord();
+			r.seq = p.seq;
+			r.at_ms = p.since_ms;
+			r.off = p.off;
+			r.nbytes = p.nbytes;
+			r.first = p.off < data_off ? -1 : (int64_t)frame_of(p.off);
+			r.last = needed ? (int64_t)needed - 1 : -1;
+			r.lead = lead;
 		}
 		if (p.seq <= kNoteReads)
 			note("read #%u: %u bytes at %llu%s (frame %lld..%lld)%s, lead %lld frames", p.seq,
@@ -220,6 +243,7 @@ struct StreamServer::Impl {
 			     p.seq, (long long)lead);
 			std::lock_guard<std::mutex> lock(mu);
 			st.far++;
+			history[p.seq % StreamServer::kReadHistory].far = true;
 		}
 		if (ready(p))
 			reply(p);
@@ -418,6 +442,33 @@ StreamStats StreamServer::stats()
 		return last_;
 	std::lock_guard<std::mutex> lock(impl_->mu);
 	return impl_->st;
+}
+
+StreamStats StreamServer::stats_window()
+{
+	if (impl_ == nullptr)
+		return last_;
+	std::lock_guard<std::mutex> lock(impl_->mu);
+	StreamStats s = impl_->st;
+	impl_->st.lead_win_min = INT64_MAX;
+	impl_->st.lead_win_max = INT64_MIN;
+	return s;
+}
+
+std::vector<ReadRecord> StreamServer::recent_reads()
+{
+	std::vector<ReadRecord> out;
+	if (impl_ == nullptr)
+		return out;
+	std::lock_guard<std::mutex> lock(impl_->mu);
+	unsigned last = impl_->st.reads;
+	unsigned n = last < kReadHistory ? last : kReadHistory;
+	for (unsigned seq = last - n + 1; n > 0 && seq <= last; seq++) {
+		const ReadRecord &r = impl_->history[seq % kReadHistory];
+		if (r.seq == seq)
+			out.push_back(r);
+	}
+	return out;
 }
 
 std::vector<std::string> StreamServer::take_notes()

@@ -115,9 +115,14 @@ public:
 	// Bytes [0, available()) exist now.
 	uint64_t available() const;
 	uint64_t frames() const;
+	// What one read() served as filler instead of frames.
+	struct ReadInfo {
+		unsigned evicted = 0;   // frames no longer kept (past ring_frames)
+		unsigned ahead = 0;     // frames not pushed yet (a far read)
+	};
 	// Copy [off, off + n) into dst; n is clamped at total(). Bytes past
 	// available() (a "far" read) come as filler frames. Returns the count.
-	size_t read(uint64_t off, uint8_t *dst, size_t n);
+	size_t read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info = nullptr);
 	// When frame k was pushed (real or skip), or -1 if unknown / no longer kept.
 	int64_t push_ms(uint64_t k) const;
 	bool started() const;        // the first IDR is in

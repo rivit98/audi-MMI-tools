@@ -706,6 +706,20 @@ void test_stream()
 	CHECK_EQ(frame_byte(st, 15, 4), h264::kFiller);                    // not there yet: filler
 	uint8_t b;
 	CHECK_EQ(st.read(st.total(), &b, 1), 0);                            // past the end
+	// what a read served as filler, frame by frame: 0..4 gone (ring of 8 of
+	// 13), 5..12 kept, 13..15 not pushed yet
+	{
+		std::vector<uint8_t> span(16 * 8192);
+		live::Stream::ReadInfo info;
+		CHECK_EQ(st.read(st.data_off(), span.data(), span.size(), &info), span.size());
+		CHECK_EQ(info.evicted, 5);
+		CHECK_EQ(info.ahead, 3);
+		CHECK_EQ(st.stats().evicted_reads, 6);
+		live::Stream::ReadInfo none;
+		st.read(st.data_off() + 6 * 8192 + 100, span.data(), 8192, &none);   // 6..7, kept
+		CHECK_EQ(none.evicted, 0);
+		CHECK_EQ(none.ahead, 0);
+	}
 
 	// declared 20: full
 	for (unsigned k = 11; k < 18; k++) {

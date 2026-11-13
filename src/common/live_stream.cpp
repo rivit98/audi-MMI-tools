@@ -275,7 +275,7 @@ uint64_t Stream::frames() const
 	return frames_;
 }
 
-size_t Stream::read(uint64_t off, uint8_t *dst, size_t n)
+size_t Stream::read(uint64_t off, uint8_t *dst, size_t n, ReadInfo *info)
 {
 	std::lock_guard<std::mutex> lock(mu_);
 	const uint64_t end_all = data_off_ + (uint64_t)declared_ * cfg_.sample_size;
@@ -298,9 +298,13 @@ size_t Stream::read(uint64_t off, uint8_t *dst, size_t n)
 			const uint8_t *src;
 			if (k >= frames_) {
 				src = filler_.data();                 // far read
+				if (info != nullptr)
+					info->ahead++;
 			} else if (k + cfg_.ring_frames < frames_) {
 				src = filler_.data();                 // no longer kept
 				st_.evicted_reads++;
+				if (info != nullptr)
+					info->evicted++;
 			} else {
 				src = ring_.data() + (size_t)(k % cfg_.ring_frames) * cfg_.sample_size;
 			}

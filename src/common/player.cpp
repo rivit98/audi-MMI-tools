@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 
 struct Player::iom_state {
@@ -50,11 +51,18 @@ std::string Player::fail(const char *what, int rc)
 	struct iom_err e;
 	char line[200];
 
-	if (g_ != nullptr && iom_error_info(&g_->g, &e) == EOK)
+	if (g_ != nullptr && iom_error_info(&g_->g, &e) == EOK) {
 		std::snprintf(line, sizeof(line), "%s: %s, iom_errno=0x%x type=%u value=%llu", what,
 		              std::strerror(rc), (unsigned)e.iom_errno, (unsigned)e.value_type,
 		              (unsigned long long)e.value);
-	else
+		if (events_n_ > 0) {
+			PlayEvent &last = events_[(events_n_ - 1) % kEventHistory];
+			if (last.type == IOM_EV_ERROR && last.a == -1) {
+				last.a = (int64_t)e.iom_errno;
+				last.b = (int64_t)e.value;
+			}
+		}
+	} else
 		std::snprintf(line, sizeof(line), "%s: %s", what, std::strerror(rc));
 	log_msg("  player: %s", line);
 	return line;
@@ -105,10 +113,73 @@ std::string Player::play()
 	return rc == EOK ? "" : fail("play", rc);
 }
 
+void Player::remember(uint32_t type, int64_t a, int64_t b)
+{
+	PlayEvent &e = events_[events_n_++ % kEventHistory];
+	e.at_ms = log_ms();
+	e.type = type;
+	e.a = a;
+	e.b = b;
+}
+
+std::vector<PlayEvent> Player::recent_events() const
+{
+	std::vector<PlayEvent> out;
+	unsigned n = events_n_ < kEventHistory ? events_n_ : kEventHistory;
+	for (unsigned i = events_n_ - n; i != events_n_; i++)
+		out.push_back(events_[i % kEventHistory]);
+	return out;
+}
+
+std::string Player::describe(const PlayEvent &e)
+{
+	char line[96];
+
+	switch (e.type) {
+	case IOM_EV_TIME:
+		std::snprintf(line, sizeof(line), "TIME %.1f s of %.1f s", e.a / 1000.0, e.b / 1000.0);
+		break;
+	case IOM_EV_STATUS:
+		std::snprintf(line, sizeof(line), "STATUS state %lld speed %lld", (long long)e.a,
+		              (long long)e.b);
+		break;
+	case IOM_EV_INPUT_EOF:
+		std::snprintf(line, sizeof(line), "INPUT_EOF");
+		break;
+	case IOM_EV_FINISHED:
+		std::snprintf(line, sizeof(line), "FINISHED");
+		break;
+	case IOM_EV_ERROR:
+		std::snprintf(line, sizeof(line), "ERROR iom_errno=0x%llx value=%llu",
+		              (unsigned long long)e.a, (unsigned long long)e.b);
+		break;
+	default:
+		std::snprintf(line, sizeof(line), "type %u (%lld bytes)", (unsigned)e.type,
+		              (long long)e.a);
+		break;
+	}
+	return line;
+}
+
 void Player::event(uint32_t type, const unsigned char *p, uint32_t len,
                    const std::function<void(unsigned, int64_t)> &on_time)
 {
 	const unsigned t = log_ms() - t_play_;
+
+	switch (type) {
+	case IOM_EV_STATUS:
+		remember(type, len >= 16 ? (int64_t)rd32(p + 8) : -1, len >= 16 ? (int32_t)rd32(p + 12) : 0);
+		break;
+	case IOM_EV_TIME:
+		remember(type, len >= 24 ? (int64_t)rd64(p + 8) : -1, len >= 24 ? (int64_t)rd64(p + 16) : 0);
+		break;
+	case IOM_EV_ERROR:
+		remember(type, -1, 0);           // fail() below fills in io-media's error
+		break;
+	default:
+		remember(type, (int64_t)len + 8, 0);
+		break;
+	}
 
 	switch (type) {
 	case IOM_EV_STATUS:

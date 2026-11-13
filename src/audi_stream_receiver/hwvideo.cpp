@@ -8,9 +8,11 @@
 #include "config_gate.h"
 #include "hw_stream.h"
 #include "live_stream.h"
+#include "rate_limit.h"
 #include "vout.h"
 
 extern "C" {
+#include "cpumon.h"
 #include "log.h"
 }
 
@@ -23,6 +25,7 @@ extern "C" {
 #include <climits>
 #include <deque>
 #include <memory>
+#include <utility>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -43,12 +46,20 @@ constexpr uint32_t kRingBytes = 8u << 20; // frames kept for io-media: 8 MB (>= 
 // IDR (live_stream.h, clock cap). A phone at 26 fps against the stream's 25
 // took the lag from 0.5 s to 3.3 s in 3 minutes; this keeps it under ~1 s.
 constexpr unsigned kShedAheadMs = 500;
+// warnings: each at most once per this, with a count of the ones held back
+constexpr unsigned kWarnEveryMs = 10000;
+constexpr int64_t kLagWarnMs = 1000;    // lag median over this
 
+// Per-window deltas: the counters at the window's start.
 struct Window {
-	uint32_t real = 0, skips = 0, refused = 0, sheds = 0;
-	unsigned reads = 0, waited = 0;
+	uint32_t real = 0, skips = 0, refused = 0, sheds = 0, evicted = 0;
+	unsigned reads = 0, waited = 0, far = 0, eof = 0, unblocked = 0;
+	bool waited_before = false;          // a window of this stream had waited reads
 	std::vector<int64_t> lags;
 };
+
+RateLimit warn_waited(kWarnEveryMs), warn_evicted(kWarnEveryMs), warn_lag(kWarnEveryMs);
+bool evicted_seen = false;              // hw thread: this stream had an evicted read
 
 std::mutex mu;                          // everything below, but `hw` use by the hw thread
 std::unique_ptr<HwStream> hw;           // set / taken under mu; polled by the hw thread
@@ -58,7 +69,7 @@ bool config_pending = false;
 bool stop_pending = false;
 std::string stop_why;
 bool restart_pending = false;           // stream full: same config again
-std::deque<uint8_t> statuses;
+std::deque<std::pair<uint8_t, const char *>> statuses;   // code, why (REFUSED)
 unsigned last_sync_ms = 0;
 uint32_t refused_total = 0, refused_logged = 0;
 
@@ -85,8 +96,8 @@ enum class End {
 	Error,       // io-media failed (the HMI may have taken VCAP 0): our displayable goes, VCAP untouched
 };
 
-// mu held
-void queue_status(uint8_t code)
+// mu held. why: a static string, logged when it goes out (REFUSED).
+void queue_status(uint8_t code, const char *why = nullptr)
 {
 	if (code == proto::kH264Sync) {
 		if (log_ms() - last_sync_ms < kSyncEveryMs && last_sync_ms != 0)
@@ -94,7 +105,7 @@ void queue_status(uint8_t code)
 		last_sync_ms = log_ms();
 	}
 	if (statuses.size() < 16)
-		statuses.push_back(code);
+		statuses.emplace_back(code, why);
 }
 
 const char *status_name(uint8_t c)
@@ -108,13 +119,19 @@ const char *status_name(uint8_t c)
 	return "?";
 }
 
-void status(uint8_t code)
+void status(uint8_t code, const char *why = nullptr)
 {
 	{
 		std::lock_guard<std::mutex> lock(mu);
-		queue_status(code);
+		queue_status(code, why);
 	}
 	aoa::wake();
+}
+
+// "12.3 s", the ring's depth at the config's rate
+double ring_s(const live::Config &c)
+{
+	return c.fps ? c.ring_frames / (double)c.fps : 0.0;
 }
 
 // hw thread: give up a picture left on for a stream that didn't come.
@@ -189,9 +206,12 @@ void teardown(const char *why, End how = End::Stop)
 	log_msg("h264: stream ended (%s): %u frames in (%u IDR), %u skips in %u gaps, refused: %u "
 	        "too big, %u waiting for an IDR, %u bad, %u SPS/PPS changed, %u ahead of the clock "
 	        "(%u times, max %lld ms ahead); io-media: %u reads, %u "
-	        "waited (max %u ms), %u unblocked; %u TIME events, position %.1f s, %u errors%s%s",
+	        "waited (max %u ms), %u unblocked, %u evicted, %u far, %u eof; ring %u frames = "
+	        "%.1f s; %u TIME events, position %.1f s, %u errors%s%s",
 	        why, ls.real, ls.idr, ls.skips, ls.gaps, ls.too_big, ls.wait_idr, ls.bad,
-	        ls.config_changed, ls.shed, ls.sheds, (long long)ls.ahead_ms_max, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked, ps.time_events,
+	        ls.config_changed, ls.shed, ls.sheds, (long long)ls.ahead_ms_max, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked,
+	        ls.evicted_reads, ss.far, ss.eof, h->stream().config().ring_frames,
+	        ring_s(h->stream().config()), ps.time_events,
 	        ps.max_pos_ms < 0 ? 0.0 : ps.max_pos_ms / 1000.0, ps.error_events,
 	        ps.error_events ? ": " : "", ps.first_error.c_str());
 	if (how != End::Restart)
@@ -209,7 +229,7 @@ void setup(const std::vector<uint8_t> &payload)
 		forget_config();
 		release_held_video(true);
 		is_active = false;
-		status(proto::kH264Refused);
+		status(proto::kH264Refused, "malformed H264_CONFIG");
 		return;
 	}
 	const proto::H264Config &c = *parsed;
@@ -248,7 +268,7 @@ void setup(const std::vector<uint8_t> &payload)
 		forget_config();
 		release_held_video(true);
 		is_active = false;
-		status(proto::kH264Refused);
+		status(proto::kH264Refused, "config not decodable");
 		return;
 	}
 
@@ -261,7 +281,7 @@ void setup(const std::vector<uint8_t> &payload)
 		forget_config();
 		h->stop();
 		is_active = false;
-		status(proto::kH264Refused);
+		status(proto::kH264Refused, "stream setup failed");
 		return;
 	}
 	{
@@ -274,12 +294,15 @@ void setup(const std::vector<uint8_t> &payload)
 	}
 	aoa::wake();
 	log_msg("h264: streaming at %s, graph %s; waiting for the first IDR", kPath, o.graph.c_str());
+	log_msg("h264: ring %u frames = %.1f s (%u-byte frames)", o.cfg.ring_frames, ring_s(o.cfg),
+	        (unsigned)o.cfg.sample_size);
+	evicted_seen = false;
 }
 
 void log_window(HwStream &h, Window &w, unsigned ms)
 {
 	live::Stats ls = h.stream().stats();
-	StreamStats ss = h.server().stats();
+	StreamStats ss = h.server().stats_window();
 	std::vector<int64_t> lags;
 	lags.swap(w.lags);
 	std::sort(lags.begin(), lags.end());
@@ -288,22 +311,91 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 		std::lock_guard<std::mutex> lock(mu);
 		refused = refused_total;
 	}
+	const live::Config &c = h.stream().config();
+	bool any_lead = ss.lead_win_max != INT64_MIN;
+	// how far io-media reads behind the newest frame (negative: ahead)
+	int64_t behind = ss.served_end <= h.stream().data_off() ? 0 :
+		((int64_t)h.stream().available() - (int64_t)ss.served_end) / (int64_t)c.sample_size;
+	unsigned reads = ss.reads - w.reads, waited = ss.waited - w.waited;
+	uint32_t evicted = ls.evicted_reads - w.evicted;
+	int64_t p50 = lags.empty() ? 0 : lags[lags.size() / 2];
 	log_msg("h264: %.1f s: %u frames (%.1f fps), %u skips, %u refused; io-media %u reads, %u "
-	        "waited (max %u ms), lead max %lld frames; lag %lld/%lld/%lld ms (%zu TIME), "
-	        "position %.1f s%s",
+	        "waited (max %u ms), lead %lld/%lld/%lld frames; lag %lld/%lld/%lld ms (%zu TIME), "
+	        "position %.1f s%s; evicted %u, far %u, eof %u, unblocked %u; reader %lld frames "
+	        "behind, ring %u frames",
 	        ms / 1000.0, ls.real - w.real, (ls.real - w.real) * 1000.0 / (ms ? ms : 1),
-	        ls.skips - w.skips, refused - w.refused, ss.reads - w.reads, ss.waited - w.waited,
-	        ss.wait_ms_max, ss.lead_frames_max == INT64_MIN ? 0LL : (long long)ss.lead_frames_max,
-	        lags.empty() ? 0LL : (long long)lags.front(),
-	        lags.empty() ? 0LL : (long long)lags[lags.size() / 2],
+	        ls.skips - w.skips, refused - w.refused, reads, waited,
+	        ss.wait_ms_max, any_lead ? (long long)ss.lead_win_min : 0LL,
+	        (long long)ss.lead_frames_last, any_lead ? (long long)ss.lead_win_max : 0LL,
+	        lags.empty() ? 0LL : (long long)lags.front(), (long long)p50,
 	        lags.empty() ? 0LL : (long long)lags.back(), lags.size(),
 	        h.player().stats().max_pos_ms < 0 ? 0.0 : h.player().stats().max_pos_ms / 1000.0,
-	        h.video_on() ? "" : ", picture not on yet");
+	        h.video_on() ? "" : ", picture not on yet", evicted, ss.far - w.far, ss.eof - w.eof,
+	        ss.unblocked - w.unblocked, (long long)behind, c.ring_frames);
+
+	unsigned now = log_ms(), held;
+	// io-media normally waits for ~every 2nd read (it reads up to the live
+	// edge); none at all after it did means it reads elsewhere - maybe
+	// frames already gone from the ring (evicted, answered with filler)
+	if (waited == 0 && reads > 0 && w.waited_before && h.playing() &&
+	    warn_waited.allow(now, &held))
+		log_msg("h264: WARNING io-media waited for none of %u reads in %.1f s (it did "
+		        "before); %u evicted, reader %lld frames behind (%u more not logged)",
+		        reads, ms / 1000.0, evicted, (long long)behind, held);
+	if (p50 > kLagWarnMs && warn_lag.allow(now, &held))
+		log_msg("h264: WARNING lag median %lld ms, over %lld ms (%u more not logged)",
+		        (long long)p50, (long long)kLagWarnMs, held);
+	if (waited > 0)
+		w.waited_before = true;
 	w.real = ls.real;
 	w.skips = ls.skips;
 	w.refused = refused;
 	w.reads = ss.reads;
 	w.waited = ss.waited;
+	w.evicted = ls.evicted_reads;
+	w.far = ss.far;
+	w.eof = ss.eof;
+	w.unblocked = ss.unblocked;
+}
+
+// hw thread, io-media has reported an error: what led up to it, before the
+// stream goes. ~50 lines (log.c fsyncs each, ~0.6 s): only on an error.
+void dump_error(HwStream &h)
+{
+	std::vector<ReadRecord> reads = h.server().recent_reads();
+	std::vector<PlayEvent> events = h.player().recent_events();
+	StreamStats ss = h.server().stats();
+	live::Stats ls = h.stream().stats();
+	int self = -1, unit = -1;
+
+	cpumon_now(&self, &unit, nullptr);
+	log_msg("h264: at the error: %llu frames in, reader at byte %llu of %llu, %u reads "
+	        "waiting, %u evicted, ring %u frames; cpu (last second) self %d%%, unit %d%%",
+	        (unsigned long long)h.stream().frames(), (unsigned long long)ss.served_end,
+	        (unsigned long long)h.stream().available(), ss.waiting_now, ls.evicted_reads,
+	        h.stream().config().ring_frames, self, unit);
+	log_msg("h264: the last %zu reads (at ms: #seq offset+bytes, frames, lead, answer):",
+	        reads.size());
+	for (const ReadRecord &r : reads) {
+		char fill[64] = "";
+		if (r.far)
+			std::snprintf(fill, sizeof(fill), ", far: filler");
+		else if (r.evicted || r.ahead)
+			std::snprintf(fill, sizeof(fill), ", filler: %u evicted, %u not pushed", r.evicted,
+			              r.ahead);
+		if (r.answered)
+			log_msg("h264:   %u: #%u %llu+%u, frames %lld..%lld, lead %lld, %u bytes after %u ms%s",
+			        r.at_ms, r.seq, (unsigned long long)r.off, r.nbytes, (long long)r.first,
+			        (long long)r.last, (long long)r.lead, r.served, r.waited_ms, fill);
+		else
+			log_msg("h264:   %u: #%u %llu+%u, frames %lld..%lld, lead %lld, still waiting%s",
+			        r.at_ms, r.seq, (unsigned long long)r.off, r.nbytes, (long long)r.first,
+			        (long long)r.last, (long long)r.lead, fill);
+	}
+	log_msg("h264: the last %zu io-media events:", events.size());
+	for (const PlayEvent &e : events)
+		log_msg("h264:   %u: %s", e.at_ms, Player::describe(e).c_str());
+	aoa::slog_snapshot("io-media error");
 }
 
 void run()
@@ -360,7 +452,7 @@ void run()
 			if (!err.empty()) {
 				log_msg("h264: %s", err.c_str());
 				teardown("the graph would not play", End::Error);
-				status(proto::kH264Refused);
+				status(proto::kH264Refused, "the graph would not play");
 				continue;
 			}
 			const PlayStats &ps = h->player().stats();
@@ -370,8 +462,9 @@ void run()
 				// VCAP left as it is (End::Error); the phone goes back to
 				// pictures for this connection.
 				log_msg("h264: io-media error: %s", ps.first_error.c_str());
+				dump_error(*h);
 				teardown("io-media reported an error", End::Error);
-				status(proto::kH264Refused);
+				status(proto::kH264Refused, "io-media error");
 				continue;
 			}
 			if (h->playing() && !was_playing) {
@@ -379,6 +472,14 @@ void run()
 				log_msg("h264: first IDR in, graph playing");
 			}
 			live::Stats now = h->stream().stats();
+			unsigned held;
+			if (now.evicted_reads > 0 && !evicted_seen) {
+				evicted_seen = true;
+				if (warn_evicted.allow(log_ms(), &held))
+					log_msg("h264: WARNING io-media read a frame no longer kept (more than %u "
+					        "frames = %.1f s behind): it got filler (%u more not logged)",
+					        h->stream().config().ring_frames, ring_s(h->stream().config()), held);
+			}
 			if (now.sheds != w.sheds) {
 				w.sheds = now.sheds;
 				log_msg("h264: over %u ms ahead of the frame clock (the phone sends faster than "
@@ -517,14 +618,19 @@ void stop(const char *why)
 
 bool status_pop(uint8_t *code)
 {
+	const char *why;
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		if (statuses.empty())
 			return false;
-		*code = statuses.front();
+		*code = statuses.front().first;
+		why = statuses.front().second;
 		statuses.pop_front();
 	}
-	log_msg("h264: tx H264_STATUS %s", status_name(*code));
+	if (why != nullptr)
+		log_msg("h264: tx H264_STATUS %s (reason: %s)", status_name(*code), why);
+	else
+		log_msg("h264: tx H264_STATUS %s", status_name(*code));
 	return true;
 }
 

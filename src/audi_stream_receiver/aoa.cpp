@@ -100,8 +100,11 @@ bool              kick;          // manager has work besides events
 AckBatch          acks;
 std::thread       manager_thread;
 bool              manager_started;
-
-void slog_snapshot(const char *why);
+// log_ms() + 1 of the last complete picture or frame (0: none yet): while
+// pictures come, the system log is saved every kSlogPeriodMs
+std::atomic<unsigned> video_rx_ms{0};
+constexpr unsigned kSlogPeriodMs = 60000;
+constexpr unsigned kStreamingGapMs = 5000;  // no picture for this long: not streaming
 
 void post(EvKind kind, const usbd_device_instance_t *inst)
 {
@@ -373,6 +376,7 @@ void Link::on_video(uint8_t type, const uint8_t *p, unsigned n)
 		ack(PicStatus::Bad);
 	} else if (r.rx == Assembler::Rx::Done) {
 		Picture pic = assembler_.take();
+		video_rx_ms = log_ms() + 1;
 		pic.rx_start_us = rx_start_us_;
 		pic.rx_done_us = log_us();
 		if (pic.format == proto::kFmtH264) {
@@ -986,23 +990,63 @@ void on_insert(usbd_device_instance_t *in)
 	model::set_state(LinkState::Waiting, detail);
 }
 
-// The system log at this moment, into <sd>/var/usb_slog_<n>.txt, in the
-// background (sloginfo + SD write take about a second). The run ends by
-// pulling the card, so run.sh never gets to save audi_stream_receiver's slog; these
-// snapshots are what shows io-usb's and the media launcher's side of a
-// failed handshake (DEV_NOANSWER on SEND_STRING, cause unknown).
 const char *slog_sd;
+std::atomic<int> slog_n{0};
 
+} // namespace
+
+// The system log at this moment, into <sd>/var/usb_slog_<n>.txt, in the
+// background (sloginfo + SD write take about a second, ~150 KB). The run
+// ends by pulling the card, so run.sh never gets to save audi_stream_receiver's
+// slog; these snapshots are what shows io-usb's and the media launcher's side
+// of a failed handshake (DEV_NOANSWER on SEND_STRING, cause unknown), and the
+// system's side of an io-media error.
 void slog_snapshot(const char *why)
 {
-	static int n;
 	char cmd[400];
 
-	if (slog_sd == nullptr || n >= kSlogSnapshots)
+	if (slog_sd == nullptr)
 		return;
-	n++;
+	int n = ++slog_n;
+	if (n > kSlogSnapshots)
+		return;
 	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%d.txt' 2>&1 &", slog_sd, n);
 	log_msg("usb: slog snapshot %d (%s) -> var/usb_slog_%d.txt", n, why, n);
+	if (std::system(cmd) != 0)
+		log_msg("usb:   could not start sloginfo");
+}
+
+namespace {
+
+// Manager thread: while streaming, the system log every kSlogPeriodMs into
+// var/usb_slog_periodic_a.txt and _b.txt in turn. When the unit hangs or
+// reboots, the app's log just stops; the older of the two was complete
+// when it happened, the newer may be cut off by it.
+void slog_periodic()
+{
+	static unsigned since;               // streaming since, or the last snapshot; 0: not streaming
+	static bool next_b;
+	char cmd[400];
+	unsigned now = log_ms() + 1, rx = video_rx_ms;
+
+	if (slog_sd == nullptr)
+		return;
+	if (rx == 0 || now - rx > kStreamingGapMs) {
+		since = 0;
+		return;
+	}
+	if (since == 0) {
+		since = now;
+		return;
+	}
+	if (now - since < kSlogPeriodMs)
+		return;
+	since = now;
+	char which = next_b ? 'b' : 'a';
+	next_b = !next_b;
+	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_periodic_%c.txt' 2>&1 &",
+	              slog_sd, which);
+	log_msg("usb: periodic slog snapshot -> var/usb_slog_periodic_%c.txt", which);
 	if (std::system(cmd) != 0)
 		log_msg("usb:   could not start sloginfo");
 }
@@ -1117,6 +1161,7 @@ void manager()
 		if (acc && acc->broken())
 			acc_broken();
 		send_acks();
+		slog_periodic();
 		uint8_t h264_status;
 		while (hwvideo::status_pop(&h264_status))
 			if (acc)

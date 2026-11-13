@@ -45,6 +45,12 @@ void ack_later(proto::PicStatus status);
 // Something for the manager to send (any thread).
 void wake();
 
+// The system log now, in the background, into var/usb_slog_<n>.txt (up to
+// kSlogSnapshots per run); logs "usb: slog snapshot <n> (<why>)". Any thread.
+// While pictures or frames come, the manager also saves it every 60 s into
+// var/usb_slog_periodic_a.txt / _b.txt in turn.
+void slog_snapshot(const char *why);
+
 } // namespace aoa
 
 #endif
