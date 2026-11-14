@@ -659,6 +659,72 @@ void test_system_audio_only()
 	CHECK(ids == std::vector<u64>({aa::kChVideo, aa::kChSystemAudio, aa::kChMic, aa::kChSensor, aa::kChInput}));
 }
 
+// The video service's VideoConfiguration and the touch screen of cfg's
+// discovery response: resolution, dpi, touch width x height.
+struct VideoOffer {
+	u64 res = 0, dpi = 0, touch_w = 0, touch_h = 0;
+};
+
+VideoOffer video_offer(const aa::Config &cfg)
+{
+	struct Null : aa::Host {
+		void send(const u8 *, usize) override {}
+		unsigned now_ms() override { return 0; }
+	} host;
+	aa::Session hu(cfg, host);
+	std::vector<u8> d = hu.discovery_response();
+	VideoOffer o;
+	pb::Reader r(d.data(), d.size());
+	pb::Field f;
+	while (r.next(f)) {
+		u64 id = 0;
+		const u8 *p = nullptr, *q = nullptr, *v = nullptr;
+		usize n = 0, m = 0, k = 0;
+		if (f.num != 1 || !pb::get_u(f.p, f.n, 1, id))
+			continue;
+		if (id == aa::kChVideo && pb::get_bytes(f.p, f.n, 3, p, n) && pb::get_bytes(p, n, 4, q, m)) {
+			pb::get_u(q, m, 1, o.res);
+			pb::get_u(q, m, 5, o.dpi);
+		}
+		if (id == aa::kChInput && pb::get_bytes(f.p, f.n, 4, p, n) && pb::get_bytes(p, n, 2, v, k)) {
+			pb::get_u(v, k, 1, o.touch_w);
+			pb::get_u(v, k, 2, o.touch_h);
+		}
+	}
+	return o;
+}
+
+void test_video_size()
+{
+	CHECK_EQ(aa::video_resolution(800, 480), 1u);
+	CHECK_EQ(aa::video_resolution(1280, 720), 2u);
+	CHECK_EQ(aa::video_resolution(1920, 1080), 3u);
+	CHECK_EQ(aa::video_resolution(3840, 2160), 5u);
+	CHECK_EQ(aa::video_resolution(720, 432), 0u);
+
+	VideoOffer o = video_offer(aa::Config{});
+	CHECK_EQ(o.res, 1u);
+	CHECK_EQ(o.dpi, 140u);
+	CHECK_EQ(o.touch_w, 800u);
+	CHECK_EQ(o.touch_h, 480u);
+
+	aa::Config cfg;
+	cfg.video_w = 1280;
+	cfg.video_h = 720;
+	cfg.dpi = 210;
+	o = video_offer(cfg);
+	CHECK_EQ(o.res, 2u);
+	CHECK_EQ(o.dpi, 210u);
+	CHECK_EQ(o.touch_w, 1280u);
+	CHECK_EQ(o.touch_h, 720u);
+
+	cfg.video_w = 1000;                  // not a size Android Auto knows: 800x480
+	o = video_offer(cfg);
+	CHECK_EQ(o.res, 1u);
+	CHECK_EQ(o.touch_w, 800u);
+	CHECK_EQ(o.touch_h, 480u);
+}
+
 void test_bad_cert()
 {
 	struct Null : aa::Host {
@@ -693,6 +759,7 @@ int main(int argc, char **argv)
 	test_frames();
 	test_session(c, k, pbdir);
 	test_system_audio_only();
+	test_video_size();
 	test_bad_cert();
 	CHECK_DONE();
 }

@@ -9,7 +9,7 @@ import android.util.Log
 import android.view.Surface
 
 /**
- * The phone's hardware H.264 decoder for Android Auto's video (800x480
+ * The phone's hardware H.264 decoder for Android Auto's video ([mode],
  * Baseline), rendering every frame into [surface] ([GlScaler]'s input) as
  * soon as it is decoded. Callbacks and every call on [handler]'s thread.
  *
@@ -20,6 +20,7 @@ import android.view.Surface
  */
 class AaDecoder(
     private val surface: Surface,
+    private val mode: AaGeometry.Mode,
     private val handler: Handler,
     private val onError: (String) -> Unit,
 ) {
@@ -44,7 +45,7 @@ class AaDecoder(
             onError("codec config without SPS/PPS")
             return
         }
-        val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, AaGeometry.VIDEO_W, AaGeometry.VIDEO_H).apply {
+        val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, mode.w, mode.h).apply {
             setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(START + sp.first))
             setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(START + sp.second))
             setInteger(MediaFormat.KEY_PRIORITY, 0)                // real time

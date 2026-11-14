@@ -176,6 +176,13 @@ NDK). Differences from the car app:
   720x432 cut the UI's right edge off. The session asks for 800x480 with no
   margins, and the GPU scales the whole frame bilinear to 720x432: 0.9 both
   ways, so the 5:3 shape stays. Text is slightly softer than 1:1.
+- **Video size setting.** The Android Auto page can also ask for 1280x720
+  or 1920x1080 (dpi raised with the height: 210, 315, so the layout stays
+  about the same). These are 16:9: scaled whole into 720x405 with black
+  above and below. A test for where Android Auto puts its bar on a 16:9
+  screen (bottom, or a rail at the side that could be cropped to leave
+  5:3); one bilinear tap per pixel at 0.56 or 0.375 aliases thin text.
+  A new size ends the session (bye-bye) and the app reconnects.
 - **Frame rate and stream settings.** Android Auto sends up to 30 fps; the
   GPU's frame clock draws exactly "Max fps" a second into the encoder (at
   most 25, the MMI's stream rate) and drops the rest. No ack pacing

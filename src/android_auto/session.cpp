@@ -76,7 +76,6 @@ constexpr unsigned kSensorDrivingStatus = 13;
 // AudioStreamType
 constexpr unsigned kCodecPcm = 1;
 constexpr unsigned kCodecH264Bp = 3;
-constexpr unsigned kVideo800x480 = 1;
 constexpr unsigned kFps30 = 2;
 constexpr unsigned kAudioGuidance = 1;
 constexpr unsigned kAudioSystem = 2;
@@ -237,14 +236,24 @@ void Session::send_msg(u8 ch, u8 flags, u16 id, const u8 *body, usize n)
 	host_.send(out.data(), out.size());
 }
 
+unsigned video_resolution(unsigned w, unsigned h)
+{
+	static const unsigned sizes[][2] = {{800, 480}, {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+	for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; i++)
+		if (sizes[i][0] == w && sizes[i][1] == h)
+			return i + 1;
+	return 0;
+}
+
 std::vector<u8> Session::discovery_response() const
 {
 	pb::Writer r;
 
-	// video: H.264 Baseline 800x480 at 30 fps (MediaSinkService,
-	// VideoConfiguration)
+	// video: H.264 Baseline at 30 fps (MediaSinkService, VideoConfiguration)
+	unsigned res = video_resolution(cfg_.video_w, cfg_.video_h);
+	unsigned vw = res ? cfg_.video_w : 800, vh = res ? cfg_.video_h : 480;
 	pb::Writer vconf, video;
-	vconf.u(1, kVideo800x480).u(2, kFps30).u(3, cfg_.margin_w).u(4, cfg_.margin_h).u(5, cfg_.dpi);
+	vconf.u(1, res ? res : 1).u(2, kFps30).u(3, cfg_.margin_w).u(4, cfg_.margin_h).u(5, cfg_.dpi);
 	video.u(1, kCodecH264Bp).msg(4, vconf).b(5, true);
 	r.msg(1, service(kChVideo, 3, video));
 
@@ -271,7 +280,7 @@ std::vector<u8> Session::discovery_response() const
 
 	// input (InputSourceService: keycodes, a touch screen the size of the video)
 	pb::Writer input, touch;
-	touch.u(1, 800).u(2, 480);
+	touch.u(1, vw).u(2, vh);
 	input.packed(1, kKeycodes).msg(2, touch);
 	r.msg(1, service(kChInput, 4, input));
 

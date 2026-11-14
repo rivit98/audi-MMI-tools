@@ -284,11 +284,35 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             if (AaService.running) AaService.stop(this) else startAa()
         }
         findViewById<Button>(R.id.aa_settings).setOnClickListener { openAaSettings() }
+        setUpVideoSize()
         mode = getPreferences(MODE_PRIVATE).getInt(PREF_MODE, MODE_SCREEN).coerceIn(MODE_SCREEN, MODE_AA)
         pager.setPage(mode, animate = false)
         pager.onPage = ::onMode
         showTabs()
         if (mode == MODE_AA) startAa()
+    }
+
+    /** Android Auto's video size, remembered; a new one reconnects. */
+    private fun setUpVideoSize() {
+        val prefs = getPreferences(MODE_PRIVATE)
+        val modes = AaGeometry.MODES
+        val saved = modes.indexOfFirst { it.toString() == prefs.getString(PREF_AA_VIDEO_SIZE, null) }.coerceAtLeast(0)
+        AaService.setMode(modes[saved])
+        val preview = findViewById<View>(R.id.aa_preview)
+        findViewById<Spinner>(R.id.aa_video_size).apply {
+            setSelection(saved)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
+                    val m = modes[pos]
+                    if (m == AaService.mode) return
+                    AppLog.i("AA mode: video size $m")
+                    prefs.edit().putString(PREF_AA_VIDEO_SIZE, m.toString()).apply()
+                    AaService.setMode(m)
+                    preview.requestLayout()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>) {}
+            }
+        }
     }
 
     private fun onMode(m: Int) {
@@ -460,6 +484,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_SHARP = "sharp_h264"
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
         private const val PREF_MODE = "mode"
+        private const val PREF_AA_VIDEO_SIZE = "aa_video_size"
         private const val MODE_SCREEN = 0
         private const val MODE_AA = 1
         private const val AA_PACKAGE = "com.google.android.projection.gearhead"
@@ -470,6 +495,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             Triple(R.id.info_clock, R.string.info_clock_title, R.string.info_clock),
             Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
             Triple(R.id.info_aa, R.string.info_aa_title, R.string.info_aa),
+            Triple(R.id.info_aa_video_size, R.string.info_aa_video_size_title, R.string.info_aa_video_size),
         )
         // in res/layout/stream_options.xml, once per page
         private val OPTION_INFO = listOf(

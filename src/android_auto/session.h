@@ -59,6 +59,10 @@ enum class Phase {
 };
 const char *phase_name(Phase p);
 
+// VideoCodecResolutionType for a w x h video: 1 = 800x480, 2 = 1280x720,
+// 3 = 1920x1080, 4 = 2560x1440, 5 = 3840x2160; 0: not one of them.
+unsigned video_resolution(unsigned w, unsigned h);
+
 struct Config {
 	u16    version_major = 1;
 	u16    version_minor = 1;
@@ -76,6 +80,9 @@ struct Config {
 	// width_margin / height_margin): the car UI is drawn in the rest
 	// (Android Auto ignores width_margin: the UI spans all 800 columns).
 	unsigned    margin_w = 0, margin_h = 0;
+	// The video Android Auto sends, also the touch screen's size: one of
+	// video_resolution()'s sizes (others fall back to 800x480).
+	unsigned    video_w = 800, video_h = 480;
 	std::string display_name = "MMI 3G+";
 };
 
@@ -89,7 +96,7 @@ enum class Touch : unsigned {
 };
 
 struct Pointer {
-	unsigned x, y;     // video pixels, 0..799 x 0..479
+	unsigned x, y;     // video pixels, 0..video_w-1 x 0..video_h-1
 	unsigned id;
 };
 

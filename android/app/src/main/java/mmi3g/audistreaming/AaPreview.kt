@@ -8,8 +8,9 @@ import android.view.Surface
 import android.view.TextureView
 
 /**
- * The Android Auto mode's picture on the phone, 5:3 (AaService.PIC_W x
- * PIC_H, what the MMI shows: Android Auto's whole 800x480), drawn by [GlScaler] into this view's surface;
+ * The Android Auto mode's picture on the phone: Android Auto's whole video
+ * in its own shape ([AaService.mode]), drawn by [GlScaler] into this view's
+ * surface (call requestLayout after a new mode);
  * touches on it go to Android Auto ([AaService.touch]) and never move the
  * pages. The surface is handed over when it exists, and given back to the
  * system only once the GL thread has let go of it.
@@ -25,7 +26,8 @@ class AaPreview @JvmOverloads constructor(context: Context, attrs: AttributeSet?
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, w * AaService.PIC_H / AaService.PIC_W)
+        val m = AaService.mode
+        setMeasuredDimension(w, w * m.h / m.w)
     }
 
     override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {

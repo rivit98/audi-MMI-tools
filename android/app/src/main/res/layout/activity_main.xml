@@ -230,6 +230,27 @@
                 android:layout_marginStart="8dp"
                 android:layout_marginEnd="8dp" />
 
+            <LinearLayout style="@style/OptionRow">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minEms="5"
+                    android:text="@string/aa_video_size"
+                    android:textSize="14sp" />
+
+                <Spinner
+                    android:id="@+id/aa_video_size"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:entries="@array/aa_video_sizes" />
+
+                <ImageButton
+                    android:id="@+id/info_aa_video_size"
+                    style="@style/InfoButton" />
+            </LinearLayout>
+
             <include
                 android:id="@+id/aa_options"
                 layout="@layout/stream_options" />

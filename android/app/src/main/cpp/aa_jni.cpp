@@ -152,7 +152,8 @@ std::string text(JNIEnv *env, jstring s)
 extern "C" {
 
 JNIEXPORT jlong JNICALL Java_mmi3g_audistreaming_AaNative_nativeCreate(JNIEnv *env, jclass, jobject cb,
-    jboolean audio, jboolean audio_media, jint margin_w, jint margin_h, jint video_fps, jstring name)
+    jboolean audio, jboolean audio_media, jint margin_w, jint margin_h, jint video_fps, jint video_w,
+    jint video_h, jint dpi, jstring name)
 {
 	log_set_tap(log_tap);
 	aa::Config cfg;
@@ -161,6 +162,9 @@ JNIEXPORT jlong JNICALL Java_mmi3g_audistreaming_AaNative_nativeCreate(JNIEnv *e
 	cfg.margin_w = (unsigned)margin_w;
 	cfg.margin_h = (unsigned)margin_h;
 	cfg.video_fps = (unsigned)video_fps;
+	cfg.video_w = (unsigned)video_w;
+	cfg.video_h = (unsigned)video_h;
+	cfg.dpi = (unsigned)dpi;
 	cfg.display_name = text(env, name);
 	return reinterpret_cast<jlong>(new Native(env, cb, cfg));
 }

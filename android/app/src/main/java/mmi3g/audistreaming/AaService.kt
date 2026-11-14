@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
  *
  * ```
  * Android Auto (head unit server, 127.0.0.1:5277) --TCP--> AaNative session
- *   video 800x480 H.264 --> AaDecoder --> GlScaler (800x480 -> 720x432, bilinear, 25 fps;
+ *   video 800x480 H.264 --> AaDecoder --> GlScaler (whole frame -> 720x432, bilinear, 25 fps;
  *                                         also the touch preview) --> HwEncoder 720x432
  *   --> MmiH264 --> AccessoryLink --> MMI (audi_stream_receiver, DM642)
  *   preview touches --> AaNative.touch --> Android Auto
@@ -45,9 +45,10 @@ import java.util.concurrent.Executors
  * server. This service connects to it on 127.0.0.1:5277, and tries again
  * every [RETRY_MS] until it answers and after every session.
  *
- * The session asks for 800x480 without margins (Android Auto ignores a
- * width margin), and the whole frame is scaled 0.9 into the MMI's 720x432
- * H.264 picture ([AaGeometry]). Only system sounds are advertised: music and navigation stay
+ * The session asks for the chosen video size ([mode]: 800x480, 1280x720,
+ * 1920x1080) without margins (Android Auto ignores a width margin), and the
+ * whole frame is scaled into the MMI's 720x432 H.264 picture with its
+ * shape kept ([AaGeometry]). Only system sounds are advertised: music and navigation stay
  * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
  *
  * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
@@ -85,6 +86,8 @@ class AaService : Service() {
     private val audio = AaAudio()
     private var previewSurface: Surface? = null
     private var pipelineFailed = ""
+    // the video size of the current session ([mode] when it started)
+    @Volatile private var sessionMode = AaGeometry.MODES[0]
     private var refusedNoted: AccessoryLink? = null
     private var sessions = 0
     private var lastEnd = ""
@@ -250,6 +253,16 @@ class AaService : Service() {
         try { s.close() } catch (_: IOException) { }
     }
 
+    /** Ends the session politely (bye-bye), then closes the socket in case
+     * Android Auto doesn't; the net thread connects again. */
+    private fun reconnect(why: String) {
+        handler.post {
+            AppLog.i("AA mode: reconnecting: $why")
+            session?.bye()
+            handler.postDelayed({ closeSocket(why) }, BYE_WAIT_MS)
+        }
+    }
+
     @Synchronized
     private fun write(data: ByteArray) {
         val out = output ?: return
@@ -304,7 +317,10 @@ class AaService : Service() {
     private fun startSession(gen: Int) {
         if (gen != generation || stopping) return
         session?.close()
-        val s = AaNative(callbacks, true, false, 0, 0, "Audi MMI")
+        val m = mode
+        sessionMode = m
+        AppLog.i("AA mode: asking for ${m} video at ${m.dpi} dpi")
+        val s = AaNative(callbacks, true, false, 0, 0, m.w, m.h, m.dpi, "Audi MMI")
         session = s
         sessions++
         fpsDecoded = 0
@@ -396,7 +412,8 @@ class AaService : Service() {
         val caps = Streaming.link?.videoCaps
         val fps = wantFps()
         val e = newEncoder(fps) ?: return false
-        val sc = GlScaler(e.surface!!, PIC_W, PIC_H, AaGeometry.geometry(PIC_W, PIC_H), fps)
+        val g = AaGeometry.geometry(sessionMode, PIC_W, PIC_H)
+        val sc = GlScaler(e.surface!!, PIC_W, PIC_H, g, fps)
         if (!sc.start()) {
             pipelineFailed = "GL: ${sc.error}"
             AppLog.w("AA mode: GL scaler failed: ${sc.error}")
@@ -412,12 +429,12 @@ class AaService : Service() {
         previewSurface?.let { sc.setPreview(it) }
         scaler = sc
         mmi.newEncoder(e, caps?.h264MaxFrame ?: MmiH264.START_FRAME_BYTES * 4)
-        decoder = AaDecoder(input, handler) { why ->
+        decoder = AaDecoder(input, sessionMode, handler) { why ->
             AppLog.w("AA mode: $why")
             pipelineFailed = why
         }
         pipelineFailed = ""
-        AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's top-left ${PIC_W}x$PIC_H 1:1")
+        AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's $sessionMode -> ${g.picW}x${g.picH} in ${PIC_W}x$PIC_H")
         return true
     }
 
@@ -505,7 +522,7 @@ class AaService : Service() {
         val ys = IntArray(n)
         val ids = IntArray(n)
         for (i in 0 until n) {
-            val (x, y) = AaGeometry.touch(e.getX(i), e.getY(i), viewW, viewH)
+            val (x, y) = AaGeometry.touch(e.getX(i), e.getY(i), viewW, viewH, sessionMode)
             xs[i] = x
             ys[i] = y
             ids[i] = e.getPointerId(i)
@@ -545,6 +562,7 @@ class AaService : Service() {
         private const val CONNECT_TIMEOUT_MS = 1000
         private const val RETRY_MS = 2000L
         private const val TICK_MS = 20L
+        private const val BYE_WAIT_MS = 300L
         private const val STATUS_LOG_MS = 5000L
         private const val SETTLE_MS = 700L       // as the mirroring's FPS_SETTLE_MS
         // the MMI's H.264 picture (H264.pictureSize(720, 576)), Android Auto's 800x480 scaled 0.9
@@ -560,6 +578,18 @@ class AaService : Service() {
             private set
         @Volatile var status = ""
             private set
+
+        /** The video size asked for (MainActivity's setting, remembered). */
+        @Volatile var mode = AaGeometry.MODES[0]
+            private set
+
+        /** A new video size: a running session ends and the next one (a
+         * reconnect, [RETRY_MS] later) asks for it. */
+        fun setMode(m: AaGeometry.Mode) {
+            if (m == mode) return
+            mode = m
+            instance?.reconnect("video size $m")
+        }
 
         fun start(context: Context) {
             val i = Intent(context, AaService::class.java)
