@@ -74,7 +74,7 @@ struct Config {
 	unsigned    video_fps = 25;
 	// Pixels of the 800x480 video the phone leaves black (VideoConfiguration
 	// width_margin / height_margin): the car UI is drawn in the rest
-	// (the phone app's Android Auto mode: 80 x 48 leaves 720x432).
+	// (Android Auto ignores width_margin: the UI spans all 800 columns).
 	unsigned    margin_w = 0, margin_h = 0;
 	std::string display_name = "MMI 3G+";
 };

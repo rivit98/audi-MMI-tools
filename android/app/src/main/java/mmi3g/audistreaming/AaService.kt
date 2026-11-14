@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
  *
  * ```
  * Android Auto (head unit server, 127.0.0.1:5277) --TCP--> AaNative session
- *   video 800x480 H.264 --> AaDecoder --> GlScaler (top-left 720x432, 1:1, 25 fps;
+ *   video 800x480 H.264 --> AaDecoder --> GlScaler (800x480 -> 720x432, bilinear, 25 fps;
  *                                         also the touch preview) --> HwEncoder 720x432
  *   --> MmiH264 --> AccessoryLink --> MMI (audi_stream_receiver, DM642)
  *   preview touches --> AaNative.touch --> Android Auto
@@ -45,9 +45,9 @@ import java.util.concurrent.Executors
  * server. This service connects to it on 127.0.0.1:5277, and tries again
  * every [RETRY_MS] until it answers and after every session.
  *
- * The session asks for 800x480 with margins 80 x 48, so Android Auto draws
- * its UI in the top-left 720x432 ([AaGeometry]): the MMI's H.264 picture,
- * copied 1:1. Only system sounds are advertised: music and navigation stay
+ * The session asks for 800x480 without margins (Android Auto ignores a
+ * width margin), and the whole frame is scaled 0.9 into the MMI's 720x432
+ * H.264 picture ([AaGeometry]). Only system sounds are advertised: music and navigation stay
  * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
  *
  * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
@@ -304,8 +304,7 @@ class AaService : Service() {
     private fun startSession(gen: Int) {
         if (gen != generation || stopping) return
         session?.close()
-        val (mw, mh) = AaGeometry.margins(PIC_W, PIC_H)
-        val s = AaNative(callbacks, true, false, mw, mh, "Audi MMI")
+        val s = AaNative(callbacks, true, false, 0, 0, "Audi MMI")
         session = s
         sessions++
         fpsDecoded = 0
@@ -506,7 +505,7 @@ class AaService : Service() {
         val ys = IntArray(n)
         val ids = IntArray(n)
         for (i in 0 until n) {
-            val (x, y) = AaGeometry.touch(e.getX(i), e.getY(i), viewW, viewH, PIC_W, PIC_H)
+            val (x, y) = AaGeometry.touch(e.getX(i), e.getY(i), viewW, viewH)
             xs[i] = x
             ys[i] = y
             ids[i] = e.getPointerId(i)
@@ -548,7 +547,7 @@ class AaService : Service() {
         private const val TICK_MS = 20L
         private const val STATUS_LOG_MS = 5000L
         private const val SETTLE_MS = 700L       // as the mirroring's FPS_SETTLE_MS
-        // the MMI's H.264 picture (H264.pictureSize(720, 576)) = Android Auto's UI
+        // the MMI's H.264 picture (H264.pictureSize(720, 576)), Android Auto's 800x480 scaled 0.9
         const val PIC_W = 720
         const val PIC_H = 432
         const val NO_SERVER = "Waiting for Android Auto's head unit server on this phone."

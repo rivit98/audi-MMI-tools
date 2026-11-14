@@ -9,7 +9,7 @@ import android.view.TextureView
 
 /**
  * The Android Auto mode's picture on the phone, 5:3 (AaService.PIC_W x
- * PIC_H, what the MMI shows), drawn by [GlScaler] into this view's surface;
+ * PIC_H, what the MMI shows: Android Auto's whole 800x480), drawn by [GlScaler] into this view's surface;
  * touches on it go to Android Auto ([AaService.touch]) and never move the
  * pages. The surface is handed over when it exists, and given back to the
  * system only once the GL thread has let go of it.

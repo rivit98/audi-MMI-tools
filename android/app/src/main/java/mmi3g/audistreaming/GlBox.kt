@@ -29,6 +29,10 @@ object GlBox {
      * group (= their average). Odd k: nearest, one tap per pixel. */
     fun linear(k: Int): Boolean = k % 2 == 0
 
+    /** [linear] for g; a [ScreenCrop.Geometry.scaled] kept part is always
+     * bilinear (nearest would drop whole columns). */
+    fun linear(g: ScreenCrop.Geometry): Boolean = g.scaled || linear(g.k)
+
     /** Where to sample, in capture pixels from the output pixel's centre
      * (the centre of its k x k block): (k/2)^2 taps for even k, k^2 odd. */
     fun taps(k: Int): List<Pair<Double, Double>> {
@@ -86,8 +90,8 @@ void main() {
      * right, before the SurfaceTexture's transform (y up from the bottom). */
     fun quadTex(g: ScreenCrop.Geometry): FloatArray {
         val u0 = g.cropX.toFloat() / g.capW
-        val u1 = (g.cropX + g.picW * g.k).toFloat() / g.capW
-        val v0 = 1f - (g.cropY + g.picH * g.k).toFloat() / g.capH
+        val u1 = (g.cropX + g.keptW).toFloat() / g.capW
+        val v0 = 1f - (g.cropY + g.keptH).toFloat() / g.capH
         val v1 = 1f - g.cropY.toFloat() / g.capH
         return floatArrayOf(u0, v0, u1, v0, u0, v1, u1, v1)
     }

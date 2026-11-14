@@ -156,10 +156,10 @@ class GlScaler(
                     oldSurface = inputSurface
                     oldTexture?.setOnFrameAvailableListener(null)
                     newInput(g.capW, g.capH, hd)
-                    useFactor(g.k)
+                    useFactor(g)
                     haveFrame = false          // the old texture's frame is the old shape
-                } else if (g.k != geometry.k) {
-                    useFactor(g.k)
+                } else if (g.k != geometry.k || GlBox.linear(g) != GlBox.linear(geometry)) {
+                    useFactor(g)
                 }
                 quadTex = floats(*GlBox.quadTex(g))
                 geometry = g
@@ -302,7 +302,7 @@ class GlScaler(
         if (!EGL14.eglMakeCurrent(display, surface, surface, context)) fail("eglMakeCurrent")
 
         newInput(geometry.capW, geometry.capH, hd)
-        useFactor(geometry.k)
+        useFactor(geometry)
 
         val np = buildProgram(NOTICE_VERTEX_SHADER, NOTICE_FRAGMENT_SHADER)
         noticeProgram = np
@@ -337,9 +337,9 @@ class GlScaler(
         oldTex = 0
     }
 
-    /** The shader and the texture's filter depend on k. */
-    private fun useFactor(k: Int) {
-        val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(k))
+    /** The shader depends on k, the texture's filter on k and scaling. */
+    private fun useFactor(g: ScreenCrop.Geometry) {
+        val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(g.k))
         if (program != 0) GLES20.glDeleteProgram(program)
         program = p
         aPos = GLES20.glGetAttribLocation(p, "aPos")
@@ -347,7 +347,7 @@ class GlScaler(
         uTexMatrix = GLES20.glGetUniformLocation(p, "uTexMatrix")
         uStepX = GLES20.glGetUniformLocation(p, "uStepX")
         uStepY = GLES20.glGetUniformLocation(p, "uStepY")
-        setFilter(if (GlBox.linear(k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
+        setFilter(if (GlBox.linear(g)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
     }
 
     /** A new capture frame: latched now (the virtual display mustn't wait
@@ -415,7 +415,7 @@ class GlScaler(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         setFilter(GLES20.GL_LINEAR)
         drawPicture(0, 0, size[0], size[1])
-        setFilter(if (GlBox.linear(geometry.k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
+        setFilter(if (GlBox.linear(geometry)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
         if (EGL14.eglSwapBuffers(display, preview)) previewDrawn++
         else {
             Log.w(TAG, "preview swap: EGL 0x${Integer.toHexString(EGL14.eglGetError())}, dropped")

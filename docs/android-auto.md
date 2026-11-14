@@ -156,7 +156,7 @@ mirroring's H.264 path.
 ```
 Android Auto (phone)  --TCP 127.0.0.1:5277-->  AaService (same phone)
    session: src/android_auto through JNI (aa_jni.cpp, NDK, mbedTLS)
-   800x480 H.264 --> MediaCodec decoder --> GlScaler: top-left 720x432, 1:1, Max fps (<= 25)
+   800x480 H.264 --> MediaCodec decoder --> GlScaler: 800x480 -> 720x432 bilinear, Max fps (<= 25)
                                                |--> phone preview (touch input back to AA)
                                                '--> MediaCodec encoder 720x432 --> MmiH264
    --> AOA --> audi_stream_receiver --> DM642 (unchanged)
@@ -170,12 +170,12 @@ then menu, Start head unit server; it listens on 127.0.0.1:5277
 the same session code as the car app (`src/android_auto`, built with the
 NDK). Differences from the car app:
 
-- **Margins put the UI on the MMI's picture.** The session asks for 800x480
-  with `width_margin` 80 and `height_margin` 48. Android Auto draws its UI
-  in the **top-left** 720x432 and leaves the rest black (open-headunit
-  measured top-left anchoring on hardware, `TouchCoordinateMapperTest.kt`).
-  720x432 is the MMI's H.264 picture, so the GPU copies it 1:1: no scaling,
-  sharp text.
+- **The whole frame is scaled to the MMI's picture.** Android Auto ignores
+  a `width_margin` of 80 and draws its UI over all 800 columns [repo, desk
+  test with the phone app and on the car]: a 1:1 copy of the top-left
+  720x432 cut the UI's right edge off. The session asks for 800x480 with no
+  margins, and the GPU scales the whole frame bilinear to 720x432: 0.9 both
+  ways, so the 5:3 shape stays. Text is slightly softer than 1:1.
 - **Frame rate and stream settings.** Android Auto sends up to 30 fps; the
   GPU's frame clock draws exactly "Max fps" a second into the encoder (at
   most 25, the MMI's stream rate) and drops the rest. No ack pacing
@@ -189,17 +189,15 @@ NDK). Differences from the car app:
   the car over Bluetooth like any phone sound. System sounds play through
   the phone's speaker path (`AaAudio`).
 - **Input.** The phone shows the same 720x432 picture; touches on it go to
-  Android Auto as touch events (`Session::touch`). Touch coordinates are the
-  UI's pixels (the margins are right and bottom).
+  Android Auto as touch events (`Session::touch`), mapped back to the
+  800x480 video's pixels.
 - **Modes.** The app has two pages, Screen (mirroring) and Android Auto;
   sliding between them switches the mode, and only one streams to the MMI.
   The MMI side (audi_stream_receiver) is unchanged.
 
 **Open, to check on the phone and car:**
 
-- Whether Android Auto honours the margins as open-headunit says, on this
-  phone's version. Wrong anchoring shows as the UI shifted on the MMI and
-  touches landing off target.
+- Whether the 0.9 scale keeps text readable on the MMI.
 - Latency: Android Auto's encoder, the phone's decoder and encoder, then the
   MMI's ~0.5 s. Estimated 0.6-0.8 s in total [estimate].
 - Phone load: a decoder, the GPU and an encoder at once, plus Android Auto
@@ -223,9 +221,10 @@ NDK). Differences from the car app:
 - **Start the head unit server without the menu.** Not possible from a
   third-party app on 17.4+ as far as open-headunit knows; the app opens
   Android Auto's settings to make it two taps.
-- **1280x720 instead of 800x480** with margins: more pixels for the same
-  UI would let the GPU box-filter 2:1 or 3:2 for even sharper text. Only
-  if 1:1 at 800x480 looks soft on the car.
+- **1280x720 or 1920x1080 instead of 800x480**, with dpi raised to match:
+  more pixels for the same UI, scaled down by more for sharper text. Android
+  Auto ignores the width margin, so these 16:9 frames don't fit 5:3 without
+  cropping or black bars. Only if 0.9 at 800x480 looks soft on the car.
 - **A plain mirror fallback:** if self mode fails, mirroring Android Auto's
   own phone-screen UI is not possible either (Google removed it); the
   Screen page with Google Maps is the fallback.

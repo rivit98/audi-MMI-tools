@@ -22,7 +22,9 @@ object ScreenCrop {
     val NONE = Insets()
 
     /** The virtual display is capW x capH; the kept part starts at
-     * (cropX, cropY) and is picW * k x picH * k of it. */
+     * (cropX, cropY) and is keptW x keptH of it: picW * k x picH * k (box
+     * filtered k:1), or any other size, then [scaled] bilinear into the
+     * picture (the Android Auto mode: 800x480 -> 720x432). */
     data class Geometry(
         val capW: Int,
         val capH: Int,
@@ -31,7 +33,11 @@ object ScreenCrop {
         val picW: Int,
         val picH: Int,
         val k: Int,
-    )
+        val keptW: Int = picW * k,
+        val keptH: Int = picH * k,
+    ) {
+        val scaled: Boolean get() = keptW != picW * k || keptH != picH * k
+    }
 
     /** [insets], or none if they would take too much of the screen: that
      * can't be a navigation bar. */
