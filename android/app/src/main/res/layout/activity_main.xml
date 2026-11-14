@@ -69,21 +69,6 @@
 
     <LinearLayout style="@style/OptionRow">
 
-        <Switch
-            android:id="@+id/details"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:enabled="false"
-            android:text="@string/details" />
-
-        <ImageButton
-            android:id="@+id/info_details"
-            style="@style/InfoButton" />
-    </LinearLayout>
-
-    <LinearLayout style="@style/OptionRow">
-
         <TextView
             android:id="@+id/fps_label"
             android:layout_width="wrap_content"

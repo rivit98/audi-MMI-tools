@@ -20,7 +20,6 @@ constexpr unsigned kDetailMax = 119;
 struct Model {
 	LinkState   state = LinkState::NoStack;
 	std::string detail;
-	bool        details = false;  // status bar over a landscape picture
 	unsigned    version = 0;      // bumped on every change
 };
 
@@ -29,8 +28,6 @@ unsigned version();
 
 // Logs the transition.
 void set_state(LinkState state, const char *detail);
-// VIDEO_DETAILS from the phone. Logs a change.
-void set_details(bool show);
 
 } // namespace model
 

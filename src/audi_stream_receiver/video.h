@@ -17,8 +17,7 @@
 //
 // Portrait vs landscape is the picture's own shape (w < h = portrait). The
 // MMI tells the phone which box each fits in (VIDEO_CAPS); ui.cpp lays the
-// screen out to match: landscape on the whole screen (a slim status bar
-// over it only on the phone's VIDEO_DETAILS), portrait on the left with
+// screen out to match: landscape alone on the whole screen, portrait on the left with
 // the status panel beside it.
 #ifndef AUDI_STREAM_VIDEO_H
 #define AUDI_STREAM_VIDEO_H
@@ -35,7 +34,6 @@ extern "C" {
 
 namespace video {
 
-constexpr int kTopbarH = 28;                  // status bar over a landscape picture
 constexpr u32 kMaxBytes = 512u * 1024;   // one JPEG
 
 struct View {

@@ -38,12 +38,8 @@
 //                            decode_ms). Not to be reused.
 //   VIDEO_STOP  0x09  phone  (empty) streaming ended, back to the status
 //                            screen. The phone forgets what it had in flight.
-//   VIDEO_DETAILS 0x0A phone show u8: 1 = the status bar (state, video
-//                            stats) over a landscape picture, 0 = the
-//                            picture alone (the MMI's default). Sent on
-//                            the MMI's HELLO / HELLO_REPLY and whenever
-//                            the user flips it. Portrait always has its
-//                            status panel beside the picture.
+//   (0x0A)                   retired: VIDEO_DETAILS, a status bar over a
+//                            landscape picture. Not to be reused.
 //   VIDEO_ACKS  0x0D  MMI    shown u16, bad u16, dropped u16: this many more
 //                            pictures are done, since the last VIDEO_ACKS,
 //                            in the order they were sent. The phone counts
@@ -115,7 +111,6 @@ enum Type : u8 {
 	kVideoStart = 0x06,
 	kVideoData = 0x07,
 	kVideoStop = 0x09,
-	kVideoDetails = 0x0A,
 	kH264Config = 0x0B,
 	kH264Status = 0x0C,
 	kVideoAcks = 0x0D,
@@ -147,7 +142,6 @@ constexpr unsigned kVideoCapsLen = 22;   // 13 without the H.264 limits
 constexpr unsigned kH264ConfigMin = 11;  // fps, frame_bytes, two lengths, 1-byte SPS/PPS
 constexpr unsigned kVideoStartLen = 11;  // the least; 13 with phone_ms
 constexpr unsigned kVideoAcksLen = 6;
-constexpr unsigned kVideoDetailsLen = 1;
 
 constexpr unsigned kHdr = 3;
 constexpr unsigned kMaxPayload = 2048;

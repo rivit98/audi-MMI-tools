@@ -136,11 +136,6 @@ class AccessoryLink(
         write(Proto.streamSettings(text))
     }
 
-    /** The MMI's status bar over a landscape picture on / off. */
-    fun sendDetails(show: Boolean) {
-        write(Proto.videoDetails(show))
-    }
-
     fun close(reason: String) {
         if (closed) return
         closed = true

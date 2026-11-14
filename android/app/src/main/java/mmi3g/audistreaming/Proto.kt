@@ -15,11 +15,10 @@ package mmi3g.audistreaming
  *   retired), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
  *   format u8, size u32, phoneMs u16 = scale + encode time, for the MMI's
  *   perf log; older MMI apps ignore it), VIDEO_DATA 0x07 (phone: id u16 + bytes),
- *   VIDEO_STOP 0x09 (phone, empty), VIDEO_DETAILS 0x0A (phone: show u8, 1 =
- *   the MMI's status bar over a landscape picture, 0 = the picture alone),
- *   VIDEO_ACKS 0x0D (MMI: shown u16, bad u16, dropped u16: this many more
+ *   VIDEO_STOP 0x09 (phone, empty), VIDEO_ACKS 0x0D (MMI: shown u16, bad u16, dropped u16: this many more
  *   pictures are done; a JPEG at once, H.264 frames in batches). 0x08 was
- *   VIDEO_ACK, one per picture, retired. STREAM_SETTINGS 0x0E (phone: ASCII
+ *   VIDEO_ACK, one per picture, retired; 0x0A was VIDEO_DETAILS (a status
+ *   bar over a landscape picture), retired. STREAM_SETTINGS 0x0E (phone: ASCII
  *   "key=value ...", the settings streaming runs with, for the MMI's log
  *   only; older MMI apps log it as unknown and ignore it).
  *
@@ -39,7 +38,6 @@ object Proto {
     const val VIDEO_START = 0x06
     const val VIDEO_DATA = 0x07
     const val VIDEO_STOP = 0x09
-    const val VIDEO_DETAILS = 0x0A
     const val H264_CONFIG = 0x0B
     const val H264_STATUS = 0x0C
     const val VIDEO_ACKS = 0x0D
@@ -117,9 +115,6 @@ object Proto {
         }
         return encode(STREAM_SETTINGS, b)
     }
-
-    fun videoDetails(show: Boolean): ByteArray =
-        encode(VIDEO_DETAILS, byteArrayOf(if (show) 1 else 0))
 
     /** One picture (format FMT_*) as VIDEO_START + VIDEO_DATA frames, back
      * to back. phoneMs: what scaling and encoding it took. */

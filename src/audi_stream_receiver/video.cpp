@@ -110,7 +110,7 @@ unsigned fps_x10(unsigned now)
 void init(int screen_w, int screen_h)
 {
 	land_w = screen_w;
-	land_h = screen_h;                   // the status bar goes over it
+	land_h = screen_h;
 	port_w = screen_w / 2;
 	port_h = screen_h;
 	log_msg("video: boxes landscape %dx%d, portrait %dx%d, max %u bytes",

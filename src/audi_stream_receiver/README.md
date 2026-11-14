@@ -67,9 +67,8 @@ plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACKS` (how
 many more pictures are shown / bad / dropped). The phone counts what it has
 in flight down by their sum, in no particular order: it keeps no ids. If
 nothing comes back for 3 s with pictures in flight, it starts counting from
-zero. `VIDEO_STOP` (or the link going down) brings back the status screen. `VIDEO_DETAILS` (`show u8`) switches the status bar
-over a landscape picture; the phone sends it on every connection, and the
-MMI starts with it off. `STREAM_SETTINGS` (`0x0E`, ASCII `key=value ...`)
+zero. `VIDEO_STOP` (or the link going down) brings back the status screen. `0x0A` (a status bar over a landscape
+picture) is retired, not to be reused. `STREAM_SETTINGS` (`0x0E`, ASCII `key=value ...`)
 carries the phone app's settings for the MMI's log only. The phone sends it when
 streaming starts on a link and whenever a setting changes, and logs the same line
 itself (`settings sent:`):
@@ -128,8 +127,7 @@ confirmed on the car.
 The picture keeps the phone's shape, never rotated or stretched:
 
 - **Landscape** (w ≥ h): centred on the whole screen (800×368 for a 19.5:9
-  phone). *Details on the MMI* draws a 28 px status bar over the top
-  (state, fps, decode and copy times).
+  phone), alone: the state and video stats are in the log.
 - **Portrait**: full height on the left (220×480), the status panel in the
   remaining ~580 px.
 
@@ -238,9 +236,8 @@ just missing. `make plot-test` checks the parsing.
    accessory: accept, and the bar turns green, *Connected*.
 3. On the phone, tap **Stream screen** and allow the screen capture. The
    phone's screen appears on the MMI: landscape on the whole screen,
-   portrait on the left half with the status panel beside it. The
-   phone's *Details on the MMI* switch adds a slim status bar over a
-   landscape picture. *Format* on the phone picks H.264 (the
+   portrait on the left half with the status panel beside it.
+   *Format* on the phone picks H.264 (the
    default) or JPEG.
 4. Use the phone as usual. Back, Home, other apps, turning the phone,
    unplugging and replugging all keep the stream going. Stop it in the
@@ -403,8 +400,7 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
   `DEV_NOANSWER` (docs/usb-stack.md).
 
 **JPEG pictures.** Work, turning the phone included (landscape
-800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped;
-*Details* on/off works.
+800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped.
 
 | | full VFB copy | changed-span copy (`copy=changed`) |
 |---|---|---|

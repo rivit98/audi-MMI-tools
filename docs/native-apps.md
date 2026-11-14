@@ -603,7 +603,7 @@ after ~18 s. Both are handled by retrying.
 **Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, at most 2048 B. `HELLO`/`HELLO_REPLY`,
 `VIDEO_CAPS`, `VIDEO_START` + `VIDEO_DATA` chunks, `VIDEO_ACKS`,
-`VIDEO_STOP`, `VIDEO_DETAILS`. Types `0x02`/`0x03`/`0x08` are retired: don't
+`VIDEO_STOP`. Types `0x02`/`0x03`/`0x08`/`0x0A` are retired: don't
 reuse them.
 
 **Screen streaming, measured:** JPEG pictures, two in flight,

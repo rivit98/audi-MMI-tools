@@ -3,11 +3,8 @@
 //   no picture  status bar coloured by link state, its detail line, what
 //               to do next on the phone (large, word-wrapped), and a
 //               footer: the status panel, full width.
-//   landscape   the picture centred on the whole screen; a slim status bar
-//   picture     (state, detail, video stats) over its top only when the
-//               phone asks for details (VIDEO_DETAILS). A 19.5:9 phone
-//               (800x368) leaves 56 px above the picture, so the bar
-//               covers none of it.
+//   landscape   the picture centred on the whole screen, alone (state
+//   picture     and video stats are in the log).
 //   portrait    the picture on the left, full height; the status panel in
 //   picture     the rest of the width, with the video stats as its body.
 //
@@ -137,17 +134,6 @@ void cpu_text(char *out, usize cap)
 		std::snprintf(out, cap, "cpu %d%% unit %d%%%s", self, unit, high ? " HIGH" : "");
 }
 
-void video_stats(char *out, usize cap, const video::View *v)
-{
-	char cpu[48];
-
-	cpu_text(cpu, sizeof(cpu));
-	std::snprintf(out, cap, "video %u.%u fps  %dx%d  %u KB %s  dec %u ms  out %u ms  %s",
-	              v->fps_x10 / 10, v->fps_x10 % 10, v->frame.w, v->frame.h,
-	              (v->bytes + 512) / 1024, proto::fmt_name(v->format), v->decode_ms,
-	              v->present_ms, cpu);
-}
-
 // The video stats one per line, for the portrait panel.
 void draw_video_lines(canvas *c, int x0, int y, const video::View *v)
 {
@@ -221,22 +207,10 @@ void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *ou
 	          c->h - kFooterH + (kFooterH - font_small.h) / 2, line, -1, kDim);
 }
 
-void render_landscape(canvas *c, const model::Model &m, const video::View *v)
+void render_landscape(canvas *c, const video::View *v)
 {
-	char line[160];
-
 	canvas_fill(c, 0, 0, c->w, c->h, kVideoBg);
 	blit(c, &v->frame, (c->w - v->frame.w) / 2, (c->h - v->frame.h) / 2);
-	if (!m.details)
-		return;
-
-	canvas_fill(c, 0, 0, c->w, video::kTopbarH, state_colour(m.state));
-	std::snprintf(line, sizeof(line), "%s  %s", state_title(m.state), m.detail.c_str());
-	text_draw(c, &font_small, kMargin, (video::kTopbarH - font_small.h) / 2, line, -1, kText);
-	video_stats(line, sizeof(line), v);
-	int x = c->w - kMargin - utf8_count(line, (int)std::strlen(line)) * font_small.w;
-	canvas_fill(c, x - kMargin, 0, c->w - x + kMargin, video::kTopbarH, state_colour(m.state));
-	text_draw(c, &font_small, x, (video::kTopbarH - font_small.h) / 2, line, -1, kText);
 }
 
 void render_portrait(canvas *c, const model::Model &m, const char *out_dir, const video::View *v)
@@ -262,7 +236,7 @@ void render(canvas *c, const char *out_dir)
 	else if (v->portrait)
 		render_portrait(c, m, out_dir, v);
 	else
-		render_landscape(c, m, v);
+		render_landscape(c, v);
 }
 
 } // namespace ui

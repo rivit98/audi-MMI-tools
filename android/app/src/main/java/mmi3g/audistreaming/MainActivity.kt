@@ -46,11 +46,7 @@ import android.widget.TextView
  * comparison) and "Capture mode" (the MMI's field mode, sent in H264_CONFIG)
  * apply to H.264 only, also remembered. "Latency clock" shows a big running
  * clock (seconds.milliseconds, redrawn every display frame) that the MMI
- * mirrors: one photo of both screens gives the delay. "Details on the MMI" puts the MMI's status
- * bar (state, fps, timings) over a landscape picture; off, the picture has
- * the screen to itself. Portrait always shows the MMI's status panel. The
- * switch is remembered and sent again on every connection (the MMI starts
- * with it off). "Keep screen on" (remembered) has CaptureService hold the
+ * mirrors: one photo of both screens gives the delay. "Keep screen on" (remembered) has CaptureService hold the
  * screen on while it streams, so a timeout can't lock the phone and end the
  * stream. Every option has an info button that explains it (setUpInfo). Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
@@ -73,7 +69,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var statusView: TextView
     private lateinit var detailView: TextView
     private lateinit var streamButton: Button
-    private lateinit var detailsSwitch: CompoundButton
     private lateinit var fpsLabel: TextView
     private lateinit var videoView: TextView
     private lateinit var clockView: TextView
@@ -134,12 +129,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         streamButton = findViewById(R.id.stream)
         videoView = findViewById(R.id.video_status)
         streamButton.setOnClickListener { toggleStreaming() }
-        detailsSwitch = findViewById(R.id.details)
-        detailsSwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(PREF_DETAILS, false)
-        detailsSwitch.setOnCheckedChangeListener { _, on ->
-            getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_DETAILS, on).apply()
-            link?.sendDetails(on)
-        }
         clockView = findViewById(R.id.clock)
         findViewById<CompoundButton>(R.id.clock_switch).setOnCheckedChangeListener { _, on -> setClock(on) }
         fpsLabel = findViewById(R.id.fps_label)
@@ -340,7 +329,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         val caps = l?.videoCaps
         streamButton.text = getString(if (Streaming.running) R.string.stream_stop else R.string.stream_start)
         streamButton.isEnabled = Streaming.running || caps != null
-        detailsSwitch.isEnabled = caps != null
         videoView.text = when {
             Streaming.running && l != null -> {
                 val v = l.video
@@ -416,7 +404,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
 
     override fun onPeerHello(peer: String) {
         setStatus(Status.CONNECTED, peer)
-        link?.sendDetails(detailsSwitch.isChecked)
     }
 
     override fun onClosed(closed: AccessoryLink, reason: String) {
@@ -428,7 +415,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     companion object {
         private const val ACTION_PERMISSION = "mmi3g.audistreaming.USB_PERMISSION"
         private const val REQ_CAPTURE = 1
-        private const val PREF_DETAILS = "details"
         private const val PREF_FPS = "max_fps"
         private const val PREF_FORMAT = "format"
         private const val PREF_BIT_RATE = "bit_rate"
@@ -438,7 +424,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
         private val INFO = listOf(
             Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
-            Triple(R.id.info_details, R.string.info_details_title, R.string.info_details),
             Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
             Triple(R.id.info_format, R.string.info_format_title, R.string.info_format),
             Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),

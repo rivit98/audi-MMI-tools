@@ -55,14 +55,4 @@ void set_state(LinkState state, const char *detail)
 	}
 }
 
-void set_details(bool show)
-{
-	std::lock_guard<std::mutex> lock(mu);
-	if (current.details != show) {
-		log_msg("details over a landscape picture: %s", show ? "on" : "off");
-		current.details = show;
-		current.version++;
-	}
-}
-
 } // namespace model

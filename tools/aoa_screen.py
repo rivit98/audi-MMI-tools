@@ -31,7 +31,7 @@ FREEZE_S = 1.0
 FPS_WINDOW_S = 2.0
 REFRESH_HZ = 30
 
-STATUS_H, DETAIL_Y, BODY_TOP, FOOTER_H, MARGIN, TOPBAR_H = 48, 54, 80, 24, 12, 28  # = ui.cpp, video.h
+STATUS_H, DETAIL_Y, BODY_TOP, FOOTER_H, MARGIN = 48, 54, 80, 24, 12  # = ui.cpp
 STRIP_H = 22
 C_BG, C_TEXT, C_DIM = (0x10, 0x18, 0x20), (0xE8, 0xE8, 0xE8), (0x8A, 0x92, 0x9E)
 C_FOOTER_BG, C_RULE, C_VIDEO_BG = (0x1C, 0x28, 0x36), (0x2A, 0x36, 0x44), (0, 0, 0)
@@ -90,7 +90,6 @@ class ScreenState:
 
     link: str = "waiting"
     detail: str = ""
-    details_bar: bool = False
     mode: str | None = None  # "h264", "jpeg" or None for no picture
     picture: pygame.Surface | None = None
     size: tuple[int, int] = (0, 0)
@@ -125,11 +124,6 @@ class ScreenModel:
         """The link state changed."""
         with self.lock:
             self.state.link, self.state.detail = head["state"], head["detail"]
-
-    def on_details(self, head: dict, _body: bytes) -> None:
-        """VIDEO_DETAILS: the status bar over a landscape picture."""
-        with self.lock:
-            self.state.details_bar = head["on"]
 
     def on_h264_config(self, _head: dict, body: bytes) -> None:
         """A new stream: black until its first frame after H.264, else the panel until then."""
@@ -210,25 +204,17 @@ class Painter:
         elif s.mode == "jpeg" and s.size[0] < s.size[1]:
             self.portrait(s, now)
         elif s.mode == "jpeg":
-            self.landscape(s, now)
+            self.landscape(s)
         else:
             self.target.fill(C_BG)
             self.panel(s, 0, SCREEN_W, now)
         if strip:
             self.strip(s, now)
 
-    def landscape(self, s: ScreenState, now: float) -> None:
-        """A landscape picture centred, the status bar on top if asked for."""
+    def landscape(self, s: ScreenState) -> None:
+        """A landscape picture centred, alone."""
         self.target.fill(C_VIDEO_BG)
         self.target.blit(s.picture, ((SCREEN_W - s.size[0]) // 2, (SCREEN_H - s.size[1]) // 2))
-        if s.details_bar:
-            colour, title, _ = LINKS[s.link]
-            self.target.fill(colour, (0, 0, SCREEN_W, TOPBAR_H))
-            self.text(self.small, (MARGIN, 7), f"{title}  {s.detail}", C_TEXT)
-            stats = f"video {s.fps(now):.1f} fps  {s.size[0]}x{s.size[1]}  {s.bytes // 1024} KB"
-            x = SCREEN_W - MARGIN - self.small.size(stats)[0]
-            self.target.fill(colour, (x - MARGIN, 0, SCREEN_W - x + MARGIN, TOPBAR_H))
-            self.text(self.small, (x, 7), stats, C_TEXT)
 
     def portrait(self, s: ScreenState, now: float) -> None:
         """A portrait picture on the left, the status panel in the rest."""

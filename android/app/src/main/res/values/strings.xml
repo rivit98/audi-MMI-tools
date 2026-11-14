@@ -5,7 +5,6 @@
     <string name="stream_start">Stream screen</string>
     <string name="stream_stop">Stop stream</string>
     <string name="max_fps">Max %1$d fps</string>
-    <string name="details">Details on the MMI (landscape)</string>
     <string name="format">Format</string>
     <string name="latency_clock">Latency clock</string>
     <string name="keep_screen_on">Keep screen on while streaming</string>
@@ -14,8 +13,6 @@
     <string name="info_about">About %1$s</string>
     <string name="info_stream_title">Stream screen</string>
     <string name="info_stream">Starts or stops sending this phone\'s screen to the MMI. It can be tapped once the phone is connected to audi_stream_receiver on the MMI, and Android asks to allow the capture each time.\n\nStreaming carries on when you switch apps, turn the phone, or unplug and replug. It ends when you stop it here or from its notification, and when the phone locks.\n\nDon\'t start or stop it while reversing: that can hide the rear camera picture until the next time the camera comes on.</string>
-    <string name="info_details_title">Details on the MMI</string>
-    <string name="info_details">JPEG only, landscape only: draws a slim status bar over the top of the picture (state, fps, decode and copy times). Off, the picture has the screen to itself.\n\nIn portrait, JPEG always shows a status panel beside the picture. H.264 never shows the bar or the panel.\n\nIt can be changed once the MMI is connected, and is remembered.</string>
     <string name="info_fps_title">Max fps</string>
     <string name="info_fps">The most pictures a second the phone sends (1 to 25). Set it to 25 for smooth video in H.264: that is the rate the MMI\'s video stream runs at, so 25 is the limit.\n\nH.264: lower means choppier motion but no extra delay, because the MMI fills the gaps by repeating the last picture. A still screen sends fewer frames anyway.\n\nJPEG: the MMI manages about 3 a second, so high values change little.\n\nThe line next to Stop stream shows the rate the MMI really achieves.</string>
     <string name="info_format_title">Format</string>

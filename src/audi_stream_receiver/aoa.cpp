@@ -438,10 +438,6 @@ void Link::on_frame(u8 type, const u8 *p, unsigned n)
 		if (!hello_seen_)
 			set_peer(kPhoneApp, sizeof(kPhoneApp) - 1);
 		break;
-	case proto::kVideoDetails:
-		if (n >= proto::kVideoDetailsLen)
-			model::set_details(p[0] != 0);
-		break;
 	case proto::kStreamSettings:
 		log_text("rx STREAM_SETTINGS", p, n);
 		break;

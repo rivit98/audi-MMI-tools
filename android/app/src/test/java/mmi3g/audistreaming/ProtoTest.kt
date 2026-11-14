@@ -31,12 +31,6 @@ class ProtoTest {
     }
 
     @Test
-    fun videoDetailsIsOneByte() {
-        assertArrayEquals(byteArrayOf(0x0A, 1, 0, 1), Proto.videoDetails(true))
-        assertArrayEquals(byteArrayOf(0x0A, 1, 0, 0), Proto.videoDetails(false))
-    }
-
-    @Test
     fun streamSettingsIsPrintableAscii() {
         val f = Proto.streamSettings("format=H264 fps=25 é")
         assertArrayEquals(byteArrayOf(0x0E, 20, 0), f.copyOfRange(0, 3))
