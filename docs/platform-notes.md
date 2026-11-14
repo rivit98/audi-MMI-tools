@@ -412,38 +412,29 @@ MMI3GApplication's audio management switches it on per connection.
   | `0x7a` | `LC_SRCSYSANN3_BEEP` | system beep (also `0x78` PRIO2, `0x79` WARN) |
   | `0x04` | `LC_SRCAPSANN` | parking aid (APS) |
 
-  Clients open and close them with the AudioManagement DSI service:
-  `requestRequestConnection(lc, terminal, group)` /
-  `requestReleaseConnection(lc, terminal)` (CAudioManagementPresCtrl), with
-  `responseStartConnection` / `responseFadedIn` / `responseStopConnection`
-  back. Java has the same as `DSIAudioManagement.requestConnection(int)` /
-  `releaseConnection(int)`. MMI3GNavigation has its own native client
-  (`CGNavDevAMClient`, `CSGAudioManagementProxy`).
+  The Java HMI opens and closes them with the AudioManagement DSI service
+  (`DSIAudioManagement.requestConnection(int)` / `releaseConnection(int)`;
+  CAudioManagementPresCtrl logs `requestRequestConnection(lc, terminal,
+  group)`). Native processes ask AudioManagementDevCtrl instead, over HBDSI
+  ([hbdsi.md](hbdsi.md)): `SGAudioManagement` `RequestAudioFocus(source,
+  sink)` / `ReleaseAudioFocus`. `eSRC_NAVTTS` (55) with `eSNK_SPEAKERS` (0) is
+  logical source `0xE`, the nav voice.
 - **The ducking.** `CAudioMixer::calculateTargetVolume` (`FUN_080f5054`):
-  while one of the nav sources (internal source ids `0xe`, `0xc`, `0x11`,
-  `0x4d`, `0x4e`) is active, each entertainment sink's target volume is
-  capped at the "lower entertainment" level for nav (log: `NAV is active =>
-  attenuate Volume of Sink %d to %x`). APS does the same with its own
-  level. The level is the user's Sound setting
-  (`requestSetLoweringEntertainment(…, EntType, Value)`). The prompt plays
-  at the nav announcement volume, not the entertainment volume.
-- **Transport.** DSI goes through `/usr/bin/servicebroker` (a resmgr; QNX
-  messages, `MsgSendv` / `MsgSendPulse`). The JVM uses it directly
-  (`DSI_MAXPACKETLENGTH=16384` in lsd's environment).
+  while one of the nav logical sources (`0xE`, `0xC`, `0x11`, `0x4D`, `0x4E`;
+  `0xE` = `eSRC_NAVTTS`, `0xC` = `eSRC_NAVTTS_NOTEL`) is active, each
+  entertainment sink's target volume is capped at the "lower entertainment"
+  level for nav (log: `NAV is active => attenuate Volume of Sink %d to %x`).
+  APS does the same with its own level. The level is the user's Sound
+  setting (`requestSetLoweringEntertainment(…, EntType, Value)`). The
+  prompt plays at the nav announcement volume, not the entertainment
+  volume.
 
-So an app that wants the radio lowered under its sound should:
-open `0x74` → wait for `responseStartConnection` (or `FadedIn`) → write
-22050 Hz mono S16 to `navi` with QSA → drain → release `0x74`. The amplifier
-restores the radio on release. **[inferred: no app of ours has opened a
-connection yet]** Two ways to open it:
-
-1. a native DSI client that talks to servicebroker like
-   `CSGAudioManagementProxy` does (the wire format still has to be read
-   from MMI3GNavigation); no system file changes, or
-2. a Java OSGi bundle in the DSITracer.jar slot (the toolkit's `per3-reader`
-   mechanism) that calls `DSIAudioManagement.requestConnection` and takes
-   orders from our app over a local socket. The Java int for each
-   connection still has to be checked against the native enum.
+So an app that wants the radio lowered under its sound should do what the
+navigation does: `RequestAudioFocus(eSRC_NAVTTS, eSNK_SPEAKERS)` over HBDSI,
+write its PCM to `navi` with QSA, then `ReleaseAudioFocus`. The amplifier
+restores the radio on release. hello5 step `d` does exactly this, with a
+control of pings on `navi` without the focus. **[inferred: built, not yet
+run on the car]**
 
 ### Why the graph volume does nothing
 

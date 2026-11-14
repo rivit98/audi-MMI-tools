@@ -106,6 +106,7 @@ PROC   := $(call common,proc)
 IMGDEC := $(call common,imgdec) src/common/stb_image.h
 CPUMON := $(call common,cpumon cpustat slogmark)
 IOM    := $(call common,iom)
+HBDSI  := $(call common,hbdsi hbdsi_wire)
 UI     := $(call commonxx,ui)
 LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vout hw_stream) src/common/camera_log.h $(IOM)
 
@@ -194,8 +195,9 @@ LIBS_hello4 := -lGLES_CM -lgf -lm
 # hello5: no GL. Its screen (what to do, which ping is playing, for a phone
 # video) is CPU-drawn. Its ping trains (pulse.c) and step g's mixer chimes
 # are played by the unit's testapp-file, started with proc.c, and by its
-# own io-media client (common/iom.c, step n).
-build/hello5: $(wildcard src/hello5/*.c src/hello5/*.h) $(BASE) $(SCREEN) $(PROC) $(IOM)
+# own io-media client (common/iom.c, step n). Step d asks audio management
+# for the nav voice channel over HBDSI (common/hbdsi.c).
+build/hello5: $(wildcard src/hello5/*.c src/hello5/*.h) $(BASE) $(SCREEN) $(PROC) $(IOM) $(HBDSI)
 LIBS_hello5 := -lasound -lgf
 # hello6: mirroring assumptions (docs/phone-mirroring.md). GL benchmarks,
 # CPU-drawn instruction screens, the unit's tools for video.
@@ -417,7 +419,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_keys build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto
+           build/test_pulse build/test_keys build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -464,6 +466,8 @@ build/test_layout: tests/test_layout.c tests/check.h src/pngondemand/layout.c \
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
 # hello5's ping train and WAV header
 build/test_pulse:  tests/test_pulse.c tests/check.h src/hello5/pulse.c src/hello5/pulse.h
+# the HBDSI wire format (common/hbdsi_wire.c): broker attach, messages, listing
+build/test_hbdsi:  tests/test_hbdsi.c tests/check.h src/common/hbdsi_wire.c src/common/hbdsi_wire.h
 # hello7's ch8 decoding, on messages logged from the car
 build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/keys.h
 # hello8's checks with the host's own libstdc++ (C++, so its own rule)

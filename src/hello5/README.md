@@ -12,9 +12,20 @@ playing:
 | `n` | Through hello5's own io-media client (`iom.c`, no `testapp-file`): are pings 4–6, at its own volume 0, silent? Do three queued files keep the 2 s beat? Every io-media event is logged with its time. |
 | `t` | After switching to music with MEDIA, does our output still play, and does the music keep playing between the pings? |
 | `v` | Do the pings follow the car's volume knob? Clicks are counted on screen. Last, so a volume left low can't spoil another step. |
+| `d` | Over a lowered radio: hello5 asks audio management for the nav voice channel, as the navigation does (does the radio get quieter?), plays 6 pings on io-audio `navi` while it is open (heard over it?), gives it back (radio back?), then plays 3 control pings with no channel (silent?). |
 | `g` | The output survey: group N = N chimes (`beep.wav`) on each mixer output or io-audio device. |
 
 Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
+
+Step `d` talks to MMI3GApplication over HBDSI ([docs/hbdsi.md](../../docs/hbdsi.md),
+`common/hbdsi.c`): it attaches to `SGAudioManagement` through the
+servicebroker, connects, and sends `RequestAudioFocus(eSRC_NAVTTS,
+eSNK_SPEAKERS)`. Then it writes its pings to io-audio `navi` and sends
+`ReleaseAudioFocus`. It always releases before it exits. Every HBDSI step
+and every message the server sends back goes to `hello5.log`. The broker's
+interface list goes to `var/hello5_broker.txt`. Run it with
+`hello5 <sd> d` (apps.conf). **Status: built and host-tested
+(`tests/test_hbdsi.c`), not yet run on the car.**
 
 - **Run:** `hello5 <sd_path> [steps] [outputs]`. The default steps are
   `mntv`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).

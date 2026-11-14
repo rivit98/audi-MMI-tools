@@ -24,6 +24,10 @@
  *      screen and every ch8 message is logged with its time.
  *   t  the driver switches to music (MEDIA): does our output still attach
  *      while the MME plays, and does the music keep playing between pings?
+ *   d  the nav voice channel: hello5 asks audio management for it over
+ *      HBDSI, as the navigation does (does the radio get quieter?), plays
+ *      pings on io-audio "navi" while it is open, gives it back, then plays
+ *      3 control pings with no channel (play_duck below).
  * The train is written to /tmp (RAM) first: an app should not need the SD
  * card for its sound. If io-media does not play it from there, the step
  * retries from a copy on the card. The /tmp files are deleted at exit.
@@ -119,7 +123,7 @@
  * (src/common/quit.c). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
- *   steps: any of "mnvtg", run in that order (default mntv)
+ *   steps: any of "mnvtdg", run in that order (default mntv)
  *   outputs: step g's groups, comma-separated, one group each: mK =
  *   mixers[K], a number = an io-audio dindex (default m2,m1,m6,m4,m7)
  * Step g plays <sd_path>/beep.wav.
@@ -136,6 +140,7 @@
 
 #include <sys/asoundlib.h>
 
+#include "hbdsi.h"
 #include "log.h"
 #include "proc.h"
 #include "quit.h"
@@ -1059,6 +1064,252 @@ static int play_native(const struct step *s, const char *log_file, struct play *
 	return native_play(file, one, s->pings, s->chain, p);
 }
 
+/* ---- step d: the nav voice channel, ducking the radio ---- */
+
+/* The car mixes the nav voice over a lowered radio: audio management opens
+ * an amplifier announcement channel for it, and caps the radio at the
+ * "lower entertainment" level while it is open. MMI3GNavigation asks for
+ * that channel over HBDSI (common/hbdsi.c): servicebroker attach to
+ * SGAudioManagement, ConnectRequest, then RequestAudioFocus(src, sink);
+ * eSRC_NAVTTS/eSNK_SPEAKERS is logical source 0xe, one of the "NAV is
+ * active" sources (docs/platform-notes.md section 9). The voice itself is
+ * PCM on io-audio "navi", where hello5's chimes were never heard: nothing
+ * had opened the channel. Step d does both, the way the nav does:
+ *   1  ask for the channel, no sound (6 s): is the radio quieter?
+ *   2  6 pings on navi while it is open: heard over the quieter radio?
+ *   3  give the channel back (6 s): is the radio back to normal?
+ *   4  control: 3 pings on navi with no channel: silent, as before?
+ * Every HBDSI step is logged, so a failure says where it stopped. The
+ * broker's interface list goes to var/hello5_broker.txt. */
+
+#define DUCK_IFACE        "SGAudioManagement"
+#define DUCK_TIMEOUT_MS   2000          /* for a server's reply */
+#define DUCK_HOLD_MS      6000          /* phases 1 and 3 */
+#define DUCK_PINGS        6             /* phase 2 */
+#define DUCK_CONTROL      3             /* phase 4 */
+#define DUCK_DEVICE       1             /* io-audio "navi" (dindex 1) */
+#define DUCK_CHUNK_MS     250           /* PCM written this much at a time */
+
+static const struct step *duck_step;
+static int duck_index, duck_count;
+static char duck_note[96];
+
+static void duck_screen(const char *text, const char *question, const char *big,
+                        int playing)
+{
+	ui_step(duck_index, duck_count, duck_step->title, text, question, big,
+	        playing, duck_note[0] ? duck_note : NULL);
+}
+
+/* Hold for ms with the screen up; 1 if asked to stop. */
+static int duck_hold(const char *text, const char *question, const char *big,
+                     unsigned ms)
+{
+	duck_screen(text, question, big, 1);
+	return wait_ms(ms);
+}
+
+/* The broker's list, saved to var/, and the attach. Every candidate the
+ * list names is tried, then the plain name at the usual versions. */
+static int duck_attach(struct hbdsi *c)
+{
+	static const u16 versions[][2] = { { 1, 0 }, { 1, 1 }, { 2, 0 }, { 0, 1 } };
+	static char text[16384];
+	char path[256], name[HBDSI_NAME_MAX];
+	u16 major, minor;
+	unsigned i;
+	int n, rc, status;
+	FILE *f;
+
+	n = hbdsi_broker_list(text, sizeof(text));
+	snprintf(path, sizeof(path), "%s/hello5_broker.txt", out_dir);
+	f = fopen(path, "w");
+	if (f != NULL) {
+		fputs(text, f);
+		fclose(f);
+	}
+	log_msg("step d: %s: %d bytes of status (saved to %s)", HBDSI_BROKER_PATH,
+	        n, path);
+	for (i = 0; hbdsi_listing_find(text, DUCK_IFACE, i, name, sizeof(name),
+	                               &major, &minor); i++) {
+		if (strstr(name, "Client") != NULL)
+			continue;
+		rc = hbdsi_attach(c, name, major, minor, &status);
+		log_msg("step d: attach \"%s\" %u.%u (listed): %s, broker: %d %s", name,
+		        major, minor, strerror(rc), status, hbdsi_broker_status_name(status));
+		if (rc == EOK && status == HBDSI_BROKER_OK) {
+			snprintf(duck_note, sizeof(duck_note), "attached %.60s %u.%u", name,
+			         major, minor);
+			return 0;
+		}
+	}
+	for (i = 0; i < sizeof(versions) / sizeof(versions[0]); i++) {
+		rc = hbdsi_attach(c, DUCK_IFACE, versions[i][0], versions[i][1], &status);
+		log_msg("step d: attach \"%s\" %u.%u: %s, broker: %d %s", DUCK_IFACE,
+		        versions[i][0], versions[i][1], strerror(rc), status,
+		        hbdsi_broker_status_name(status));
+		if (rc != EOK)
+			return -1;      /* no broker at all */
+		if (status == HBDSI_BROKER_OK) {
+			snprintf(duck_note, sizeof(duck_note), "attached %s %u.%u",
+			         DUCK_IFACE, versions[i][0], versions[i][1]);
+			return 0;
+		}
+		if (status != HBDSI_BROKER_VERSION_MISMATCH && i > 0)
+			break;
+	}
+	return -1;
+}
+
+static void duck_log_attach(const struct hbdsi_attach_reply *r)
+{
+	log_msg("step d: server nd %u pid %u chid %u, word0 0x%x, server id <%u.%u>, "
+	        "client id <%u.%u>", (unsigned)r->nd, (unsigned)r->pid,
+	        (unsigned)r->chid, (unsigned)r->word0, (unsigned)r->server_id[0],
+	        (unsigned)r->server_id[1], (unsigned)r->client_id[0],
+	        (unsigned)r->client_id[1]);
+}
+
+/* RequestAudioFocus / ReleaseAudioFocus(eSRC_NAVTTS, eSNK_SPEAKERS). */
+static int duck_focus(struct hbdsi *c, int on)
+{
+	const i32 args[2] = { SGAM_SRC_NAVTTS, SGAM_SNK_SPEAKERS };
+	u32 id = on ? SGAM_REQ_AUDIO_FOCUS : SGAM_REQ_RELEASE_FOCUS;
+	unsigned t0 = log_ms();
+	int rc = hbdsi_request(c, id, args, 2, DUCK_TIMEOUT_MS);
+
+	log_msg("step d: %s(%d, %d) = request %u: %s after %u ms",
+	        on ? "RequestAudioFocus" : "ReleaseAudioFocus", (int)args[0],
+	        (int)args[1], (unsigned)id, strerror(rc), log_ms() - t0);
+	return rc;
+}
+
+/* n pings on navi, written DUCK_CHUNK_MS at a time (the write paces itself
+ * to the device), the screen counting them. 1 if asked to stop. */
+static int duck_pings(snd_pcm_t *h, const i16 *pcm, unsigned n,
+                      const char *text, const char *question)
+{
+	const u32 chunk = PULSE_RATE / 1000 * DUCK_CHUNK_MS;
+	u32 total = pulse_samples(n), off;
+	unsigned t0 = log_ms(), ping, shown = 0;
+	char big[32];
+	isize w;
+
+	snd_pcm_plugin_prepare(h, SND_PCM_CHANNEL_PLAYBACK);
+	for (off = 0; off < total; off += chunk) {
+		u32 len = total - off < chunk ? total - off : chunk;
+
+		ping = (log_ms() - t0) / PULSE_PERIOD_MS + 1;
+		if (ping != shown && ping <= n) {
+			snprintf(big, sizeof(big), "ping %u of %u", ping, n);
+			duck_screen(text, question, big, 1);
+			shown = ping;
+		}
+		w = snd_pcm_plugin_write(h, pcm + off, len * sizeof(i16));
+		if (w < (isize)(len * sizeof(i16))) {
+			log_msg("step d: navi short write %ld/%u at sample %u", (long)w,
+			        (unsigned)(len * sizeof(i16)), (unsigned)off);
+			break;
+		}
+		if (quit_poll() != QUIT_NONE)
+			return 1;
+	}
+	log_msg("step d: %u pings written to navi in %u ms (train %u ms)", n,
+	        log_ms() - t0, n * PULSE_PERIOD_MS);
+	return 0;
+}
+
+static int play_duck(const struct step *s, const char *log_file, struct play *p)
+{
+	struct hbdsi c;
+	struct clip train;
+	snd_pcm_t *h = NULL;
+	i16 *pcm;
+	int rc, focus = 0;
+
+	(void)log_file;
+	duck_step = s;
+	duck_index = cur_index;
+	duck_count = cur_count;
+	duck_note[0] = '\0';
+	hbdsi_init(&c);
+	pcm = malloc(pulse_samples(DUCK_PINGS) * sizeof(i16));
+	if (pcm == NULL) {
+		log_msg("step d: no memory for the pings");
+		return -1;
+	}
+	pulse_render(pcm, DUCK_PINGS);
+	train.pcm = (unsigned char *)pcm;
+	train.len = pulse_samples(DUCK_PINGS) * sizeof(i16);
+	train.rate = PULSE_RATE;
+	train.voices = 1;
+	train.bits = 16;
+
+	duck_screen(s->todo, NULL, "asking the MMI", 0);
+	if (duck_attach(&c) != 0) {
+		log_msg("RESULT step d: no attach to %s", DUCK_IFACE);
+		snprintf(duck_note, sizeof(duck_note), "%s: not attached", DUCK_IFACE);
+		p->refused = 1;
+		goto out;
+	}
+	duck_log_attach(&c.r);
+	rc = hbdsi_connect(&c, DUCK_TIMEOUT_MS);
+	if (rc != EOK) {
+		log_msg("RESULT step d: ConnectRequest: %s", strerror(rc));
+		snprintf(duck_note, sizeof(duck_note), "connect: %s", strerror(rc));
+		p->refused = 1;
+		goto out;
+	}
+	log_msg("RESULT step d: connected to %s (server pid %u)", DUCK_IFACE,
+	        (unsigned)c.r.pid);
+	if (audio_open(0, DUCK_DEVICE, &train, &h) != 0)
+		log_msg("step d: navi would not open, the pings stay silent");
+
+	/* 1: the channel alone */
+	rc = duck_focus(&c, 1);
+	focus = rc == EOK;
+	if (!focus) {
+		log_msg("RESULT step d: RequestAudioFocus not sent: %s", strerror(rc));
+		p->refused = 1;
+		goto out;
+	}
+	if (duck_hold("hello5 has asked for the NAVIGATION VOICE channel. No sound "
+	              "from hello5 yet.",
+	              "LISTEN: did the radio get QUIETER (not silent)?",
+	              "channel open", DUCK_HOLD_MS))
+		goto out;
+	/* 2: pings on navi while it is open */
+	if (h != NULL && duck_pings(h, pcm, DUCK_PINGS,
+	                            "Pings on the navigation voice channel.",
+	                            "LISTEN: pings heard? Radio still playing, quieter, "
+	                            "between them?"))
+		goto out;
+	/* 3: give it back */
+	duck_focus(&c, 0);
+	focus = 0;
+	if (duck_hold("hello5 has given the channel back.",
+	              "LISTEN: is the radio back to its normal volume?",
+	              "channel closed", DUCK_HOLD_MS))
+		goto out;
+	/* 4: control, no channel */
+	if (h != NULL && duck_pings(h, pcm, DUCK_CONTROL,
+	                            "Control: 3 pings on the same device, with NO channel.",
+	                            "LISTEN: should be SILENT, radio at normal volume."))
+		goto out;
+	p->eof = 1;
+	log_msg("step d: rx: %u+%u messages, %u+%u pulses from the server",
+	        c.rx_msgs[0], c.rx_msgs[1], c.rx_pulses[0], c.rx_pulses[1]);
+out:
+	if (focus)
+		duck_focus(&c, 0);      /* never leave the radio lowered */
+	if (h != NULL)
+		snd_pcm_close(h);
+	hbdsi_close(&c);
+	free(pcm);
+	p->stopped = !p->eof && !p->refused;
+	return 0;
+}
+
 static const struct step step_list[] = {
 	{ 'm', "radio + our sound",
 	  "Radio on at a normal volume. Then pings, one every 2 s, for 12 s.",
@@ -1082,6 +1333,12 @@ static const struct step step_list[] = {
 	  "WATCH: is this screen back, without flicker? LISTEN: music BETWEEN "
 	  "the pings?",
 	  25, 6, 0, play_testapp },
+	{ 'd', "radio lowered for us",
+	  "Radio on at a normal volume. hello5 asks the MMI for the navigation "
+	  "voice channel, as the navigation does before it speaks, plays pings "
+	  "on it, then gives it back.",
+	  "LISTEN: does the radio get QUIETER (not silent) while the channel is "
+	  "open?", 10, DUCK_PINGS + DUCK_CONTROL, 0, play_duck },
 };
 #define NSTEPS ((int)(sizeof(step_list) / sizeof(step_list[0])))
 
@@ -1245,7 +1502,7 @@ int main(int argc, char *argv[])
 	for (c = steps; *c != '\0' && (*c == 'g' || find_step(*c) != NULL); c++)
 		;
 	if (nout <= 0 || *c != '\0') {
-		log_msg("hello5: bad step list \"%s\" (any of mnvtg) or output list "
+		log_msg("hello5: bad step list \"%s\" (any of mnvtdg) or output list "
 		        "\"%s\" (want e.g. %s)", steps, outspec, DEFAULT_OUTPUTS);
 		log_close();
 		return 2;

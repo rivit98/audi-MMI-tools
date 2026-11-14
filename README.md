@@ -35,7 +35,7 @@ what it showed on the car). Shared code is in [src/common/](src/common/).
 | [hello2](src/hello2/README.md) | OpenGL ES bring-up, full EGL/GL diagnostics | works |
 | [hello3](src/hello3/README.md) | GPU canvas, fill-rate benchmark | works |
 | [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark | works up to 12 lit tori; 16 froze the unit |
-| [hello5](src/hello5/README.md) | sound from an app through io-media | works on one output |
+| [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) | works on one output; step `d` not yet run |
 | [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode | done (5 of 10 clips play) |
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
@@ -87,6 +87,7 @@ What is built but not yet confirmed is listed in each app's README and in
 | [phone-mirroring.md](docs/phone-mirroring.md) | video decoder, display path, streaming options and results |
 | [android-auto.md](docs/android-auto.md) | what an Android Auto receiver would need |
 | [rear-camera.md](docs/rear-camera.md) | how the HMI shows the rear camera; what apps must not do |
+| [hbdsi.md](docs/hbdsi.md) | how the unit's processes call each other's services (servicebroker, HBDSI messages, SGAudioManagement) |
 | [vehicle-data.md](docs/vehicle-data.md) | what the unit reads from the car's buses |
 | [map-and-cluster.md](docs/map-and-cluster.md) | how the navigation map is drawn; how the cluster display is fed (DDP2, KOMO) |
 | [power-onoff.md](docs/power-onoff.md) | who reboots / powers off the unit |
