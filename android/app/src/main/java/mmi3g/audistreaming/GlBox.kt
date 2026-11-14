@@ -57,8 +57,28 @@ void main() {
      * one capture pixel across / down in texture coordinates (through the
      * SurfaceTexture's transform). highp: mediump's 10-bit mantissa can't
      * tell 2880 pixels apart. */
-    fun fragmentShader(k: Int): String {
-        val t = taps(k)
+    fun fragmentShader(k: Int): String = fragmentShader(taps(k))
+
+    /** The shader for g: k:1 box taps, or for a [ScreenCrop.Geometry.scaled]
+     * one [scaledTaps]. */
+    fun fragmentShader(g: ScreenCrop.Geometry): String =
+        fragmentShader(if (g.scaled) scaledTaps(g) else taps(g.k))
+
+    /** A scaled picture (any factor): n x n bilinear taps spread evenly over
+     * the capture pixels one picture pixel covers, n = that footprint
+     * rounded (at least 1), so a shrink by more than ~1.5 averages what
+     * a single tap would skip (thin text). In capture pixels from the
+     * output pixel's centre, as [taps]. */
+    fun scaledTaps(g: ScreenCrop.Geometry): List<Pair<Double, Double>> {
+        val fx = g.keptW.toDouble() / g.picW
+        val fy = g.keptH.toDouble() / g.picH
+        val n = maxOf(1, Math.round(maxOf(fx, fy)).toInt()).coerceAtMost(MAX_FACTOR)
+        fun spread(f: Double) = (0 until n).map { (it + 0.5) / n * f - f / 2 }
+        val xs = spread(fx)
+        return spread(fy).flatMap { y -> xs.map { x -> x to y } }
+    }
+
+    private fun fragmentShader(t: List<Pair<Double, Double>>): String {
         val sb = StringBuilder()
         sb.append("#extension GL_OES_EGL_image_external : require\n")
         sb.append("precision highp float;\n")

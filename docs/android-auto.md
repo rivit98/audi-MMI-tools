@@ -176,13 +176,19 @@ NDK). Differences from the car app:
   720x432 cut the UI's right edge off. The session asks for 800x480 with no
   margins, and the GPU scales the whole frame bilinear to 720x432: 0.9 both
   ways, so the 5:3 shape stays. Text is slightly softer than 1:1.
-- **Video size setting.** The Android Auto page can also ask for 1280x720
-  or 1920x1080 (dpi raised with the height: 210, 315, so the layout stays
-  about the same). These are 16:9: scaled whole into 720x405 with black
-  above and below. A test for where Android Auto puts its bar on a 16:9
-  screen (bottom, or a rail at the side that could be cropped to leave
-  5:3); one bilinear tap per pixel at 0.56 or 0.375 aliases thin text.
-  A new size ends the session (bye-bye) and the app reconnects.
+- **Video size setting: 16:9 without the rail.** At 800x480 Android Auto
+  draws its bar at the bottom [repo, desk]. At 1280x720 and 1920x1080 it
+  draws it as a rail on the left instead, 59 of 720 columns of the scaled
+  picture at both sizes = ~80 dp at 210 / 315 dpi [repo, desk; dpi raised
+  with the height so the layout stays the size of 800x480's]. The app
+  leaves the rail out (105 / 158 px) and scales the rest (1175x720 /
+  1762x1080) to fill 720x432: ~2% wider than its shape, unnoticeable, and
+  the UI is the same size on the MMI as at 800x480. The shrink (0.61 /
+  0.41) averages 2x2 bilinear taps over each output pixel's footprint
+  (`GlBox.scaledTaps`) so thin text isn't skipped. The phone's preview
+  shows the whole frame, rail included: home, apps and mic are tapped
+  there until the MMI's knob drives them. A new size ends the session
+  (bye-bye) and the app reconnects. Sharpness on the MMI: [unverified].
 - **Frame rate and stream settings.** Android Auto sends up to 30 fps; the
   GPU's frame clock draws exactly "Max fps" a second into the encoder (at
   most 25, the MMI's stream rate) and drops the rest. No ack pacing

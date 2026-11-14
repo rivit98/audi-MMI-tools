@@ -3,6 +3,7 @@ package mmi3g.audistreaming
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 
 class AaGeometryTest {
     private val m800 = AaGeometry.MODES[0]
@@ -32,12 +33,36 @@ class AaGeometryTest {
     }
 
     @Test
-    fun sixteenNineKeepsItsShape() {
-        // 720 wide, 405 high: the scaler centres it, black above and below
-        assertEquals(ScreenCrop.Geometry(1280, 720, 0, 0, 720, 405, 1, 1280, 720),
-            AaGeometry.geometry(m720, 720, 432))
-        assertEquals(ScreenCrop.Geometry(1920, 1080, 0, 0, 720, 405, 1, 1920, 1080),
+    fun railIsMeasuredWidth() {
+        assertEquals(0, m800.rail)
+        // 59 of 720 columns on the desk: 104.9 and 157.3 px
+        assertEquals(105, m720.rail)
+        assertEquals(158, m1080.rail)
+    }
+
+    @Test
+    fun sixteenNineLeavesTheRailOutAndFills() {
+        val g = AaGeometry.geometry(m720, 720, 432)
+        assertEquals(ScreenCrop.Geometry(1280, 720, 105, 0, 720, 432, 1, 1175, 720), g)
+        assertEquals(ScreenCrop.Geometry(1920, 1080, 158, 0, 720, 432, 1, 1762, 1080),
             AaGeometry.geometry(m1080, 720, 432))
+        // u from the rail's edge to the right edge, v the whole height
+        val q = GlBox.quadTex(g)
+        assertEquals(105f / 1280, q[0], 1e-6f)
+        assertEquals(1f, q[2], 1e-6f)
+        assertEquals(0f, q[1], 1e-6f)
+        assertEquals(1f, q[5], 1e-6f)
+    }
+
+    @Test
+    fun scaledTapsAverageTheFootprint() {
+        // 0.9: one tap, as plain bilinear
+        assertEquals(listOf(0.0 to 0.0), GlBox.scaledTaps(AaGeometry.geometry(m800, 720, 432)))
+        // 1175x720 -> 720x432: 2 x 2 taps within the ~1.63 x 1.67 footprint
+        val t = GlBox.scaledTaps(AaGeometry.geometry(m720, 720, 432))
+        assertEquals(4, t.size)
+        assertTrue(t.all { (x, y) -> abs(x) < 0.82 && abs(y) < 0.84 })
+        assertEquals(0.0, t.sumOf { it.first }, 1e-9)
     }
 
     @Test

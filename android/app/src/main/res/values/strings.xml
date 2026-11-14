@@ -38,7 +38,7 @@
     <string name="aa_how_to">Slide back to Screen to mirror the phone\'s screen instead. Only one of the two runs at a time.\n\nOnce, on the phone: open Android Auto\'s settings (button above), tap Version at the bottom about ten times until developer settings are on, then in the menu (three dots) tap Start head unit server. This app connects to it and the MMI shows Android Auto.\n\nTouch the picture above to use Android Auto. Music and navigation sound stay on the phone (Bluetooth to the car).</string>
     <string name="aa_video_size">Video size</string>
     <string name="info_aa_video_size_title">Video size</string>
-    <string name="info_aa_video_size">The picture size Android Auto draws. The app scales the whole picture to the MMI\'s 720x432, keeping its shape.\n\n800x480 (recommended): the same shape as the MMI\'s screen, so it fills it.\n\n1280x720 and 1920x1080: wider (16:9), so the MMI shows black bands above and below. Android Auto draws more pixels for the same layout, and may place its bar differently. A test for now.\n\nA new size makes Android Auto reconnect (about 2 seconds).</string>
+    <string name="info_aa_video_size">The picture size Android Auto draws. The app scales it to the MMI\'s 720x432.\n\n800x480: the same shape as the MMI\'s screen, the whole picture with Android Auto\'s bar at the bottom.\n\n1280x720 and 1920x1080 (16:9): Android Auto puts its bar in a rail on the left. The MMI shows everything except the rail, filling its screen; the picture here keeps the rail, so tap home, apps and the mic here. Android Auto draws more pixels for the same layout, so text can be sharper. 1920x1080 works the phone harder.\n\nA new size makes Android Auto reconnect (about 2 seconds).</string>
     <string name="info_aa_title">Android Auto mode</string>
     <string name="info_aa">This app becomes the car\'s Android Auto display, for Android Auto on this same phone (self mode). The MMI shows Android Auto through the same video path as the screen mirroring, and the picture above is what the MMI shows: touch it to use Android Auto.\n\nAndroid Auto starts this only through its developer head unit server: Android Auto settings, tap Version until developer settings are on, then menu, Start head unit server. The app tries to connect every 2 seconds and again after every session.\n\nAndroid Auto draws its screen at the chosen video size, and the app scales it to the MMI\'s 720x432 picture. It runs at up to 25 frames a second on the MMI. H.264 rate on the Screen page applies here too.\n\nThe mode starts when you slide to this page, and stops when you slide back to Screen or tap Stop.</string>
     <string name="stream_options">Stream to the MMI (both modes)</string>
@@ -59,9 +59,9 @@
     </string-array>
     <!-- in the order of AaGeometry.MODES -->
     <string-array name="aa_video_sizes">
-        <item>800x480 (5:3, fills the MMI)</item>
-        <item>1280x720 (16:9, test)</item>
-        <item>1920x1080 (16:9, test)</item>
+        <item>800x480 (bar at the bottom)</item>
+        <item>1280x720 (rail left, not on the MMI)</item>
+        <item>1920x1080 (rail left, not on the MMI)</item>
     </string-array>
     <!-- in the order of enum Format (CaptureService.kt) -->
     <string-array name="formats">

@@ -414,6 +414,7 @@ class AaService : Service() {
         val e = newEncoder(fps) ?: return false
         val g = AaGeometry.geometry(sessionMode, PIC_W, PIC_H)
         val sc = GlScaler(e.surface!!, PIC_W, PIC_H, g, fps)
+        sc.previewWhole = true
         if (!sc.start()) {
             pipelineFailed = "GL: ${sc.error}"
             AppLog.w("AA mode: GL scaler failed: ${sc.error}")
@@ -434,7 +435,8 @@ class AaService : Service() {
             pipelineFailed = why
         }
         pipelineFailed = ""
-        AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's $sessionMode -> ${g.picW}x${g.picH} in ${PIC_W}x$PIC_H")
+        AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's $sessionMode, rail ${sessionMode.rail} px left out, " +
+            "${g.keptW}x${g.keptH} -> ${g.picW}x${g.picH} in ${PIC_W}x$PIC_H")
         return true
     }
 

@@ -158,7 +158,7 @@ class GlScaler(
                     newInput(g.capW, g.capH, hd)
                     useFactor(g)
                     haveFrame = false          // the old texture's frame is the old shape
-                } else if (g.k != geometry.k || GlBox.linear(g) != GlBox.linear(geometry)) {
+                } else if (g.k != geometry.k || g.scaled || geometry.scaled) {
                     useFactor(g)
                 }
                 quadTex = floats(*GlBox.quadTex(g))
@@ -192,6 +192,11 @@ class GlScaler(
         }
         return done.await(2, TimeUnit.SECONDS) && !dead
     }
+
+    /** The preview shows the whole input frame, not only the kept part
+     * (the Android Auto mode: the rail the MMI's picture leaves out stays
+     * touchable on the phone). */
+    @Volatile var previewWhole = false
 
     /** Draws every frame's picture into [s] too, from the next tick on;
      * null: no more (blocks until the GL thread has let go of the old one,
@@ -339,7 +344,7 @@ class GlScaler(
 
     /** The shader depends on k, the texture's filter on k and scaling. */
     private fun useFactor(g: ScreenCrop.Geometry) {
-        val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(g.k))
+        val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(g))
         if (program != 0) GLES20.glDeleteProgram(program)
         program = p
         aPos = GLES20.glGetAttribLocation(p, "aPos")
@@ -414,7 +419,7 @@ class GlScaler(
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         setFilter(GLES20.GL_LINEAR)
-        drawPicture(0, 0, size[0], size[1])
+        drawPicture(0, 0, size[0], size[1], if (previewWhole) WHOLE_TEX else quadTex)
         setFilter(if (GlBox.linear(geometry)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
         if (EGL14.eglSwapBuffers(display, preview)) previewDrawn++
         else {
@@ -439,7 +444,7 @@ class GlScaler(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, filter)
     }
 
-    private fun drawPicture(x: Int, y: Int, pw: Int, ph: Int) {
+    private fun drawPicture(x: Int, y: Int, pw: Int, ph: Int, texCoords: FloatBuffer = quadTex) {
         val g = geometry
         GLES20.glViewport(x, y, pw, ph)
         GLES20.glUseProgram(program)
@@ -452,7 +457,7 @@ class GlScaler(
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, QUAD_POS)
         GLES20.glEnableVertexAttribArray(aTex)
-        GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, quadTex)
+        GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, texCoords)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
@@ -569,6 +574,8 @@ class GlScaler(
         // full-viewport quad, triangle strip; its texture coordinates are
         // GlBox.quadTex
         private val QUAD_POS = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+        // the whole input frame, in GlBox.quadTex's order
+        private val WHOLE_TEX = floats(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
         // the notice bitmap: its first row (t = 0) at the top
         private val NOTICE_TEX = floats(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
 
