@@ -1,11 +1,14 @@
 package mmi3g.audistreaming
 
 import android.content.Context
+import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.View
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.widget.AbsSeekBar
 import android.widget.OverScroller
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -16,7 +19,8 @@ import kotlin.math.roundToInt
  * Android Auto (MainActivity). A horizontal drag takes over from the page
  * once it is longer than the touch slop and more sideways than up or down,
  * so the pages still scroll vertically; a child that wants every touch
- * (the Android Auto preview) calls requestDisallowInterceptTouchEvent. A
+ * (the Android Auto preview) calls requestDisallowInterceptTouchEvent, and
+ * a drag that starts on a slider (the fps slider) is the slider's. A
  * fling or a drag past half a page goes to the next page. [onPage] runs
  * when a different page has settled.
  *
@@ -35,6 +39,8 @@ class SwipePager @JvmOverloads constructor(context: Context, attrs: AttributeSet
     private var downY = 0f
     private var lastX = 0f
     private var dragging = false
+    private var onSlider = false
+    private val hit = Rect()
 
     /** Goes to page [p]; [onPage] runs if it is a different one. */
     fun setPage(p: Int, animate: Boolean = true) {
@@ -84,10 +90,12 @@ class SwipePager @JvmOverloads constructor(context: Context, attrs: AttributeSet
                 lastX = e.x
                 dragging = !scroller.isFinished
                 if (dragging) scroller.forceFinished(true)
+                onSlider = !dragging && sliderAt(this, e.rawX.toInt(), e.rawY.toInt())
                 track(e, reset = true)
             }
             MotionEvent.ACTION_MOVE -> {
                 track(e)
+                if (onSlider) return false
                 val dx = e.x - downX
                 val dy = e.y - downY
                 if (abs(dx) > slop && abs(dx) > abs(dy) * 1.5f) {
@@ -132,6 +140,14 @@ class SwipePager @JvmOverloads constructor(context: Context, attrs: AttributeSet
             }
         }
         return true
+    }
+
+    /** Whether a shown slider under v is at screen point (x, y). */
+    private fun sliderAt(v: View, x: Int, y: Int): Boolean {
+        if (v.visibility != View.VISIBLE) return false
+        if (v is AbsSeekBar) return v.isEnabled && v.getGlobalVisibleRect(hit) && hit.contains(x, y)
+        if (v !is ViewGroup) return false
+        return (0 until v.childCount).any { sliderAt(v.getChildAt(it), x, y) }
     }
 
     private fun track(e: MotionEvent, reset: Boolean = false) {
