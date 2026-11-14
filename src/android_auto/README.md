@@ -177,6 +177,8 @@ Open points:
 
 - showing the video: the DM642 shows nothing from an 800-wide coded
   picture, even with the SPS cropped to 720 (docs/android-auto.md §4.1).
-  What is left is software decode or driving the DSP directly
+  The phone app's Android Auto mode runs this same session on the phone
+  (JNI, `Config::margin_w`/`margin_h`, `Session::touch`) and relays a
+  720-wide picture instead (docs/android-auto.md §4.3)
 - ack pacing: default back to `fps=0`
 - touch / knob input, audio out

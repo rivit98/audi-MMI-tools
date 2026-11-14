@@ -242,6 +242,11 @@ just missing. `make plot-test` checks the parsing.
 4. Use the phone as usual. Back, Home, other apps, turning the phone,
    unplugging and replugging all keep the stream going. Stop it in the
    app or from its notification. Pull the SD card to end the MMI side.
+5. Or slide the app to its **Android Auto** page: the phone becomes the
+   head unit for Android Auto on itself, and the MMI shows Android Auto
+   (needs Android Auto's developer head unit server;
+   [docs/android-auto.md](../../docs/android-auto.md) §4.3). Slide back to
+   Screen for mirroring. The MMI side is the same for both.
 
 ## Hardware H.264
 

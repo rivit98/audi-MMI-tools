@@ -16,9 +16,10 @@ two places that the existing `audi_stream_receiver` work cannot answer:
 1. **Live H.264 video at 800x480.** The DM642 hardware decoder refuses
    800-wide input [repo]; live H.264 at up to 720 wide works only through a
    CS-MP4 stream ([native-apps.md](native-apps.md) §10), the path hardware
-   mirroring uses. An 800x480 stream with a 80 px margin, cropped to 720
-   in the SPS, is the untested way through it (section 4.1). Software
-   decode on the SH4 is unmeasured.
+   mirroring uses. Cropping the SPS of an 800x480 stream to 720 stays
+   black (section 4.1). The way around it is on the phone: the phone app's
+   Android Auto mode decodes Android Auto's video and sends the MMI a
+   720x432 stream (section 4.3). Software decode on the SH4 is unmeasured.
 2. **Live PCM audio out.** The only audible path found is file-based [repo].
 
 Do the two de-risking experiments (section 5, steps 1-3) before writing any
@@ -74,7 +75,7 @@ aasdk's source (opencardev/aasdk) where android_auto relies on them.
 | Protobuf messages | **Built** | Written and read by hand (`src/common/pb.h`), about 30 messages; no generator. |
 | Input | Partly | The MMI has no touchscreen. Advertise rotary + D-pad. Knob detents and presses are decoded from `/dev/ipc/ch8` [repo]; push directions and other buttons are still open (platform-notes §8). |
 | Sensors | **Built** | Fixed values: driving status unrestricted (parked), night mode off. |
-| Video | **Blocked at 800 wide** | Same pipeline as hardware mirroring, which plays 720 wide; an SPS crop to 720 is the untested way past (section 4.1). |
+| Video | **Blocked at 800 wide** on the MMI | An SPS crop to 720 stays black (section 4.1). The phone app's Android Auto mode re-encodes on the phone instead (section 4.3). |
 | Audio | **Unproven** | Section 4.2. |
 
 ### 4.1 Video
@@ -132,6 +133,8 @@ whatever the SPS says [repo]. Why is unknown: nothing is logged, so the
 DSP's width check (or a buffer sized for 720) fails silently [inferred]. Android Auto's smallest video (800x480) can't
 reach the screen through io-media. The options left:
 
+- **Phone relay** (section 4.3): the phone decodes Android Auto and sends
+  the MMI a 720-wide stream. Built.
 - **DSP driven directly** (option 2b): bypasses io-media's check, but the
   DSP assertion stays; months of work.
 - **Software decode, Baseline.** Cheapest profile (no CABAC, no B-frames). Cost
@@ -141,6 +144,86 @@ reach the screen through io-media. The options left:
   average or latency grows until the ack window throttles the phone.
 - **Not usable:** the GPU's VCAP 1 "Partial Decode" is suspected MPEG-2 only
   [repo].
+
+### 4.3 Phone relay: the phone app's Android Auto mode
+
+The DM642 can't show what Android Auto sends, but it shows what the phone
+app sends. So the "Audi streaming" app on the phone also acts as the head
+unit for Android Auto on the **same phone** ("self mode", as open-headunit
+and Headunit Reloaded do), and sends the MMI the picture through the
+mirroring's H.264 path.
+
+```
+Android Auto (phone)  --TCP 127.0.0.1:5277-->  AaService (same phone)
+   session: src/android_auto through JNI (aa_jni.cpp, NDK, mbedTLS)
+   800x480 H.264 --> MediaCodec decoder --> GlScaler: top-left 720x432, 1:1, 25 fps
+                                               |--> phone preview (touch input back to AA)
+                                               '--> MediaCodec encoder 720x432 --> MmiH264
+   --> AOA --> audi_stream_receiver --> DM642 (unchanged)
+```
+
+**How it works [source / built, not yet run].** Android Auto 17.4 and newer
+start a projection to a third-party app only through its developer "head
+unit server": in Android Auto's settings, developer mode (tap Version),
+then menu, Start head unit server; it listens on 127.0.0.1:5277
+(open-headunit's `SelfLauncherV17_4.kt`). The app connects there and runs
+the same session code as the car app (`src/android_auto`, built with the
+NDK). Differences from the car app:
+
+- **Margins put the UI on the MMI's picture.** The session asks for 800x480
+  with `width_margin` 80 and `height_margin` 48. Android Auto draws its UI
+  in the **top-left** 720x432 and leaves the rest black (open-headunit
+  measured top-left anchoring on hardware, `TouchCoordinateMapperTest.kt`).
+  720x432 is the MMI's H.264 picture, so the GPU copies it 1:1: no scaling,
+  sharp text.
+- **Frame rate.** Android Auto sends up to 30 fps; the GPU's frame clock
+  draws exactly 25 a second into the encoder (the MMI's stream rate) and
+  drops the rest. No ack pacing (`fps=0`): the acks go at once.
+- **Audio.** Only the system-sound sink is advertised (open-headunit's Self
+  Mode does the same), so music and navigation stay on the phone and reach
+  the car over Bluetooth like any phone sound. System sounds play through
+  the phone's speaker path (`AaAudio`).
+- **Input.** The phone shows the same 720x432 picture; touches on it go to
+  Android Auto as touch events (`Session::touch`). Touch coordinates are the
+  UI's pixels (the margins are right and bottom).
+- **Modes.** The app has two pages, Screen (mirroring) and Android Auto;
+  sliding between them switches the mode, and only one streams to the MMI.
+  The MMI side (audi_stream_receiver) is unchanged.
+
+**Open, to check on the phone and car:**
+
+- Whether Android Auto honours the margins as open-headunit says, on this
+  phone's version. Wrong anchoring shows as the UI shifted on the MMI and
+  touches landing off target.
+- Latency: Android Auto's encoder, the phone's decoder and encoder, then the
+  MMI's ~0.5 s. Estimated 0.6-0.8 s in total [estimate].
+- Phone load: a decoder, the GPU and an encoder at once, plus Android Auto
+  itself. The Redmi Note 8 Pro mirrors at 25 fps with one encoder.
+- Whether the head unit server keeps running in the background, and
+  whether MIUI kills either app.
+
+**Ideas for later:**
+
+- **The MMI's knob and buttons.** Knob detents and presses are decoded from
+  `/dev/ipc/ch8` [repo]. A new AOA message (MMI to phone) could carry them,
+  and the phone would send Android Auto rotary and D-pad key events (the
+  session already advertises the keycodes). The phone then stays in the
+  pocket.
+- **Night mode** from the MMI's day/night state (BAP or the light sensor
+  on ch5 [repo]) instead of always day.
+- **Older Android Auto (17.3 and earlier):** open-headunit's legacy route
+  starts Android Auto's `WirelessStartupActivity` with host 127.0.0.1 and
+  port 5288 and listens there. Not built: the user's phone needs only the
+  17.4 route.
+- **Start the head unit server without the menu.** Not possible from a
+  third-party app on 17.4+ as far as open-headunit knows; the app opens
+  Android Auto's settings to make it two taps.
+- **1280x720 instead of 800x480** with margins: more pixels for the same
+  UI would let the GPU box-filter 2:1 or 3:2 for even sharper text. Only
+  if 1:1 at 800x480 looks soft on the car.
+- **A plain mirror fallback:** if self mode fails, mirroring Android Auto's
+  own phone-screen UI is not possible either (Google removed it); the
+  Screen page with Google Maps is the fallback.
 
 ### 4.2 Audio
 
