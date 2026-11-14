@@ -5,7 +5,7 @@ import aoa_screen
 import av
 import pygame
 import pytest
-from aoa_screen import Painter, ScreenModel, ScreenState
+from aoa_screen import Painter, ScreenModel
 
 RED, RED_YUV = (220, 30, 30), (81, 90, 240)
 
@@ -54,7 +54,7 @@ def test_h264_fills_the_whole_screen(target):
     state = model.snapshot()
     assert state.mode == "h264"
     assert state.shown >= 1
-    Painter(target).paint(state, state.last_frame, strip=False)
+    Painter(target).paint(state, 0)
     for corner in ((0, 0), (799, 0), (0, 479), (799, 479)):
         assert near(target.get_at(corner), RED)
 
@@ -65,7 +65,7 @@ def test_a_new_h264_stream_is_black_until_its_first_frame(target):
     for data in h264_stream():
         model.apply({"kind": "h264"}, data)
     model.apply({"kind": "h264_config"}, b"")
-    Painter(target).paint(model.snapshot(), 0, strip=False)
+    Painter(target).paint(model.snapshot(), 0)
     assert target.get_at((400, 240))[:3] == aoa_screen.C_VIDEO_BG
 
 
@@ -74,14 +74,14 @@ def test_a_stream_after_a_jpeg_shows_the_panel_until_its_first_frame(target, siz
     model = ScreenModel()
     model.apply({"kind": "jpeg"}, jpeg(*size))
     model.apply({"kind": "h264_config"}, b"")
-    Painter(target).paint(model.snapshot(), 0, strip=False)
+    Painter(target).paint(model.snapshot(), 0)
     assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
 
 
 def test_landscape_jpeg_is_centred_on_black(target):
     model = ScreenModel()
     model.apply({"kind": "jpeg"}, jpeg(800, 368))
-    Painter(target).paint(model.snapshot(), 0, strip=False)
+    Painter(target).paint(model.snapshot(), 0)
     assert target.get_at((400, 20))[:3] == aoa_screen.C_VIDEO_BG
     assert near(target.get_at((400, 240)), RED)
 
@@ -90,20 +90,19 @@ def test_portrait_jpeg_goes_left_with_the_panel_beside_it(target):
     model = ScreenModel()
     model.apply({"kind": "jpeg"}, jpeg(220, 480))
     state = model.snapshot()
-    Painter(target).paint(state, 0, strip=False)
+    Painter(target).paint(state, 0)
     assert near(target.get_at((100, 240)), RED)
     assert target.get_at((220, 240))[:3] == aoa_screen.C_RULE
     assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
 
 
-def test_a_stop_goes_back_to_the_panel_and_says_why(target):
+def test_a_stop_goes_back_to_the_panel(target):
     model = ScreenModel()
     model.apply({"kind": "jpeg"}, jpeg(800, 480))
     model.apply({"kind": "stop", "why": "ended by VIDEO_STOP"}, b"")
     state = model.snapshot()
     assert state.mode is None
-    assert state.ended == "ended by VIDEO_STOP"
-    Painter(target).paint(state, 0, strip=False)
+    Painter(target).paint(state, 0)
     assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
 
 
@@ -113,20 +112,6 @@ def test_a_picture_that_does_not_decode_leaves_the_old_one_up():
     before = model.snapshot().picture
     model.apply({"kind": "jpeg"}, b"not a jpeg")
     assert model.snapshot().picture is before
-
-
-def strip_colour(target, state, now):
-    Painter(target).paint(state, now)
-    return target.get_at((790, aoa_screen.SCREEN_H - aoa_screen.FOOTER_H - 3))
-
-
-def test_the_strip_turns_red_only_while_a_picture_is_frozen(target):
-    frozen = pygame.Surface((800, 480))
-    state = ScreenState(mode="h264", picture=frozen, last_frame=100.0)
-    assert strip_colour(target, state, 100.5)[0] < 100
-    assert strip_colour(target, state, 101.5)[0] > 100
-    stopped = ScreenState(mode=None, last_frame=100.0)
-    assert strip_colour(target, stopped, 200)[0] < 100
 
 
 def test_wrap_keeps_lines_within_the_width(target):

@@ -318,8 +318,7 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 - **Desk test** (`make aoa-host`): the PC plays the MMI, checks every frame
   as the MMI would, shows the stream in an 800x480 window laid out like the
   MMI's screen and saves it to `build/aoa-host/stream.h264` (`ffplay` it). The
-  window's bottom strip (key D) and the timestamped log tell a freeze (picture
-  stays, strip red, "no frames for") from a stop (status panel, "stream ended:
+  timestamped log tells a freeze ("no frames for") from a stop ("stream ended:
   VIDEO_STOP"). Acks go out at once, so this shows when the phone stops sending,
   not the MMI's timing.
 - **Latency:** the phone app's *Latency clock* switch shows a big
