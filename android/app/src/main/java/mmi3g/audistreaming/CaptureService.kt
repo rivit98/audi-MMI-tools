@@ -67,17 +67,9 @@ import java.nio.ByteOrder
  * fails gets the direct path, navigation bar included. The bit rate is the drop-down's. The
  * scaler draws at exactly the "Max fps" slider's rate (at most the MMI's
  * 25, [FrameClock]), a still screen too; the MMI times its stream at 25 fps
- * and fills the rest with skip frames. Every frame goes
- * out in order - a lost one would spoil the ones after it - so frames
- * queue here while the MMI's acks are outstanding; if the queue gets long,
- * or a frame is bigger than the MMI's per-frame size, the frames up to the
- * next IDR are dropped and an IDR is asked for. A frame that doesn't fit
- * also raises the size (a new H264_CONFIG; the MMI restarts its stream).
- * The MMI's H264_STATUS: SYNC asks for an IDR, CONFIG for the config
- * again, REFUSED falls back to JPEG for this connection. After an
- * H264_CONFIG no frame goes until the MMI says PLAYING (it would only be
- * refused while the MMI sets its stream up), and then the stream starts at
- * an IDR.
+ * and fills the rest with skip frames. The frames go to the MMI through
+ * [MmiH264] (queue, IDRs, the MMI's H264_STATUS); a REFUSED falls back to
+ * JPEG for this connection.
  *
  * H.264 is landscape only: a portrait screen would fill a narrow strip of
  * the MMI with unreadable text, so while the phone is portrait the scaler
@@ -144,29 +136,13 @@ class CaptureService : Service() {
     }
 
     // H.264 (capture thread only)
-    private var enc: HwEncoder? = null
+    private val mmi = MmiH264()                       // the encoder's frames to the MMI
+    private val enc: HwEncoder? get() = mmi.enc
     private var scaler: GlScaler? = null              // null: the display draws into enc directly
-    private var sps: ByteArray? = null
-    private var pps: ByteArray? = null
-    private var frameBytes = START_FRAME_BYTES
-    private val queue = ArrayDeque<ByteArray>()
-    private var waitIdr = true
-    private var configLink: AccessoryLink? = null     // the link the config went to
-    private var configVcapMode = VcapMode.WEAVE        // the capture mode it asked for
-    private var refusedLink: AccessoryLink? = null    // REFUSED: JPEG on this one
     private var h264Failed = ""                       // the phone can't: why
     private var h264ScalerFailed = ""                 // GL scaler failed once: direct from then on
     private var fpsChangeAt = 0L
-    private var playingSeen = false                   // PLAYING since the last config
     private var portrait = false                      // the notice is up instead of the screen
-    private var nextH264Id = 1
-    private val h264 = H264Stats()
-
-    private class H264Stats {
-        var frames = 0; var bytes = 0L; var maxFrame = 0; var idrs = 0
-        var dropped = 0; var tooBig = 0; var overflows = 0
-        var windowAt = 0L; var windowBytes = 0L; var kbps = 0
-    }
 
     private class Picture(val w: Int, val h: Int, val data: ByteArray, val phoneMs: Int)
 
@@ -257,7 +233,7 @@ class CaptureService : Service() {
             scaler?.release()
             scaler = null
             enc?.release()
-            enc = null
+            mmi.encoderGone()
             reader?.close()
             frame?.recycle()
             projection?.stop()
@@ -304,7 +280,7 @@ class CaptureService : Service() {
             "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
             "sharp=${on(Streaming.sharp)} capture_mode=${Streaming.vcapMode} " +
             "hide_nav_bar=${on(Streaming.hideNavBar)} keep_screen_on=${on(Streaming.keepScreenOn)} " +
-            "frame_kb=${frameBytes / 1024} jpeg_q=$QUALITY android=${Build.VERSION.SDK_INT}"
+            "frame_kb=${mmi.frameBytes / 1024} jpeg_q=$QUALITY android=${Build.VERSION.SDK_INT}"
     }
 
     /** STREAM_SETTINGS to the link when streaming starts on it or a setting
@@ -348,11 +324,11 @@ class CaptureService : Service() {
         val v = Streaming.link?.video
         AppLog.i("status: ${state()}; " +
             (if (scaler != null) "display frames +$newDisplayFrames, drawn ${scaler?.drawn ?: 0}, " else "") +
-            "encoded +${h264.frames - statusEncoded}, dropped +${h264.dropped - statusDropped}, queue ${queue.size}; " +
+            "encoded +${mmi.stats.frames - statusEncoded}, dropped +${mmi.stats.dropped - statusDropped}, queue ${mmi.queued}; " +
             "MMI sent ${v?.sent ?: 0}, shown ${v?.shown ?: 0}")
         statusDisplayFrames = displayFrames
-        statusEncoded = h264.frames
-        statusDropped = h264.dropped
+        statusEncoded = mmi.stats.frames
+        statusDropped = mmi.stats.dropped
     }
 
     // --- H.264 (capture thread) -------------------------------------------
@@ -361,7 +337,7 @@ class CaptureService : Service() {
         if (Streaming.format != Format.H264) return false
         val link = Streaming.link ?: return enc != null      // keep it through a replug
         val caps = link.videoCaps ?: return false
-        return caps.h264 && link !== refusedLink && h264Failed.isEmpty() && Build.VERSION.SDK_INT >= 29
+        return caps.h264 && link !== mmi.refusedLink && h264Failed.isEmpty() && Build.VERSION.SDK_INT >= 29
     }
 
     /** One step of the H.264 stream; returns the delay to the next. */
@@ -383,8 +359,6 @@ class CaptureService : Service() {
         } else {
             fpsChangeAt = 0L
         }
-        // a new capture mode: the same encoder, the MMI restarts its stream
-        if (configLink === link && configVcapMode != Streaming.vcapMode) sendConfig(link, "capture mode")
         scaler?.let {
             if (it.failed) {
                 h264ScalerFailed = it.error
@@ -395,37 +369,19 @@ class CaptureService : Service() {
         if (enc == null && !startEncoder(caps, wantFps)) return POLL_MS
         val encoder = enc ?: return POLL_MS
 
-        if (link.h264.refused.getAndSet(false)) {
-            refusedLink = link
+        followScreen()
+        followOrientation(encoder)
+        // the MMI's status (a new capture mode: the same encoder, the MMI
+        // restarts its stream), then the frames
+        if (!mmi.step(link)) {
             stopEncoder()
             Streaming.status = "the MMI refused H.264 (see its log): JPEG instead"
             return POLL_MS
         }
-        if (link !== configLink && sps != null) sendConfig(link, "new connection")
-        if (link.h264.configWanted.getAndSet(false)) sendConfig(link, "the MMI asked")
-        if (link.h264.sync.getAndSet(false)) encoder.requestSync()
-        if (!playingSeen && link.h264.playing && configLink === link) {
-            playingSeen = true
-            // frames were held back until now: start at an IDR
-            if (waitIdr) encoder.requestSync()
-        }
-        followScreen()
-        followOrientation(encoder)
-        pump(link)
-
-        if (now - h264.windowAt >= 1000) {
-            h264.kbps = ((h264.bytes - h264.windowBytes) * 8 / maxOf(1L, now - h264.windowAt)).toInt()
-            h264.windowAt = now
-            h264.windowBytes = h264.bytes
-        }
         val sc = scaler
         Streaming.status = "H.264 ${encoder.w}x${encoder.h} " +
             (if (sc != null) "(x${sc.k}) " else "(direct${if (h264ScalerFailed.isNotEmpty()) ": GL failed" else ""}) ") +
-            "${encoder.fps} fps, ${h264.kbps} of ${encoder.bitRate / 1000} kbit/s, " +
-            "frames ${h264.frames} (IDR ${h264.idrs}), max ${h264.maxFrame / 1024} of ${frameBytes / 1024} KB" +
-            (if (queue.isNotEmpty()) ", queue ${queue.size}" else "") +
-            (if (h264.dropped > 0) ", dropped ${h264.dropped} (too big ${h264.tooBig}, " +
-                "queue full ${h264.overflows})" else "") +
+            mmi.describe(encoder) +
             (if (portrait) "; portrait: the MMI shows \"turn the phone to landscape\"" else "") +
             if (link.h264.playing) "" else "; MMI starting"
         return H264_TICK_MS
@@ -437,7 +393,7 @@ class CaptureService : Service() {
         // behind the GL scaler the still screen is drawn on its clock: no
         // encoder repeats on top of that
         val viaGl = h264ScalerFailed.isEmpty()
-        val e = HwEncoder(w, h, fps, Streaming.bitRate, !viaGl, handler, ::onH264Config, ::onH264Frame) { why ->
+        val e = HwEncoder(w, h, fps, Streaming.bitRate, !viaGl, handler, mmi::onConfig, mmi::onFrame) { why ->
             AppLog.w("H.264: $why")
             h264Failed = why
             Streaming.status = "H.264 failed ($why): JPEG instead"
@@ -479,16 +435,8 @@ class CaptureService : Service() {
             d.surface = input
             d.resize(vw, vh, dpi)
         }
-        enc = e
-        sps = null
-        pps = null
-        configLink = null
+        mmi.newEncoder(e, caps.h264MaxFrame)
         portrait = false
-        queue.clear()
-        waitIdr = true
-        // the size the frames needed stays: from 64 KB again, the next big
-        // IDR would cost one more restart on the MMI
-        frameBytes = frameBytes.coerceAtMost(caps.h264MaxFrame)
         AppLog.i("H.264 on: ${e.description}, display ${vw}x$vh${scaler?.let { " -> GL x${it.k}" } ?: " direct"}")
         return true
     }
@@ -547,110 +495,8 @@ class CaptureService : Service() {
         scaler?.release()                 // nothing draws into the encoder after this
         scaler = null
         e.release()
-        enc = null
-        sps = null
-        pps = null
-        configLink = null
-        queue.clear()
+        mmi.encoderGone()
         AppLog.i("H.264 off")
-    }
-
-    private fun sendConfig(link: AccessoryLink, why: String) {
-        val s = sps ?: return
-        val p = pps ?: return
-        val caps = link.videoCaps ?: return
-        val mode = Streaming.vcapMode
-        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.wire))
-        configLink = link
-        configVcapMode = mode
-        // the MMI (re)starts its stream at the next IDR, after PLAYING
-        playingSeen = false
-        queue.clear()
-        waitIdr = true
-        enc?.requestSync()
-        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B, capture mode $mode")
-    }
-
-    // encoder callback (capture thread)
-    private fun onH264Config(s: ByteArray, p: ByteArray) {
-        sps = s
-        pps = p
-        Streaming.link?.let { sendConfig(it, "encoder started") }
-    }
-
-    // encoder callback (capture thread)
-    private fun onH264Frame(data: ByteArray, key: Boolean) {
-        val link = Streaming.link
-        if (link == null || configLink !== link) return      // the MMI has no stream for it
-        if (!playingSeen) {
-            // the MMI is still setting its stream up: it would refuse it
-            h264.dropped++
-            waitIdr = true
-            return
-        }
-        val idr = key && H264.isIdr(data)
-        if (waitIdr && !idr) {
-            h264.dropped++
-            return
-        }
-        // an encoder that repeats SPS/PPS before its IDRs, but not the
-        // csd's bytes: the MMI refuses in-band ones that differ from its
-        // config (and would ask for the same config again forever), so the
-        // in-band ones become the config
-        if (idr) {
-            val inBand = H264.spsPps(data)
-            val s = sps
-            val p = pps
-            if (inBand != null && s != null && p != null &&
-                (!inBand.first.contentEquals(s) || !inBand.second.contentEquals(p))) {
-                sps = inBand.first
-                pps = inBand.second
-                h264.dropped++
-                sendConfig(link, "in-band SPS/PPS differ from the codec config")
-                return
-            }
-        }
-        val need = H264.sampleBytes(data)
-        if (need > frameBytes) {
-            h264.dropped++
-            h264.tooBig++
-            val max = link.videoCaps?.h264MaxFrame ?: frameBytes
-            val grown = H264.grow(frameBytes, need, max)
-            AppLog.w("H.264 frame of $need B > $frameBytes B${if (grown > frameBytes) ": now $grown" else ""}")
-            if (grown > frameBytes) {
-                frameBytes = grown
-                sendConfig(link, "bigger frames")
-            } else {
-                waitIdr = true
-                enc?.requestSync()
-            }
-            return
-        }
-        if (queue.size >= MAX_QUEUE) {
-            h264.dropped += queue.size + 1
-            h264.overflows++
-            queue.clear()
-            waitIdr = true
-            enc?.requestSync()
-            return
-        }
-        waitIdr = false
-        queue.addLast(data)
-        h264.frames++
-        h264.bytes += data.size
-        if (idr) h264.idrs++
-        if (need > h264.maxFrame) h264.maxFrame = need
-        pump(link)
-    }
-
-    private fun pump(link: AccessoryLink) {
-        val e = enc ?: return
-        while (queue.isNotEmpty() && link.readyForPicture(AccessoryLink.H264_IN_FLIGHT)) {
-            val f = queue.first()
-            if (!link.sendPicture(nextH264Id, e.w, e.h, Proto.FMT_H264, f, 0, AccessoryLink.H264_IN_FLIGHT)) break
-            queue.removeFirst()
-            nextH264Id = if (nextH264Id == 0xffff) 1 else nextH264Id + 1
-        }
     }
 
     // --- pictures (capture thread) ------------------------------------------
@@ -682,7 +528,7 @@ class CaptureService : Service() {
             "H.264 off: " + when {
                 Build.VERSION.SDK_INT < 29 -> "needs Android 10"
                 h264Failed.isNotEmpty() -> h264Failed
-                link === refusedLink -> "the MMI refused it"
+                link === mmi.refusedLink -> "the MMI refused it"
                 else -> "the MMI app has none (older audi_stream_receiver?)"
             } + ", JPEG instead"
         } else ""
@@ -833,8 +679,6 @@ class CaptureService : Service() {
         // 2.5 Mbit/s is ~12 KB a frame at 25 fps
         val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000, 8_000_000)
         const val DEFAULT_BIT_RATE = 4_000_000
-        const val START_FRAME_BYTES = 64 * 1024
-        private const val MAX_QUEUE = 25  // ~1 s at 25 fps not acked: start again at an IDR
 
         fun start(context: Context, resultCode: Int, data: Intent) {
             val i = Intent(context, CaptureService::class.java)
