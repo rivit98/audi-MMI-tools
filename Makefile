@@ -162,14 +162,16 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # everything before it is already on the card).
 #
 # android_auto (an Android Auto head unit, proof of connectivity) runs
-# until the SD card is pulled, like audi_stream_receiver. Both are on the
-# card; run.sh's APPS line picks which one runs.
+# until the SD card is pulled, like audi_stream_receiver. It connects and
+# receives video but can't show it (the DM642 refuses 800 wide), so it is
+# no longer in the default run: the phone app's Android Auto mode streams
+# through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 \
            audi_stream_receiver android_auto
 CXX_APPS := hello8 hello9 hello10 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := android_auto audi_stream_receiver
+TESTS   := audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
