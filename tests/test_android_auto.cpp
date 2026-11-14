@@ -217,6 +217,8 @@ public:
 	std::map<u32, int> got;         // (channel << 16 | id) -> count, HU -> phone
 	std::vector<int> sensor_statuses;
 	int sensor_batches = 0, key_binding_status = -1, audio_focus_state = -1, nav_focus = -1;
+	u64 touch_ts = 0;
+	int touch_action = -1, touch_index = -1, touch_pointers = 0, touch_x = -1, touch_y = -1;
 	int mic_status = -1;
 
 	// --pb: protobuf-encoded phone messages in, the HU's messages out
@@ -382,6 +384,29 @@ public:
 		} else if (ch == 1 && id == 0x8003) {            // KEY_BINDING_RESPONSE
 			pb::get_u(p, n, 1, v);
 			key_binding_status = (int)(i32)v;
+		} else if (ch == 1 && id == 0x8001) {            // INPUT_REPORT
+			const u8 *te, *ptr;
+			usize ten, ptrn;
+			pb::get_u(p, n, 1, v);
+			touch_ts = v;
+			if (pb::get_bytes(p, n, 3, te, ten)) {
+				pb::get_u(te, ten, 3, v);
+				touch_action = (int)v;
+				pb::get_u(te, ten, 2, v);
+				touch_index = (int)v;
+				pb::Reader r(te, ten);
+				pb::Field f;
+				touch_pointers = 0;
+				while (r.next(f))
+					if (f.num == 1)
+						touch_pointers++;
+				if (pb::get_bytes(te, ten, 1, ptr, ptrn)) {
+					pb::get_u(ptr, ptrn, 1, v);
+					touch_x = (int)v;
+					pb::get_u(ptr, ptrn, 2, v);
+					touch_y = (int)v;
+				}
+			}
 		}
 	}
 };
@@ -412,6 +437,24 @@ void check_discovery(const std::vector<u8> &d)
 	CHECK(pb::get_str(d.data(), d.size(), 14) == "MMI 3G+");
 }
 
+// The video configuration's margins (width_margin 3, height_margin 4).
+void video_margins(const std::vector<u8> &d, u64 &mw, u64 &mh)
+{
+	pb::Reader r(d.data(), d.size());
+	pb::Field f;
+	mw = mh = 99;
+	while (r.next(f)) {
+		u64 id = 0;
+		const u8 *sink, *conf;
+		usize sn, cn;
+		if (f.num == 1 && pb::get_u(f.p, f.n, 1, id) && id == aa::kChVideo &&
+		    pb::get_bytes(f.p, f.n, 3, sink, sn) && pb::get_bytes(sink, sn, 4, conf, cn)) {
+			pb::get_u(conf, cn, 3, mw);
+			pb::get_u(conf, cn, 4, mh);
+		}
+	}
+}
+
 void test_session(const std::string &crt, const std::string &key, const std::string &pbdir)
 {
 	Phone phone;
@@ -423,8 +466,15 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	CHECK(phone.tls.init(crt, key));
 	phone.tls.out = &phone.junk;
 	aa::Config cfg;
+	cfg.margin_w = 80;
+	cfg.margin_h = 48;
 	aa::Session hu(cfg, phone);
 	phone.hu = &hu;
+
+	// touch before the session runs: nothing sent
+	aa::Pointer early = {1, 2, 0};
+	hu.touch(aa::Touch::Down, 0, &early, 1);
+	CHECK_EQ(hu.stats().touches, 0u);
 
 	CHECK(hu.start(crt, key));
 	CHECK(phone.version_req);
@@ -439,6 +489,10 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	CHECK(hu.stats().phone == "Test Phone");
 	check_discovery(phone.discovery);
 	CHECK(phone.discovery == hu.discovery_response());
+	u64 mw, mh;
+	video_margins(phone.discovery, mw, mh);
+	CHECK_EQ(mw, 80u);
+	CHECK_EQ(mh, 48u);
 
 	// channels: video ok, an unknown one refused
 	pb::Writer open;
@@ -544,6 +598,18 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	CHECK_EQ(phone.sensor_batches, 2);
 	CHECK_EQ(phone.key_binding_status, 0);
 	CHECK_EQ(hu.stats().unknown, 0);
+
+	// touch: a second finger down, with both pointers; the timestamp in us
+	aa::Pointer two[2] = {{400, 240, 0}, {799, 479, 1}};
+	hu.touch(aa::Touch::PointerDown, 1, two, 2);
+	phone.flush();
+	CHECK_EQ(hu.stats().touches, 1u);
+	CHECK_EQ(phone.touch_action, 5);
+	CHECK_EQ(phone.touch_index, 1);
+	CHECK_EQ(phone.touch_pointers, 2);
+	CHECK_EQ(phone.touch_x, 799);                    // get_bytes: the last pointer
+	CHECK_EQ(phone.touch_y, 479);
+	CHECK_EQ(phone.touch_ts, (u64)phone.clock * 1000);
 
 	// pings: ours after ping_ms, the phone's answered
 	phone.clock += 1500;

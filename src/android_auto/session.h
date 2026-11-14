@@ -17,6 +17,7 @@
 //      steady 25)
 //   5. pings both ways, audio / navigation / video focus always granted,
 //      sensors answered with fixed values: parked (unrestricted), day
+//   6. touch input from the app (touch()), in video pixels
 //
 // Pure C++ over tls.h: no USB, no threads. The app feeds it the bytes from
 // bulk IN (rx), calls tick() regularly and gets back what to write to bulk
@@ -67,7 +68,25 @@ struct Config {
 	// Video frame acks at most this many per second, held back in tick()
 	// until due (0: acked at once, as every other media message).
 	unsigned    video_fps = 25;
+	// Pixels of the 800x480 video the phone leaves black (VideoConfiguration
+	// width_margin / height_margin): the car UI is drawn in the rest
+	// (the phone app's Android Auto mode: 80 x 48 leaves 720x432).
+	unsigned    margin_w = 0, margin_h = 0;
 	std::string display_name = "MMI 3G+";
+};
+
+// TouchEvent.proto PointerAction
+enum class Touch : unsigned {
+	Down = 0,
+	Up = 1,
+	Moved = 2,
+	PointerDown = 5,
+	PointerUp = 6,
+};
+
+struct Pointer {
+	unsigned x, y;     // video pixels, 0..799 x 0..479
+	unsigned id;
 };
 
 struct Stats {
@@ -92,6 +111,7 @@ struct Stats {
 	unsigned    last_rtt_ms = 0;
 	unsigned    handshake_ms = 0;    // the TLS handshake, from the first ClientHello
 	unsigned    unknown = 0;         // messages we had no handler for
+	unsigned    touches = 0;         // touch reports sent
 };
 
 class Host {
@@ -123,6 +143,10 @@ public:
 	unsigned ms_to_next(unsigned limit) const;
 	// Tell the phone we are going (BYEBYE_REQUEST), if the session is up.
 	void bye();
+	// A touch event (INPUT_REPORT): every pointer down, `index` the one the
+	// action is about (PointerDown / PointerUp). Ignored until the phone
+	// has opened the input channel.
+	void touch(Touch action, unsigned index, const Pointer *p, usize n);
 
 	Phase phase() const { return phase_; }
 	const Stats &stats() const { return stats_; }

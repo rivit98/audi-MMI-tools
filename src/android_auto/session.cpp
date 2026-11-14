@@ -63,6 +63,7 @@ enum : u16 {
 
 // input channel (InputMessageId.proto)
 enum : u16 {
+	kInputReport = 0x8001,
 	kKeyBindingRequest = 0x8002,
 	kKeyBindingResponse = 0x8003,
 };
@@ -242,7 +243,7 @@ std::vector<u8> Session::discovery_response() const
 	// video: H.264 Baseline 800x480 at 30 fps (MediaSinkService,
 	// VideoConfiguration)
 	pb::Writer vconf, video;
-	vconf.u(1, kVideo800x480).u(2, kFps30).u(3, 0).u(4, 0).u(5, cfg_.dpi);
+	vconf.u(1, kVideo800x480).u(2, kFps30).u(3, cfg_.margin_w).u(4, cfg_.margin_h).u(5, cfg_.dpi);
 	video.u(1, kCodecH264Bp).msg(4, vconf).b(5, true);
 	r.msg(1, service(kChVideo, 3, video));
 
@@ -708,6 +709,22 @@ void Session::on_input(u16 id, const u8 *, usize n)
 	pb::Writer w;
 	w.i(1, 0);
 	send_msg(kChInput, aap::kEncrypted, kKeyBindingResponse, w.buf);
+}
+
+void Session::touch(Touch action, unsigned index, const Pointer *p, usize n)
+{
+	if (phase_ != Phase::Running || !(stats_.open_channels & 1u << kChInput))
+		return;
+	pb::Writer ev, report;
+	for (usize i = 0; i < n; i++) {
+		pb::Writer ptr;
+		ptr.u(1, p[i].x).u(2, p[i].y).u(3, p[i].id);
+		ev.msg(1, ptr);
+	}
+	ev.u(2, index).u(3, (unsigned)action);
+	report.u(1, (u64)host_.now_ms() * 1000).msg(3, ev);   // timestamp in us
+	send_msg(kChInput, aap::kEncrypted, kInputReport, report.buf);
+	stats_.touches++;
 }
 
 void Session::tick()

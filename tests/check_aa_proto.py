@@ -56,7 +56,10 @@ SENSOR_TYPES = {
     0x8002: SENSOR + "SensorResponse",
     0x8003: SENSOR + "SensorBatch",
 }
-INPUT_TYPES = {0x8003: MEDIA + "sink.message.KeyBindingResponse"}
+INPUT_TYPES = {
+    0x8001: "aap_protobuf.service.inputsource.message.InputReport",
+    0x8003: MEDIA + "sink.message.KeyBindingResponse",
+}
 
 # Not expected in a test session: the head unit only sends it on stop.
 NOT_IN_SESSION = {CTRL + "ByeByeRequest"}
