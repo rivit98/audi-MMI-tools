@@ -380,7 +380,70 @@ What this means for an app with sound: it can play through
 volume, set with the volume knob. The app's own graph volume does nothing
 (below, confirmed in code). That suits short prompts and a full-screen
 media app, but not background sound over the radio. To be quieter than
-the car volume, an app has to scale the samples it writes.
+the car volume, an app has to scale the samples it writes. Sound over a
+lowered radio goes another way: the next section.
+
+### Mixing over the radio: the announcement path
+
+The car already mixes over the radio for the nav voice: the radio gets
+quieter, the prompt plays, the radio comes back. The DSP doesn't do this.
+The external amplifier does it, on its own announcement inputs, and
+MMI3GApplication's audio management switches it on per connection.
+**[confirmed in code; not tried on the car]**
+
+- **The nav voice's PCM path.** SSSProcess plays every prompt through
+  io-audio (`libpal_audio.so`, QSA). `/mnt/efs-system/sss/general/default.cfg`:
+  `PrompterService.Prompter_2 = NAVI` → `SAOP_2` →
+  `DeviceID_navi = PAL,1,FRAME,256,22050`, i.e. **22050 Hz mono S16 on
+  `navi` (card 0 device 1, `pcmC0D1p`)**. SDS, SMS, e-mail, TMC and touchpad
+  prompts (`Prompter_1`) go to `tones1` (device 5) the same way. These
+  are the same devices hello5 wrote to, unheard.
+- **Why hello5's writes were unheard.** The amplifier only plays an
+  announcement input while a *logical connection* for it is open. The
+  connections are MMI3GApplication's `LC_*` enum (name table
+  `FUN_0830d654`):
+
+  | id | connection | carries |
+  |---|---|---|
+  | `0x74` | `LC_SRCNAVTTSANN_SNKAMPANN2` | nav voice → amp announcement sink 2 |
+  | `0x75` | `LC_SRCNAVTTSANN_NO_TEL` | nav voice, no phone call active |
+  | `0x72` / `0x73` | `LC_SRCNAVTTSTMC(_NO_TEL)` | TMC traffic prompt |
+  | `0x70` | `LC_SRCSDSTTSANN_SNKAMPANN1` | SDS voice → amp announcement sink 1 |
+  | `0x7a` | `LC_SRCSYSANN3_BEEP` | system beep (also `0x78` PRIO2, `0x79` WARN) |
+  | `0x04` | `LC_SRCAPSANN` | parking aid (APS) |
+
+  Clients open and close them with the AudioManagement DSI service:
+  `requestRequestConnection(lc, terminal, group)` /
+  `requestReleaseConnection(lc, terminal)` (CAudioManagementPresCtrl), with
+  `responseStartConnection` / `responseFadedIn` / `responseStopConnection`
+  back. Java has the same as `DSIAudioManagement.requestConnection(int)` /
+  `releaseConnection(int)`. MMI3GNavigation has its own native client
+  (`CGNavDevAMClient`, `CSGAudioManagementProxy`).
+- **The ducking.** `CAudioMixer::calculateTargetVolume` (`FUN_080f5054`):
+  while one of the nav sources (internal source ids `0xe`, `0xc`, `0x11`,
+  `0x4d`, `0x4e`) is active, each entertainment sink's target volume is
+  capped at the "lower entertainment" level for nav (log: `NAV is active =>
+  attenuate Volume of Sink %d to %x`). APS does the same with its own
+  level. The level is the user's Sound setting
+  (`requestSetLoweringEntertainment(…, EntType, Value)`). The prompt plays
+  at the nav announcement volume, not the entertainment volume.
+- **Transport.** DSI goes through `/usr/bin/servicebroker` (a resmgr; QNX
+  messages, `MsgSendv` / `MsgSendPulse`). The JVM uses it directly
+  (`DSI_MAXPACKETLENGTH=16384` in lsd's environment).
+
+So an app that wants the radio lowered under its sound should:
+open `0x74` → wait for `responseStartConnection` (or `FadedIn`) → write
+22050 Hz mono S16 to `navi` with QSA → drain → release `0x74`. The amplifier
+restores the radio on release. **[inferred: no app of ours has opened a
+connection yet]** Two ways to open it:
+
+1. a native DSI client that talks to servicebroker like
+   `CSGAudioManagementProxy` does (the wire format still has to be read
+   from MMI3GNavigation); no system file changes, or
+2. a Java OSGi bundle in the DSITracer.jar slot (the toolkit's `per3-reader`
+   mechanism) that calls `DSIAudioManagement.requestConnection` and takes
+   orders from our app over a local socket. The Java int for each
+   connection still has to be checked against the native enum.
 
 ### Why the graph volume does nothing
 
