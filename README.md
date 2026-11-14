@@ -91,4 +91,3 @@ What is built but not yet confirmed is listed in each app's README and in
 | [map-and-cluster.md](docs/map-and-cluster.md) | how the navigation map is drawn; how the cluster display is fed (DDP2, KOMO) |
 | [power-onoff.md](docs/power-onoff.md) | who reboots / powers off the unit |
 | [bridge.md](docs/bridge.md) | laptop shell over USB (parked) |
-| [TODO.md](docs/TODO.md) | what to verify next |
