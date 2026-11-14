@@ -99,7 +99,7 @@ the same `HwStream`. What differs is who controls the encoder:
 | | Mirroring (option 2a) | Android Auto |
 |---|---|---|
 | Encoder settings | ours: 720x432, 25 fps, Baseline | the phone's, from the offered list only: **800x480 minimum** |
-| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`, phone-mirroring §7.8), and the DSP's `NvMixer_Video.c` has `assert(width < 720)` [repo] |
+| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`, phone-mirroring §7.8), and the DSP's `NvMixer_Video.c` has `assert(width < 720)` [repo]; cropped to 720 in the SPS it stays black [repo, hello10] |
 | Level | ≤ 3 | 800x480 at 30 fps is 45 000 MB/s, above level 3's 40 500, which io-media rejects; the phone may signal 3.1 (patching `level_idc` in the SPS: unverified) |
 | Frame rate | 25 | 30 or 60; 30 is allowed at 480 lines |
 | Pacing | batched `VIDEO_ACKS` | the protocol's media acks, held to 25 fps (ack pacing) |
@@ -107,35 +107,30 @@ the same `HwStream`. What differs is who controls the encoder:
 So the 720-wide limit is the one blocker, the same one an 800x480 clip hit
 in the mirroring tests.
 
-**Idea to pass it: margin + SPS crop [estimate, untested].**
+**Margin + SPS crop: does not work [repo, hello10].** The idea was to
+offer 800x480 with `width_margin = 80` (the phone keeps the car UI in the
+left 720 columns) and rewrite the SPS with `frame_cropping` of 80 px on the
+right, so the stream says 720x480 and passes io-media's check.
+`h264::crop_sps` does the rewrite: cropping and `level_idc` 3.0 (800x480 at
+25 fps is 37 500 macroblocks/s, within Level 3), the rest of the SPS bit for
+bit; ffmpeg decodes a cropped stream to exactly the original's top-left
+[repo, `make test`].
 
-1. Offer 800x480 with `width_margin = 80`: the phone keeps the car UI in
-   the left 720 columns and fills the rest with black, still encoding
-   800x480.
-2. Rewrite the SPS with `frame_cropping` of 80 px on the right, so the
-   stream says 720x480; the CS-MP4 header (`csmp4`) declares 720x480 and
-   passes io-media's check. The SPS is a few bytes, rewritten once per
-   codec config; `common/h264.h` already parses cropping.
+On the car, [hello10](../src/hello10/README.md) streamed an ffmpeg 800x480
+Baseline clip with the cropped SPS through `HwStream` on VCAP 0 input 1:
 
-The rewrite is built: `h264::crop_sps` sets the cropping and `level_idc`
-and keeps the rest of the SPS bit for bit; ffmpeg decodes a cropped stream
-to exactly the original's top-left [repo, `make test`]. At 25 fps the
-800-wide coded picture is 37 500 macroblocks/s, within Level 3, so level
-3.0 in the rewritten SPS is true.
+- io-media accepts it: the graph reports 720x480 (720x416 for the bottom
+  crop), TIME events run at 1x for the whole test, 0 errors, reads block
+  ~85 ms as with 720-wide streams.
+- **The screen stays black** for all three crop tests (720x480, 720x416,
+  15 fps with skip frames). The plain 720x336 MP4 control just before plays.
+- No assertion, DSP or io-media error in the system log; the unit and the
+  following apps run on normally.
 
-Open: whether the DM642 decodes a 50-macroblock-wide coded picture that is
-cropped to 720 for display, or trips its width assertion or overflows a
-buffer sized for 720. [hello10](../src/hello10/README.md) answers it
-without a phone: an ffmpeg 800x480 Baseline clip with the cropped SPS,
-streamed through `HwStream` on VCAP 0 input 1, also cropped to 720x416
-(the bottom bar cut). If it plays, AA video on screen is mostly wiring. If
-not, the options are below.
-
-**Frame rate: ack pacing [estimate].** The phone encodes at 30 fps, the
-stream plays at 25. android_auto holds each video ack until a frame period
-after the last (`fps=`, default 25; its README): with one frame unacked,
-the phone can't send faster. Whether it then drops frames (the age of
-arrivals stays flat) or queues them (it grows) is unmeasured.
+So the DM642 shows nothing from a 50-macroblock-wide coded picture,
+whatever the SPS says [repo]. Why is unknown: nothing is logged, so the
+DSP's width check (or a buffer sized for 720) fails silently [inferred]. Android Auto's smallest video (800x480) can't
+reach the screen through io-media. The options left:
 
 - **DSP driven directly** (option 2b): bypasses io-media's check, but the
   DSP assertion stays; months of work.

@@ -162,10 +162,21 @@ DRBG is seeded by the own jitter source. CPU: the app 15-26 %, the unit
   own GPS has to be on and allowed.
 - No audio arrived (nothing was played).
 
+**Ack pacing at 25 fps makes it worse.** With `fps=25` the slow start never
+ended: ~50 s of video at 3.6-6.8 fps, far under the cap, while the ping
+round trip grew from ~0.85 s to ~8.4 s and the `frame age` from +2.4 s to
++8 s. So the phone **queues** frames, it doesn't drop them. Held acks
+waited up to 730-860 ms, far beyond one 40 ms period: the frames came in
+bursts of up to ~20, past `max_unacked` 1, and their acks went out 40 ms
+apart. Without pacing (`fps=0`) the same phone recovers to 30 fps after
+~20 s. Pacing seems to keep the phone in its backlog [inferred, one run
+each]. Its reason, a steady 25 fps for the DM642, is gone with the crop
+result below.
+
 Open points:
 
-- showing the video (800 wide is refused by the DM642; the SPS crop to 720
-  is tested by [hello10](../hello10/README.md), docs/android-auto.md §4.1),
-  touch / knob input, audio out
-- ack pacing at 25 fps: built and host-tested, not yet run with a phone.
-  The `pace:` line answers whether the phone drops frames or queues them
+- showing the video: the DM642 shows nothing from an 800-wide coded
+  picture, even with the SPS cropped to 720 (docs/android-auto.md §4.1).
+  What is left is software decode or driving the DSP directly
+- ack pacing: default back to `fps=0`
+- touch / knob input, audio out

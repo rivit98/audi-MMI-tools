@@ -73,4 +73,10 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 
 ## State
 
-Built, host-tested (the SPS rewrite); not yet run on the car.
+Run on the car. `c5` plays. `crop`, `cropnav` and `slow` stay **black**:
+io-media accepts the cropped stream (query 720×480 / 720×416, TIME events
+at 1×, 0 errors, 0 refused frames), but nothing reaches the screen. No
+assertion or DSP error in `slog.txt`, and the unit runs on normally. So an
+800-wide coded picture can't be shown, cropped or not
+([docs/android-auto.md](../../docs/android-auto.md) §4.1). Retired from the
+default run.

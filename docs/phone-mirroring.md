@@ -86,6 +86,9 @@ not covered here.
   25 fps above 480 lines (`FUN_080d1760`, §7.8). Both the host
   (`vmixer.c`) and the DSP (`NvMixer_Video.c`) also contain
   `assert(width < 720)`. 800×480 H.264 does not play on the car (§7.5).
+  Cropping the SPS to 720 does not help: an 800-wide coded picture that
+  says 720×480 passes io-media but stays black on screen (hello10,
+  [android-auto.md](android-auto.md) §4.1) [confirmed].
 - **Containers.** `iom.cfg` maps file extensions to parsers (full table in
   §7.8):
 
