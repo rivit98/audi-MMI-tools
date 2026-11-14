@@ -143,9 +143,11 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # input 1, is rechecked by hello9's c5 control on every hello9 run. What
 # it leaves open needs RE or new tests (src/hello6/README.md).
 #
-# hello5 is not in the default run: all its steps have answered on the car
-# (the sound replaces radio and music and follows the volume knob, the
-# re-shown screen comes back over the Media screen; src/hello5/README.md).
+# hello5 runs step d by default (sd/apps.conf): sound over a lowered radio
+# through the nav voice channel (docs/hbdsi.md). Its other steps have
+# answered on the car (the sound replaces radio and music and follows the
+# volume knob, the re-shown screen comes back over the Media screen;
+# src/hello5/README.md).
 #
 # hello9 is not in the default run: all eight tests have answered on the
 # car (skip frames work on the DSP, the io-media queue isn't counted in
@@ -172,7 +174,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello8 hello9 hello10 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := audi_stream_receiver
+TESTS   := hello5 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
