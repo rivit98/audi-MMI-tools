@@ -22,7 +22,6 @@ import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.Button
 import android.widget.CompoundButton
-import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 
@@ -44,7 +43,9 @@ import android.widget.TextView
  * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
  * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
  * comparison) and "Capture mode" (the MMI's field mode, sent in H264_CONFIG)
- * apply to H.264 only, also remembered. "Latency clock" shows a big running
+ * apply to H.264 only, also remembered. "Max fps", "H.264 rate", "Capture
+ * mode" and "Keep screen on" are on both pages ([StreamOptions]): the
+ * Android Auto mode streams with the same settings. "Latency clock" shows a big running
  * clock (seconds.milliseconds, redrawn every display frame) that the MMI
  * mirrors: one photo of both screens gives the delay. "Keep screen on" (remembered) has CaptureService hold the
  * screen on while it streams, so a timeout can't lock the phone and end the
@@ -78,7 +79,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var statusView: TextView
     private lateinit var detailView: TextView
     private lateinit var streamButton: Button
-    private lateinit var fpsLabel: TextView
     private lateinit var videoView: TextView
     private lateinit var clockView: TextView
     private lateinit var pager: SwipePager
@@ -145,10 +145,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         streamButton.setOnClickListener { toggleStreaming() }
         clockView = findViewById(R.id.clock)
         findViewById<CompoundButton>(R.id.clock_switch).setOnCheckedChangeListener { _, on -> setClock(on) }
-        fpsLabel = findViewById(R.id.fps_label)
-        Streaming.maxFps = getPreferences(MODE_PRIVATE).getInt(PREF_FPS, CaptureService.DEFAULT_FPS)
-            .coerceIn(CaptureService.MIN_FPS, CaptureService.MAX_FPS)
-        showFps()
         Streaming.format = Format.entries.firstOrNull {
             it.name == getPreferences(MODE_PRIVATE).getString(PREF_FORMAT, null)
         } ?: Format.H264
@@ -163,31 +159,8 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             }
         }
         val prefs = getPreferences(MODE_PRIVATE)
-        Streaming.bitRate = prefs.getInt(PREF_BIT_RATE, CaptureService.DEFAULT_BIT_RATE)
-            .takeIf { it in CaptureService.BIT_RATES } ?: CaptureService.DEFAULT_BIT_RATE
-        findViewById<Spinner>(R.id.bit_rate).apply {
-            setSelection(CaptureService.BIT_RATES.indexOf(Streaming.bitRate))
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
-                    Streaming.bitRate = CaptureService.BIT_RATES[pos]
-                    getPreferences(MODE_PRIVATE).edit().putInt(PREF_BIT_RATE, Streaming.bitRate).apply()
-                }
-                override fun onNothingSelected(parent: AdapterView<*>) {}
-            }
-        }
-        Streaming.vcapMode = VcapMode.entries.firstOrNull {
-            it.name == prefs.getString(PREF_VCAP_MODE, null)
-        } ?: VcapMode.WEAVE
-        findViewById<Spinner>(R.id.vcap_mode).apply {
-            setSelection(Streaming.vcapMode.ordinal)
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
-                    Streaming.vcapMode = VcapMode.entries[pos]
-                    getPreferences(MODE_PRIVATE).edit().putString(PREF_VCAP_MODE, Streaming.vcapMode.name).apply()
-                }
-                override fun onNothingSelected(parent: AdapterView<*>) {}
-            }
-        }
+        setUpStreamOptions(prefs)
+
         Streaming.sharp = prefs.getBoolean(PREF_SHARP, true)
         findViewById<CompoundButton>(R.id.sharp).apply {
             isChecked = Streaming.sharp
@@ -203,27 +176,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
                 Streaming.hideNavBar = on
                 getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_HIDE_NAV_BAR, on).apply()
             }
-        }
-        Streaming.keepScreenOn = prefs.getBoolean(PREF_KEEP_SCREEN_ON, false)
-        findViewById<CompoundButton>(R.id.keep_screen_on).apply {
-            isChecked = Streaming.keepScreenOn
-            setOnCheckedChangeListener { _, on ->
-                Streaming.keepScreenOn = on
-                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_KEEP_SCREEN_ON, on).apply()
-            }
-        }
-        findViewById<SeekBar>(R.id.fps).apply {
-            max = CaptureService.MAX_FPS - CaptureService.MIN_FPS     // no setMin before API 26
-            progress = Streaming.maxFps - CaptureService.MIN_FPS
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
-                    Streaming.maxFps = value + CaptureService.MIN_FPS
-                    getPreferences(MODE_PRIVATE).edit().putInt(PREF_FPS, Streaming.maxFps).apply()
-                    showFps()
-                }
-                override fun onStartTrackingTouch(bar: SeekBar) {}
-                override fun onStopTrackingTouch(bar: SeekBar) {}
-            })
         }
         setUpInfo()
         setUpModes()
@@ -383,9 +335,9 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     }
 
     /** The (i) buttons stay usable while their option is disabled. */
-    private fun setUpInfo() {
-        for ((button, title, text) in INFO) {
-            findViewById<View>(button).apply {
+    private fun setUpInfo(root: View = window.decorView, info: List<Triple<Int, Int, Int>> = INFO) {
+        for ((button, title, text) in info) {
+            root.findViewById<View>(button).apply {
                 contentDescription = getString(R.string.info_about, getString(title))
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity)
@@ -398,8 +350,16 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         }
     }
 
-    private fun showFps() {
-        fpsLabel.text = getString(R.string.max_fps, Streaming.maxFps)
+    /** The H.264 settings on both pages: one set of values, two copies of
+     * the controls, each showing what the other changed. */
+    private fun setUpStreamOptions(prefs: android.content.SharedPreferences) {
+        StreamOptions.load(prefs)
+        val fpsText = { fps: Int -> getString(R.string.max_fps, fps) }
+        lateinit var screen: StreamOptions
+        lateinit var aa: StreamOptions
+        screen = StreamOptions(findViewById(R.id.screen_options), prefs, fpsText) { aa.show() }
+        aa = StreamOptions(findViewById(R.id.aa_options), prefs, fpsText) { screen.show() }
+        for (root in listOf(R.id.screen_options, R.id.aa_options)) setUpInfo(findViewById(root), OPTION_INFO)
     }
 
     private fun showVideo() {
@@ -496,12 +456,8 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     companion object {
         private const val ACTION_PERMISSION = "mmi3g.audistreaming.USB_PERMISSION"
         private const val REQ_CAPTURE = 1
-        private const val PREF_FPS = "max_fps"
         private const val PREF_FORMAT = "format"
-        private const val PREF_BIT_RATE = "bit_rate"
-        private const val PREF_VCAP_MODE = "vcap_mode"
         private const val PREF_SHARP = "sharp_h264"
-        private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
         private const val PREF_MODE = "mode"
         private const val MODE_SCREEN = 0
@@ -509,15 +465,18 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val AA_PACKAGE = "com.google.android.projection.gearhead"
         private val INFO = listOf(
             Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
-            Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
             Triple(R.id.info_format, R.string.info_format_title, R.string.info_format),
-            Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),
-            Triple(R.id.info_vcap_mode, R.string.info_vcap_mode_title, R.string.info_vcap_mode),
             Triple(R.id.info_sharp, R.string.info_sharp_title, R.string.info_sharp),
             Triple(R.id.info_clock, R.string.info_clock_title, R.string.info_clock),
             Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
-            Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
             Triple(R.id.info_aa, R.string.info_aa_title, R.string.info_aa),
+        )
+        // in res/layout/stream_options.xml, once per page
+        private val OPTION_INFO = listOf(
+            Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
+            Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),
+            Triple(R.id.info_vcap_mode, R.string.info_vcap_mode_title, R.string.info_vcap_mode),
+            Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
         )
     }
 }

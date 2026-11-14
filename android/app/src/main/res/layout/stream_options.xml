@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The H.264 stream settings both modes use, included in both pages and
+     kept in step by StreamOptions (MainActivity). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:text="@string/stream_options"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <LinearLayout style="@style/OptionRow">
+
+        <TextView
+            android:id="@+id/fps_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minEms="5"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/fps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/info_fps"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/OptionRow">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minEms="5"
+            android:text="@string/bit_rate"
+            android:textSize="14sp" />
+
+        <Spinner
+            android:id="@+id/bit_rate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:entries="@array/bit_rates" />
+
+        <ImageButton
+            android:id="@+id/info_bit_rate"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/OptionRow">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minEms="5"
+            android:text="@string/vcap_mode"
+            android:textSize="14sp" />
+
+        <Spinner
+            android:id="@+id/vcap_mode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:entries="@array/vcap_modes" />
+
+        <ImageButton
+            android:id="@+id/info_vcap_mode"
+            style="@style/InfoButton" />
+    </LinearLayout>
+
+    <LinearLayout
+        style="@style/OptionRow"
+        android:paddingStart="12dp">
+
+        <CheckBox
+            android:id="@+id/keep_screen_on"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/keep_screen_on" />
+
+        <ImageButton
+            android:id="@+id/info_keep_screen_on"
+            style="@style/InfoButton" />
+    </LinearLayout>
+</LinearLayout>

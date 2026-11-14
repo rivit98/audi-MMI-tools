@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.Surface
@@ -48,7 +49,13 @@ import java.util.concurrent.Executors
  * its UI in the top-left 720x432 ([AaGeometry]): the MMI's H.264 picture,
  * copied 1:1. Only system sounds are advertised: music and navigation stay
  * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
- * The frame clock (25 fps) drops what Android Auto sends above that.
+ *
+ * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
+ * is the frame clock's rate (what Android Auto sends above it is dropped),
+ * then "H.264 rate", "Capture mode" and "Keep screen on". A new rate or bit
+ * rate, once settled, gets a new encoder that the scaler draws into
+ * ([GlScaler.retarget]); the decoder goes on, so Android Auto never
+ * notices, and only the MMI restarts its stream.
  *
  * Everything runs on one thread ("aa"): the session (single-threaded), the
  * decoder's and encoder's callbacks, [MmiH264]. The socket has a reader and
@@ -85,6 +92,8 @@ class AaService : Service() {
     private var fpsAt = 0L
     private var fpsDecoded = 0
     private var fps = 0.0
+    private var settingsChangeAt = 0L
+    private lateinit var screenLock: PowerManager.WakeLock
 
     private val tick = Runnable { onTick() }
 
@@ -95,6 +104,9 @@ class AaService : Service() {
         AppLog.init(this)
         thread = HandlerThread("aa").apply { start() }
         handler = Handler(thread.looper)
+        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @Suppress("DEPRECATION")
+        screenLock = power.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "audistreaming:aa_keep_screen_on")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -147,6 +159,7 @@ class AaService : Service() {
             drainLog()
             stopPipeline()
             audio.release()
+            if (screenLock.isHeld) screenLock.release()
             Streaming.link?.sendVideoStop()
             // the preview's owner may let its surface go from here on
             if (instance === this) instance = null
@@ -317,6 +330,7 @@ class AaService : Service() {
         var next = TICK_MS
         if (s != null) next = s.tick(TICK_MS.toInt()).toLong().coerceIn(1L, TICK_MS)
         drainLog()
+        followSettings()
         sendToMmi()
         showStatus()
         handler.postDelayed(tick, next)
@@ -328,16 +342,61 @@ class AaService : Service() {
 
     // --- decoder -> scaler -> encoder -> MMI (aa thread) -------------------
 
-    /** The picture path, made on the first codec config of a session. */
-    private fun startPipeline(): Boolean {
-        if (decoder != null) return true
-        val caps = Streaming.link?.videoCaps
-        val fps = caps?.h264Fps?.takeIf { it > 0 }?.coerceAtMost(CaptureService.MAX_FPS) ?: CaptureService.MAX_FPS
+    /** The H.264 rate the settings ask for: "Max fps", at most the MMI's. */
+    private fun wantFps(): Int {
+        val mmiFps = Streaming.link?.videoCaps?.h264Fps?.takeIf { it > 0 } ?: CaptureService.MAX_FPS
+        return Streaming.maxFps.coerceIn(CaptureService.MIN_FPS, mmiFps.coerceAtMost(CaptureService.MAX_FPS))
+    }
+
+    private fun newEncoder(fps: Int): HwEncoder? {
         val e = HwEncoder(PIC_W, PIC_H, fps, Streaming.bitRate, false, handler, mmi::onConfig, mmi::onFrame) { why ->
             AppLog.w("AA mode H.264: $why")
             pipelineFailed = why
         }
-        if (!e.start()) return false
+        return if (e.start()) e else null
+    }
+
+    /** "Keep screen on", and a new rate or bit rate: once settled for
+     * [SETTLE_MS] (a slider being dragged), a new encoder. */
+    private fun followSettings() {
+        if (Streaming.keepScreenOn != screenLock.isHeld) {
+            if (Streaming.keepScreenOn) screenLock.acquire() else screenLock.release()
+            AppLog.i("AA mode: keep screen on: ${Streaming.keepScreenOn}")
+        }
+        val e = mmi.enc
+        val sc = scaler
+        if (e == null || sc == null) {
+            settingsChangeAt = 0L
+            return
+        }
+        val fps = wantFps()
+        if (e.fps == fps && e.bitRate == Streaming.bitRate) {
+            settingsChangeAt = 0L
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (settingsChangeAt == 0L) settingsChangeAt = now
+        if (now - settingsChangeAt < SETTLE_MS) return
+        settingsChangeAt = 0L
+        val n = newEncoder(fps) ?: return
+        if (!sc.retarget(n.surface!!, fps)) {
+            AppLog.w("AA mode: GL scaler could not move to the new encoder: ${sc.error}")
+            pipelineFailed = "GL: ${sc.error}"
+            n.release()
+            stopPipeline()
+            return
+        }
+        e.release()
+        mmi.newEncoder(n, Streaming.link?.videoCaps?.h264MaxFrame ?: MmiH264.START_FRAME_BYTES * 4)
+        AppLog.i("AA mode: new encoder for the settings: ${n.description}")
+    }
+
+    /** The picture path, made on the first codec config of a session. */
+    private fun startPipeline(): Boolean {
+        if (decoder != null) return true
+        val caps = Streaming.link?.videoCaps
+        val fps = wantFps()
+        val e = newEncoder(fps) ?: return false
         val sc = GlScaler(e.surface!!, PIC_W, PIC_H, AaGeometry.geometry(PIC_W, PIC_H), fps)
         if (!sc.start()) {
             pipelineFailed = "GL: ${sc.error}"
@@ -488,6 +547,7 @@ class AaService : Service() {
         private const val RETRY_MS = 2000L
         private const val TICK_MS = 20L
         private const val STATUS_LOG_MS = 5000L
+        private const val SETTLE_MS = 700L       // as the mirroring's FPS_SETTLE_MS
         // the MMI's H.264 picture (H264.pictureSize(720, 576)) = Android Auto's UI
         const val PIC_W = 720
         const val PIC_H = 432

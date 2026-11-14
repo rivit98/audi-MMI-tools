@@ -156,7 +156,7 @@ mirroring's H.264 path.
 ```
 Android Auto (phone)  --TCP 127.0.0.1:5277-->  AaService (same phone)
    session: src/android_auto through JNI (aa_jni.cpp, NDK, mbedTLS)
-   800x480 H.264 --> MediaCodec decoder --> GlScaler: top-left 720x432, 1:1, 25 fps
+   800x480 H.264 --> MediaCodec decoder --> GlScaler: top-left 720x432, 1:1, Max fps (<= 25)
                                                |--> phone preview (touch input back to AA)
                                                '--> MediaCodec encoder 720x432 --> MmiH264
    --> AOA --> audi_stream_receiver --> DM642 (unchanged)
@@ -176,9 +176,14 @@ NDK). Differences from the car app:
   measured top-left anchoring on hardware, `TouchCoordinateMapperTest.kt`).
   720x432 is the MMI's H.264 picture, so the GPU copies it 1:1: no scaling,
   sharp text.
-- **Frame rate.** Android Auto sends up to 30 fps; the GPU's frame clock
-  draws exactly 25 a second into the encoder (the MMI's stream rate) and
-  drops the rest. No ack pacing (`fps=0`): the acks go at once.
+- **Frame rate and stream settings.** Android Auto sends up to 30 fps; the
+  GPU's frame clock draws exactly "Max fps" a second into the encoder (at
+  most 25, the MMI's stream rate) and drops the rest. No ack pacing
+  (`fps=0`): the acks go at once. "Max fps", "H.264 rate", "Capture mode"
+  and "Keep screen on" are the mirroring's settings, shown on both pages. A
+  new rate or bit rate gets a new encoder that the GPU draws into
+  (`GlScaler.retarget`); the decoder keeps running, so Android Auto never
+  notices, and only the MMI restarts its stream.
 - **Audio.** Only the system-sound sink is advertised (open-headunit's Self
   Mode does the same), so music and navigation stay on the phone and reach
   the car over Bluetooth like any phone sound. System sounds play through

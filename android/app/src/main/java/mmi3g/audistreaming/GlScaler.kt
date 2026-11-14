@@ -41,15 +41,19 @@ import java.util.concurrent.TimeUnit
  * The input needn't be a virtual display: the Android Auto mode ([AaService])
  * gives [inputSurface] to its H.264 decoder. [setPreview] also draws each
  * frame's picture into a phone-side surface (that mode's touch preview),
- * stretched to it and bilinear-filtered.
+ * stretched to it and bilinear-filtered. [retarget] moves the drawing to a
+ * new encoder (another rate) while the input stays: that mode's decoder
+ * goes on undisturbed.
  */
 class GlScaler(
-    private val target: Surface,
+    private var target: Surface,
     val w: Int,
     val h: Int,
     start: ScreenCrop.Geometry,
-    val fps: Int,
+    fps: Int,
 ) {
+    @Volatile var fps = fps
+        private set
     @Volatile var geometry = start
         private set
     val k: Int get() = geometry.k
@@ -212,6 +216,41 @@ class GlScaler(
             done.countDown()
         }
         return done.await(2, TimeUnit.SECONDS) && ok
+    }
+
+    /** Draws into [s] (a new encoder's input, w x h) at [newFps] from the
+     * next tick on; the old target is let go of before this returns, so its
+     * encoder may be released after. False (and [failed]) if the GL thread
+     * couldn't. */
+    fun retarget(s: Surface, newFps: Int): Boolean {
+        val hd = handler ?: return false
+        val done = CountDownLatch(1)
+        hd.post {
+            try {
+                val old = surface
+                val n = EGL14.eglCreateWindowSurface(display, eglConfig, s, intArrayOf(EGL14.EGL_NONE), 0)
+                if (n == EGL14.EGL_NO_SURFACE) fail("eglCreateWindowSurface")
+                if (!EGL14.eglMakeCurrent(display, n, n, context)) {
+                    EGL14.eglDestroySurface(display, n)
+                    fail("eglMakeCurrent")
+                }
+                surface = n
+                target = s
+                if (old != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, old)
+                if (newFps != fps) {
+                    fps = newFps
+                    clock = FrameClock(newFps, System.nanoTime())
+                    hd.removeCallbacks(tick)
+                    hd.post(tick)
+                }
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "GL scaler retarget", e)
+                error = e.message ?: e.toString()
+                dead = true
+            }
+            done.countDown()
+        }
+        return done.await(2, TimeUnit.SECONDS) && !dead
     }
 
     /** The input surface before the last [update], once the virtual

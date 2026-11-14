@@ -98,25 +98,9 @@
                     style="@style/InfoButton" />
             </LinearLayout>
 
-            <LinearLayout style="@style/OptionRow">
-
-                <TextView
-                    android:id="@+id/fps_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minEms="5"
-                    android:textSize="14sp" />
-
-                <SeekBar
-                    android:id="@+id/fps"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1" />
-
-                <ImageButton
-                    android:id="@+id/info_fps"
-                    style="@style/InfoButton" />
-            </LinearLayout>
+            <include
+                android:id="@+id/screen_options"
+                layout="@layout/stream_options" />
 
             <LinearLayout style="@style/OptionRow">
 
@@ -139,47 +123,7 @@
                     style="@style/InfoButton" />
             </LinearLayout>
 
-            <LinearLayout style="@style/OptionRow">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minEms="5"
-                    android:text="@string/bit_rate"
-                    android:textSize="14sp" />
-
-                <Spinner
-                    android:id="@+id/bit_rate"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:entries="@array/bit_rates" />
-
-                <ImageButton
-                    android:id="@+id/info_bit_rate"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/OptionRow">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minEms="5"
-                    android:text="@string/vcap_mode"
-                    android:textSize="14sp" />
-
-                <Spinner
-                    android:id="@+id/vcap_mode"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:entries="@array/vcap_modes" />
-
-                <ImageButton
-                    android:id="@+id/info_vcap_mode"
-                    style="@style/InfoButton" />
-            </LinearLayout>
 
             <LinearLayout style="@style/OptionRow">
 
@@ -225,21 +169,6 @@
                     style="@style/InfoButton" />
             </LinearLayout>
 
-            <LinearLayout
-                style="@style/OptionRow"
-                android:paddingStart="12dp">
-
-                <CheckBox
-                    android:id="@+id/keep_screen_on"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/keep_screen_on" />
-
-                <ImageButton
-                    android:id="@+id/info_keep_screen_on"
-                    style="@style/InfoButton" />
-            </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
@@ -300,6 +229,10 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_marginEnd="8dp" />
+
+            <include
+                android:id="@+id/aa_options"
+                layout="@layout/stream_options" />
 
             <Button
                 android:id="@+id/aa_settings"
