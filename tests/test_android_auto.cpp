@@ -637,6 +637,28 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 		std::fclose(phone.index);
 }
 
+// System sounds only: video, system audio, mic, sensors, input.
+void test_system_audio_only()
+{
+	struct Null : aa::Host {
+		void send(const u8 *, usize) override {}
+		unsigned now_ms() override { return 0; }
+	} host;
+	aa::Config cfg;
+	cfg.audio_media = false;
+	aa::Session hu(cfg, host);
+	std::vector<u8> d = hu.discovery_response();
+	pb::Reader r(d.data(), d.size());
+	pb::Field f;
+	std::vector<u64> ids;
+	while (r.next(f)) {
+		u64 id = 0;
+		if (f.num == 1 && pb::get_u(f.p, f.n, 1, id))
+			ids.push_back(id);
+	}
+	CHECK(ids == std::vector<u64>({aa::kChVideo, aa::kChSystemAudio, aa::kChMic, aa::kChSensor, aa::kChInput}));
+}
+
 void test_bad_cert()
 {
 	struct Null : aa::Host {
@@ -670,6 +692,7 @@ int main(int argc, char **argv)
 	test_pb();
 	test_frames();
 	test_session(c, k, pbdir);
+	test_system_audio_only();
 	test_bad_cert();
 	CHECK_DONE();
 }

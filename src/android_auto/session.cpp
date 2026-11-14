@@ -195,6 +195,7 @@ bool Session::channel_known(u8 ch) const
 		return true;
 	case kChMediaAudio:
 	case kChGuidanceAudio:
+		return cfg_.audio && cfg_.audio_media;
 	case kChSystemAudio:
 		return cfg_.audio;
 	}
@@ -247,11 +248,12 @@ std::vector<u8> Session::discovery_response() const
 	video.u(1, kCodecH264Bp).msg(4, vconf).b(5, true);
 	r.msg(1, service(kChVideo, 3, video));
 
-	if (cfg_.audio) {
+	if (cfg_.audio && cfg_.audio_media) {
 		r.msg(1, service(kChMediaAudio, 3, audio_sink(kAudioMedia, 48000, 2)));
 		r.msg(1, service(kChGuidanceAudio, 3, audio_sink(kAudioGuidance, 16000, 1)));
-		r.msg(1, service(kChSystemAudio, 3, audio_sink(kAudioSystem, 16000, 1)));
 	}
+	if (cfg_.audio)
+		r.msg(1, service(kChSystemAudio, 3, audio_sink(kAudioSystem, 16000, 1)));
 
 	// microphone (MediaSourceService: PCM 16 kHz mono). Android Auto ends
 	// the session with "No audio/mic" without one. We send no mic data.

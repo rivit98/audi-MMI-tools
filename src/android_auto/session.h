@@ -63,6 +63,10 @@ struct Config {
 	u16    version_major = 1;
 	u16    version_minor = 1;
 	bool        audio = true;          // advertise the three audio sinks
+	// With audio: also media and guidance (false: system sounds only, so
+	// the phone plays music and navigation itself; open-headunit's Self
+	// Mode does the same, the phone app's Android Auto mode too).
+	bool        audio_media = true;
 	unsigned    dpi = 140;
 	unsigned    ping_ms = 1000;
 	// Video frame acks at most this many per second, held back in tick()
