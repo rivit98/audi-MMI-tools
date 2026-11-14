@@ -29,6 +29,15 @@
     <string name="info_keep_screen_on">Locking the phone ends the stream, so this stops the screen timing out and locking by itself while streaming, even with another app in front. The phone\'s screen may dim, but the MMI\'s picture stays bright.\n\nThe power button still turns the screen off and ends the stream. The phone uses more battery with this on.</string>
     <string name="info_hide_nav_bar_title">Hide navigation buttons</string>
     <string name="info_hide_nav_bar">Leaves the phone\'s navigation bar out of the picture, so the rest of the screen fills more of the MMI. The phone itself doesn\'t change. Needs Android 11 or newer.\n\nThe app can\'t see when the app in front goes full screen, so a full-screen video or game loses the same strip at that edge. Turn this off to see the whole screen.\n\nWith H.264, this needs the GPU step: if the GPU setup fails, the buttons stay. A change while streaming applies at once.</string>
+    <string name="mode_screen">Screen</string>
+    <string name="mode_aa">Android Auto</string>
+    <string name="aa_start">Start</string>
+    <string name="aa_stop">Stop</string>
+    <string name="aa_settings">Open Android Auto settings</string>
+    <string name="aa_off">Android Auto mode is off. Tap Start.</string>
+    <string name="aa_how_to">Slide back to Screen to mirror the phone\'s screen instead. Only one of the two runs at a time.\n\nOnce, on the phone: open Android Auto\'s settings (button above), tap Version at the bottom about ten times until developer settings are on, then in the menu (three dots) tap Start head unit server. This app connects to it and the MMI shows Android Auto.\n\nTouch the picture above to use Android Auto. Music and navigation sound stay on the phone (Bluetooth to the car).</string>
+    <string name="info_aa_title">Android Auto mode</string>
+    <string name="info_aa">This app becomes the car\'s Android Auto display, for Android Auto on this same phone (self mode). The MMI shows Android Auto through the same video path as the screen mirroring, and the picture above is what the MMI shows: touch it to use Android Auto.\n\nAndroid Auto starts this only through its developer head unit server: Android Auto settings, tap Version until developer settings are on, then menu, Start head unit server. The app tries to connect every 2 seconds and again after every session.\n\nAndroid Auto draws its screen in 720x432, the MMI\'s picture size, so text is not scaled. It runs at up to 25 frames a second on the MMI. H.264 rate on the Screen page applies here too.\n\nThe mode starts when you slide to this page, and stops when you slide back to Screen or tap Stop.</string>
     <string name="bit_rate">H.264 rate</string>
     <string name="vcap_mode">Capture mode</string>
     <string name="sharp">Sharp H.264 (GPU box downscale)</string>

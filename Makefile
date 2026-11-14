@@ -176,7 +176,7 @@ SD_APPS ?= $(TESTS)
 PRE_S   := 5
 POST_S  := 8
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan plot plot-test
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan plot plot-test aa-sources
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -510,6 +510,9 @@ gusa-scan: $(addprefix build/,$(APPS))
 	done' | c++filt
 
 # Android sender: its own Makefile (android/Makefile), everything in Docker.
+# Its Android Auto mode needs mbedTLS and the head unit certificate:
+# android/Makefile asks for them with aa-sources.
+aa-sources: $(MBEDTLS)/.done $(AA_CERT)/.done
 apk:
 	$(MAKE) -C android
 apk-test:

@@ -11,6 +11,10 @@
 #   make distclean  also remove the Gradle cache
 #
 # Gradle's caches live in .cache/ (mounted), so rebuilds are offline-fast.
+# The container sees the parent directory (/src, this directory is
+# /src/android): the Android Auto mode builds src/android_auto and
+# mbedTLS from third_party/ with the NDK (app/src/main/cpp), and bundles
+# aasdk's head unit certificate. Both are fetched by the top Makefile.
 # The APK is signed with a fixed key in keystore/ (made once), so reinstalls
 # keep working after `make clean`.
 
@@ -18,8 +22,8 @@ IMAGE := mmi-android
 APK   := out/audi_streaming.apk
 
 RUN = mkdir -p .cache/home && docker run --rm -u $(shell id -u):$(shell id -g) \
-      -e HOME=/src/.cache/home -e GRADLE_USER_HOME=/src/.cache/gradle \
-      -v $(CURDIR):/src -w /src $(IMAGE)
+      -e HOME=/src/android/.cache/home -e GRADLE_USER_HOME=/src/android/.cache/gradle \
+      -v $(CURDIR)/..:/src -w /src/android $(IMAGE)
 
 # adb needs the USB device nodes (root in the container); its key is kept in
 # a docker volume so the phone's "allow USB debugging" prompt comes once.
@@ -27,9 +31,14 @@ ADB = docker run --rm --privileged -v /dev/bus/usb:/dev/bus/usb \
       -v mmi-android-adb:/root/.android -v $(CURDIR)/out:/out:ro $(IMAGE)
 
 SRC := $(shell find app/src -type f) app/build.gradle.kts build.gradle.kts \
-       settings.gradle.kts gradle.properties
+       settings.gradle.kts gradle.properties \
+       $(wildcard ../src/android_auto/*.cpp ../src/android_auto/*.h ../src/common/pb.h \
+                  ../src/common/log.c ../src/common/log.h ../src/common/types.h \
+                  ../src/common/mbedtls/*.h)
+# mbedTLS + the head unit certificate (the top Makefile's pinned downloads)
+AA_SOURCES := ../third_party/mbedtls-3.6.7/.done ../third_party/aasdk-cert/.done
 
-.PHONY: all image test install shell clean distclean
+.PHONY: all image test install shell clean distclean aa-sources
 all: $(APK)
 
 # Rebuilt when the Dockerfile changes (docker's own cache makes it cheap).
@@ -44,13 +53,16 @@ keystore/debug.keystore: | .cache/image.stamp
 	    -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
 	    -dname "CN=Android Debug,O=Android,C=US"
 
-$(APK): $(SRC) keystore/debug.keystore .cache/image.stamp
+$(AA_SOURCES):
+	$(MAKE) -C .. aa-sources
+
+$(APK): $(SRC) $(AA_SOURCES) keystore/debug.keystore .cache/image.stamp
 	$(RUN) gradle --no-daemon -q assembleDebug
 	mkdir -p out
 	cp app/build/outputs/apk/debug/app-debug.apk $@
 	@echo "built android/$@"
 
-test: .cache/image.stamp
+test: $(AA_SOURCES) .cache/image.stamp
 	$(RUN) gradle --no-daemon -q testDebugUnitTest
 	@echo "android unit tests passed"
 
@@ -60,8 +72,8 @@ install: $(APK)
 
 shell: .cache/image.stamp
 	docker run --rm -it -u $(shell id -u):$(shell id -g) \
-	    -e HOME=/src/.cache/home -e GRADLE_USER_HOME=/src/.cache/gradle \
-	    -v $(CURDIR):/src -w /src $(IMAGE) bash
+	    -e HOME=/src/android/.cache/home -e GRADLE_USER_HOME=/src/android/.cache/gradle \
+	    -v $(CURDIR)/..:/src -w /src/android $(IMAGE) bash
 
 clean:
 	rm -rf app/build build out .gradle

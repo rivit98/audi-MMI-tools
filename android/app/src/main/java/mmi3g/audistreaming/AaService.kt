@@ -1,0 +1,528 @@
+package mmi3g.audistreaming
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.Surface
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+/**
+ * Android Auto mode: this app is the Android Auto head unit for Android
+ * Auto on the same phone ("self mode"), and the MMI shows its picture
+ * through the H.264 path the screen mirroring uses
+ * (docs/android-auto.md, "Phone relay").
+ *
+ * ```
+ * Android Auto (head unit server, 127.0.0.1:5277) --TCP--> AaNative session
+ *   video 800x480 H.264 --> AaDecoder --> GlScaler (top-left 720x432, 1:1, 25 fps;
+ *                                         also the touch preview) --> HwEncoder 720x432
+ *   --> MmiH264 --> AccessoryLink --> MMI (audi_stream_receiver, DM642)
+ *   preview touches --> AaNative.touch --> Android Auto
+ * ```
+ *
+ * Android Auto 17.4+ only starts a projection itself through its developer
+ * "Head unit server" (open-headunit's finding): Android Auto settings ->
+ * tap the version until developer mode is on -> menu -> Start head unit
+ * server. This service connects to it on 127.0.0.1:5277, and tries again
+ * every [RETRY_MS] until it answers and after every session.
+ *
+ * The session asks for 800x480 with margins 80 x 48, so Android Auto draws
+ * its UI in the top-left 720x432 ([AaGeometry]): the MMI's H.264 picture,
+ * copied 1:1. Only system sounds are advertised: music and navigation stay
+ * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
+ * The frame clock (25 fps) drops what Android Auto sends above that.
+ *
+ * Everything runs on one thread ("aa"): the session (single-threaded), the
+ * decoder's and encoder's callbacks, [MmiH264]. The socket has a reader and
+ * a writer thread of its own. Only one mode streams at a time: the activity
+ * stops [CaptureService] before it starts this.
+ */
+class AaService : Service() {
+    private lateinit var thread: HandlerThread
+    private lateinit var handler: Handler
+    private val main = Handler(Looper.getMainLooper())
+    @Volatile private var stopping = false
+
+    // the socket to Android Auto (net thread connects, reader reads)
+    private var socket: Socket? = null
+    private var output: OutputStream? = null
+    private var writer: ExecutorService? = null
+    private var netThread: Thread? = null
+    @Volatile private var generation = 0            // a new socket: older readers' posts are ignored
+
+    // aa thread
+    private var session: AaNative? = null
+    private var cert = ""
+    private var key = ""
+    private val mmi = MmiH264()
+    private var scaler: GlScaler? = null
+    private var decoder: AaDecoder? = null
+    private val audio = AaAudio()
+    private var previewSurface: Surface? = null
+    private var pipelineFailed = ""
+    private var refusedNoted: AccessoryLink? = null
+    private var sessions = 0
+    private var lastEnd = ""
+    private var statusAt = 0L
+    private var fpsAt = 0L
+    private var fpsDecoded = 0
+    private var fps = 0.0
+
+    private val tick = Runnable { onTick() }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.init(this)
+        thread = HandlerThread("aa").apply { start() }
+        handler = Handler(thread.looper)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            AppLog.i("AA mode: stop asked")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // every start: startForegroundService wants it each time
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification())
+        }
+        if (instance === this) return START_NOT_STICKY
+        try {
+            cert = assets.open("aa/headunit.crt").bufferedReader().readText()
+            key = assets.open("aa/headunit.key").bufferedReader().readText()
+        } catch (e: IOException) {
+            AppLog.w("AA mode: no head unit certificate in the app", e)
+            status = "No head unit certificate in the app (build problem)"
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        instance = this
+        handler.post { previewSurface = previewWanted }
+        running = true
+        status = "Starting"
+        AppLog.i("AA mode on")
+        startNet()
+        handler.post(tick)
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        stopping = true
+        AppLog.i("AA mode off")
+        running = false
+        connected = false
+        status = ""
+        closeSocket("AA mode off")
+        netThread?.interrupt()
+        handler.removeCallbacksAndMessages(null)
+        handler.post {
+            session?.let {
+                it.bye()
+                it.close()
+            }
+            session = null
+            drainLog()
+            stopPipeline()
+            audio.release()
+            Streaming.link?.sendVideoStop()
+            // the preview's owner may let its surface go from here on
+            if (instance === this) instance = null
+            thread.quitSafely()
+        }
+        super.onDestroy()
+    }
+
+    // --- the socket (net thread) -------------------------------------------
+
+    /** Connects to Android Auto's head unit server until stopped: a session
+     * at a time, a new attempt [RETRY_MS] after each. */
+    private fun startNet() {
+        netThread = Thread({
+            var announced = false
+            while (!stopping) {
+                val s = Socket()
+                try {
+                    s.tcpNoDelay = true
+                    s.connect(InetSocketAddress("127.0.0.1", PORT), CONNECT_TIMEOUT_MS)
+                } catch (e: IOException) {
+                    try { s.close() } catch (_: IOException) { }
+                    if (!announced) {
+                        AppLog.i("AA mode: no head unit server on 127.0.0.1:$PORT (${e.message})")
+                        announced = true
+                    }
+                    if (!connected) status = NO_SERVER
+                    if (!pause(RETRY_MS)) return@Thread
+                    continue
+                }
+                announced = false
+                val input = try { s.getInputStream() } catch (e: IOException) { null }
+                if (input == null) {
+                    try { s.close() } catch (_: IOException) { }
+                    continue
+                }
+                val gen = opened(s)
+                read(input, gen)               // until the socket closes
+                closeSocket("Android Auto closed the connection")
+                if (!pause(RETRY_MS)) return@Thread
+            }
+        }, "aa-net").apply { isDaemon = true; start() }
+    }
+
+    private fun pause(ms: Long): Boolean = try {
+        Thread.sleep(ms)
+        !stopping
+    } catch (_: InterruptedException) {
+        false
+    }
+
+    @Synchronized
+    private fun opened(s: Socket): Int {
+        socket = s
+        output = s.getOutputStream()
+        writer = Executors.newSingleThreadExecutor()
+        val gen = ++generation
+        connected = true
+        AppLog.i("AA mode: connected to the head unit server")
+        handler.post { startSession(gen) }
+        return gen
+    }
+
+    private fun read(input: InputStream, gen: Int) {
+        val buf = ByteArray(65536)
+        try {
+            while (!stopping) {
+                val n = input.read(buf)
+                if (n < 0) break
+                val copy = buf.copyOf(n)
+                handler.post { if (gen == generation) session?.rx(copy, copy.size) }
+            }
+        } catch (e: IOException) {
+            if (!stopping) AppLog.i("AA mode: read ended: ${e.message}")
+        }
+        handler.post { if (gen == generation) endSession("connection closed") }
+    }
+
+    @Synchronized
+    private fun closeSocket(why: String) {
+        val s = socket ?: return
+        socket = null
+        output = null
+        writer?.shutdown()
+        writer = null
+        connected = false
+        AppLog.i("AA mode: socket closed: $why")
+        try { s.close() } catch (_: IOException) { }
+    }
+
+    @Synchronized
+    private fun write(data: ByteArray) {
+        val out = output ?: return
+        try {
+            writer?.execute {
+                try {
+                    out.write(data)
+                } catch (e: IOException) {
+                    AppLog.i("AA mode: write failed: ${e.message}")
+                    closeSocket("write failed")
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // the socket is closing: nothing more goes out
+        }
+    }
+
+    // --- the session (aa thread) ---------------------------------------------
+
+    // Each one catches its own: an exception must not travel back into
+    // the native session.
+    private val callbacks = object : AaNative.Callbacks {
+        override fun send(data: ByteArray) = guard("send") { write(data) }
+
+        override fun phase(phase: Int, detail: String) = guard("phase") {
+            AppLog.i("AA mode: ${AaNative.PHASE_NAMES.getOrElse(phase) { "?" }}: $detail")
+            if (phase == AaNative.PHASE_ENDED || phase == AaNative.PHASE_FAILED) {
+                lastEnd = (if (phase == AaNative.PHASE_FAILED) "failed: " else "") + detail
+                closeSocket(lastEnd)
+            }
+        }
+
+        override fun video(data: ByteArray, tsUs: Long, config: Boolean) = guard("video") {
+            if (config) {
+                if (startPipeline()) decoder?.config(data)
+            } else {
+                decoder?.frame(data, tsUs)
+            }
+        }
+
+        override fun audio(channel: Int, data: ByteArray) = guard("audio") { audio.play(channel, data) }
+    }
+
+    private inline fun guard(what: String, body: () -> Unit) {
+        try {
+            body()
+        } catch (e: RuntimeException) {
+            AppLog.w("AA mode: $what", e)
+        }
+    }
+
+    private fun startSession(gen: Int) {
+        if (gen != generation || stopping) return
+        session?.close()
+        val (mw, mh) = AaGeometry.margins(PIC_W, PIC_H)
+        val s = AaNative(callbacks, true, false, mw, mh, "Audi MMI")
+        session = s
+        sessions++
+        fpsDecoded = 0
+        if (!s.start(cert, key)) AppLog.w("AA mode: session did not start: ${s.error}")
+    }
+
+    private fun endSession(why: String) {
+        val s = session ?: return
+        val st = s.stats()
+        AppLog.i("AA mode: session over ($why): ${st[0]} video frames, ${st[1] / 1024} KB, " +
+            "${st[8]} touches, rtt ${st[6]} ms")
+        if (lastEnd.isEmpty()) lastEnd = why
+        s.close()
+        session = null
+        drainLog()
+        stopPipeline()
+    }
+
+    private fun onTick() {
+        if (stopping) return
+        val s = session
+        var next = TICK_MS
+        if (s != null) next = s.tick(TICK_MS.toInt()).toLong().coerceIn(1L, TICK_MS)
+        drainLog()
+        sendToMmi()
+        showStatus()
+        handler.postDelayed(tick, next)
+    }
+
+    private fun drainLog() {
+        for (line in AaNative.drainLog()) AppLog.i("aa-native $line")
+    }
+
+    // --- decoder -> scaler -> encoder -> MMI (aa thread) -------------------
+
+    /** The picture path, made on the first codec config of a session. */
+    private fun startPipeline(): Boolean {
+        if (decoder != null) return true
+        val caps = Streaming.link?.videoCaps
+        val fps = caps?.h264Fps?.takeIf { it > 0 }?.coerceAtMost(CaptureService.MAX_FPS) ?: CaptureService.MAX_FPS
+        val e = HwEncoder(PIC_W, PIC_H, fps, Streaming.bitRate, false, handler, mmi::onConfig, mmi::onFrame) { why ->
+            AppLog.w("AA mode H.264: $why")
+            pipelineFailed = why
+        }
+        if (!e.start()) return false
+        val sc = GlScaler(e.surface!!, PIC_W, PIC_H, AaGeometry.geometry(PIC_W, PIC_H), fps)
+        if (!sc.start()) {
+            pipelineFailed = "GL: ${sc.error}"
+            AppLog.w("AA mode: GL scaler failed: ${sc.error}")
+            e.release()
+            return false
+        }
+        val input = sc.inputSurface
+        if (input == null) {
+            sc.release()
+            e.release()
+            return false
+        }
+        previewSurface?.let { sc.setPreview(it) }
+        scaler = sc
+        mmi.newEncoder(e, caps?.h264MaxFrame ?: MmiH264.START_FRAME_BYTES * 4)
+        decoder = AaDecoder(input, handler) { why ->
+            AppLog.w("AA mode: $why")
+            pipelineFailed = why
+        }
+        pipelineFailed = ""
+        AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's top-left ${PIC_W}x$PIC_H 1:1")
+        return true
+    }
+
+    private fun stopPipeline() {
+        decoder?.release()
+        decoder = null
+        scaler?.release()                     // nothing draws into the encoder after this
+        scaler = null
+        mmi.enc?.release()
+        mmi.encoderGone()
+    }
+
+    private fun sendToMmi() {
+        val link = Streaming.link ?: return
+        val caps = link.videoCaps ?: return
+        if (!caps.h264 || mmi.enc == null) return
+        if (link === mmi.refusedLink) {
+            if (refusedNoted !== link) AppLog.w("AA mode: the MMI refused H.264 on this connection")
+            refusedNoted = link
+            return
+        }
+        mmi.step(link)
+    }
+
+    private fun showStatus() {
+        val now = SystemClock.elapsedRealtime()
+        val d = decoder
+        if (now - fpsAt >= 2000) {
+            val n = d?.decoded ?: 0
+            fps = if (fpsAt == 0L || n < fpsDecoded) 0.0 else (n - fpsDecoded) * 1000.0 / (now - fpsAt)
+            fpsDecoded = n
+            fpsAt = now
+        }
+        val s = session
+        val link = Streaming.link
+        val e = mmi.enc
+        status = when {
+            s == null && !connected -> NO_SERVER + if (lastEnd.isNotEmpty()) " Last session: $lastEnd." else ""
+            s == null -> "Connected, starting"
+            else -> {
+                val phase = AaNative.PHASE_NAMES.getOrElse(s.phase) { "?" }
+                val phone = s.phone.ifEmpty { "Android Auto" }
+                "$phone: $phase" +
+                    (if (d != null) "; video %.1f fps decoded".format(fps) +
+                        (if (d.dropped > 0) ", ${d.dropped} dropped" else "") else "; no video yet") +
+                    when {
+                        pipelineFailed.isNotEmpty() -> "; picture path failed: $pipelineFailed"
+                        link == null -> "; MMI not connected"
+                        link.videoCaps?.h264 != true -> "; the MMI app takes no H.264"
+                        link === mmi.refusedLink -> "; the MMI refused H.264"
+                        e != null -> "; MMI: " + mmi.describe(e) + if (link.h264.playing) "" else ", MMI starting"
+                        else -> ""
+                    }
+            }
+        }
+        if (now - statusAt >= STATUS_LOG_MS) {
+            statusAt = now
+            AppLog.i("AA status: $status; preview ${scaler?.previewDrawn ?: 0} drawn, " +
+                "audio dropped ${audio.droppedBytes} B")
+        }
+    }
+
+    // --- the activity's preview and touches (main thread -> aa thread) ----
+
+    private fun preview(s: Surface?, done: Runnable?) {
+        val posted = handler.post {
+            previewSurface = s
+            scaler?.setPreview(s)
+            done?.let { main.post(it) }
+        }
+        if (!posted) done?.run()               // the thread has ended: nothing draws
+    }
+
+    private fun touch(e: MotionEvent, viewW: Int, viewH: Int) {
+        val action = when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> AaNative.TOUCH_DOWN
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> AaNative.TOUCH_UP
+            MotionEvent.ACTION_MOVE -> AaNative.TOUCH_MOVED
+            MotionEvent.ACTION_POINTER_DOWN -> AaNative.TOUCH_POINTER_DOWN
+            MotionEvent.ACTION_POINTER_UP -> AaNative.TOUCH_POINTER_UP
+            else -> return
+        }
+        val n = e.pointerCount
+        val xs = IntArray(n)
+        val ys = IntArray(n)
+        val ids = IntArray(n)
+        for (i in 0 until n) {
+            val (x, y) = AaGeometry.touch(e.getX(i), e.getY(i), viewW, viewH, PIC_W, PIC_H)
+            xs[i] = x
+            ys[i] = y
+            ids[i] = e.getPointerId(i)
+        }
+        val index = e.actionIndex
+        handler.post { session?.touch(action, index, xs, ys, ids) }
+    }
+
+    private fun notification(): Notification {
+        val stop = PendingIntent.getService(this, 0,
+            Intent(this, AaService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(this, 0,
+            Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val b = if (Build.VERSION.SDK_INT >= 26) {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Android Auto mode",
+                NotificationManager.IMPORTANCE_LOW))
+            Notification.Builder(this, CHANNEL)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        @Suppress("DEPRECATION")
+        return b.setSmallIcon(R.drawable.ic_stat_stream)
+            .setContentTitle("Android Auto on the MMI")
+            .setContentIntent(open)
+            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .setOngoing(true)
+            .build()
+    }
+
+    companion object {
+        private const val CHANNEL = "aa"
+        private const val NOTIFICATION_ID = 2
+        private const val ACTION_STOP = "mmi3g.audistreaming.STOP_AA"
+        const val PORT = 5277
+        private const val CONNECT_TIMEOUT_MS = 1000
+        private const val RETRY_MS = 2000L
+        private const val TICK_MS = 20L
+        private const val STATUS_LOG_MS = 5000L
+        // the MMI's H.264 picture (H264.pictureSize(720, 576)) = Android Auto's UI
+        const val PIC_W = 720
+        const val PIC_H = 432
+        const val NO_SERVER = "Waiting for Android Auto's head unit server on this phone."
+
+        @Volatile private var instance: AaService? = null
+        @Volatile private var previewWanted: Surface? = null
+        @Volatile var running = false
+            private set
+        @Volatile var connected = false
+            private set
+        @Volatile var status = ""
+            private set
+
+        fun start(context: Context) {
+            val i = Intent(context, AaService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
+        }
+
+        fun stop(context: Context) {
+            if (!running) return
+            context.startService(Intent(context, AaService::class.java).setAction(ACTION_STOP))
+        }
+
+        /** The activity's preview surface (null: gone); [done] runs on the
+         * main thread once the GL thread has let go of the old one. */
+        fun setPreview(s: Surface?, done: Runnable?) {
+            previewWanted = s
+            val i = instance
+            if (i == null) done?.run() else i.preview(s, done)
+        }
+
+        /** A touch on a viewW x viewH preview of the UI. */
+        fun touch(e: MotionEvent, viewW: Int, viewH: Int) {
+            instance?.touch(e, viewW, viewH)
+        }
+    }
+}

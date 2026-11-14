@@ -27,7 +27,23 @@ android {
         val epoch = ZonedDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)
         versionCode = Duration.between(epoch, built).toMinutes().toInt()
         versionName = semver + "+" + built.format(DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm"))
+        // the Android Auto session (src/android_auto) through the NDK; the
+        // phone is arm64
+        ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }
+
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    // aasdk's head unit certificate + key (the top Makefile fetches them),
+    // as assets aa/headunit.crt and aa/headunit.key for the Android Auto mode
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/aa-assets"))
 
     // A fixed debug key in android/keystore/, so rebuilding (or `make clean`)
     // does not change the signature and `adb install -r` keeps working.
@@ -48,6 +64,12 @@ android {
         jvmTarget = "17"
     }
 }
+
+val copyAaCert by tasks.registering(Copy::class) {
+    from(rootProject.file("../third_party/aasdk-cert")) { include("headunit.crt", "headunit.key") }
+    into(layout.buildDirectory.dir("generated/aa-assets/aa"))
+}
+tasks.named("preBuild") { dependsOn(copyAaCert) }
 
 dependencies {
     testImplementation("junit:junit:4.13.2")

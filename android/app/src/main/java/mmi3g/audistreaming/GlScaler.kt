@@ -37,6 +37,11 @@ import java.util.concurrent.TimeUnit
  *
  * [start] and [release] block until the GL thread has done its part, so
  * after [release] nothing draws into the encoder's surface any more.
+ *
+ * The input needn't be a virtual display: the Android Auto mode ([AaService])
+ * gives [inputSurface] to its H.264 decoder. [setPreview] also draws each
+ * frame's picture into a phone-side surface (that mode's touch preview),
+ * stretched to it and bilinear-filtered.
  */
 class GlScaler(
     private val target: Surface,
@@ -64,6 +69,12 @@ class GlScaler(
     private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var context: EGLContext = EGL14.EGL_NO_CONTEXT
     private var surface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var eglConfig: EGLConfig? = null
+    // the preview (GL thread)
+    private var preview: EGLSurface = EGL14.EGL_NO_SURFACE
+    /** Frames drawn into the preview. */
+    @Volatile var previewDrawn = 0
+        private set
     private var texture: SurfaceTexture? = null
     private var tex = 0
     // the input before the last size change, until [dropOld] (GL thread)
@@ -178,6 +189,31 @@ class GlScaler(
         return done.await(2, TimeUnit.SECONDS) && !dead
     }
 
+    /** Draws every frame's picture into [s] too, from the next tick on;
+     * null: no more (blocks until the GL thread has let go of the old one,
+     * so a TextureView may destroy it after this returns). False if the
+     * preview's EGL surface couldn't be made; the encoder is not affected. */
+    fun setPreview(s: Surface?): Boolean {
+        val hd = handler ?: return false
+        val done = CountDownLatch(1)
+        var ok = false
+        hd.post {
+            dropPreview()
+            ok = s == null
+            if (s != null && display != EGL14.EGL_NO_DISPLAY) {
+                val p = EGL14.eglCreateWindowSurface(display, eglConfig, s, intArrayOf(EGL14.EGL_NONE), 0)
+                if (p != EGL14.EGL_NO_SURFACE) {
+                    preview = p
+                    ok = true
+                } else {
+                    Log.w(TAG, "preview surface: EGL 0x${Integer.toHexString(EGL14.eglGetError())}")
+                }
+            }
+            done.countDown()
+        }
+        return done.await(2, TimeUnit.SECONDS) && ok
+    }
+
     /** The input surface before the last [update], once the virtual
      * display draws into the new one. */
     fun dropOld() {
@@ -218,6 +254,7 @@ class GlScaler(
         val n = IntArray(1)
         if (!EGL14.eglChooseConfig(display, attribs, 0, configs, 0, 1, n, 0) || n[0] < 1) fail("eglChooseConfig")
         val config = configs[0]!!
+        eglConfig = config
         context = EGL14.eglCreateContext(display, config, EGL14.EGL_NO_CONTEXT,
             intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
         if (context == EGL14.EGL_NO_CONTEXT) fail("eglCreateContext")
@@ -271,10 +308,7 @@ class GlScaler(
         uTexMatrix = GLES20.glGetUniformLocation(p, "uTexMatrix")
         uStepX = GLES20.glGetUniformLocation(p, "uStepX")
         uStepY = GLES20.glGetUniformLocation(p, "uStepY")
-        val filter = if (GlBox.linear(k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, filter)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, filter)
+        setFilter(if (GlBox.linear(k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
     }
 
     /** A new capture frame: latched now (the virtual display mustn't wait
@@ -311,6 +345,7 @@ class GlScaler(
             EGLExt.eglPresentationTimeANDROID(display, surface, ptsNs)
             if (!EGL14.eglSwapBuffers(display, surface)) fail("eglSwapBuffers")
             drawn++
+            if (preview != EGL14.EGL_NO_SURFACE && haveFrame && !noticeOn) drawPreview()
         } catch (e: RuntimeException) {
             // the encoder's surface went away under us (stopping): stop drawing
             Log.w(TAG, "GL scaler draw", e)
@@ -322,7 +357,52 @@ class GlScaler(
     private fun drawScreen() {
         // the encoder's buffers keep old content: black around the picture
         val g = geometry
-        GLES20.glViewport((w - g.picW) / 2, (h - g.picH) / 2, g.picW, g.picH)
+        drawPicture((w - g.picW) / 2, (h - g.picH) / 2, g.picW, g.picH)
+    }
+
+    /** The picture again into the preview, stretched, bilinear; a preview
+     * that fails is dropped (its view went away), the encoder goes on. */
+    private fun drawPreview() {
+        val size = IntArray(2)
+        if (!EGL14.eglMakeCurrent(display, preview, preview, context) ||
+            !EGL14.eglQuerySurface(display, preview, EGL14.EGL_WIDTH, size, 0) ||
+            !EGL14.eglQuerySurface(display, preview, EGL14.EGL_HEIGHT, size, 1)) {
+            Log.w(TAG, "preview: EGL 0x${Integer.toHexString(EGL14.eglGetError())}, dropped")
+            dropPreview()
+            return
+        }
+        EGL14.eglSwapInterval(display, 0)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        setFilter(GLES20.GL_LINEAR)
+        drawPicture(0, 0, size[0], size[1])
+        setFilter(if (GlBox.linear(geometry.k)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
+        if (EGL14.eglSwapBuffers(display, preview)) previewDrawn++
+        else {
+            Log.w(TAG, "preview swap: EGL 0x${Integer.toHexString(EGL14.eglGetError())}, dropped")
+            dropPreview()
+        }
+        if (!EGL14.eglMakeCurrent(display, surface, surface, context)) fail("eglMakeCurrent")
+    }
+
+    private fun dropPreview() {
+        if (preview == EGL14.EGL_NO_SURFACE) return
+        if (display != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(display, surface, surface, context)
+            EGL14.eglDestroySurface(display, preview)
+        }
+        preview = EGL14.EGL_NO_SURFACE
+    }
+
+    private fun setFilter(filter: Int) {
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, filter)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, filter)
+    }
+
+    private fun drawPicture(x: Int, y: Int, pw: Int, ph: Int) {
+        val g = geometry
+        GLES20.glViewport(x, y, pw, ph)
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, tex)
@@ -368,6 +448,7 @@ class GlScaler(
         dead = true
         handler?.removeCallbacks(tick)
         texture?.setOnFrameAvailableListener(null)
+        dropPreview()
         releaseOld()
         inputSurface?.release()
         inputSurface = null

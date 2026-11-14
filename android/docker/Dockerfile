@@ -1,7 +1,7 @@
 # mmi-android - build image for the Audi streaming Android app (android/).
 #
-# JDK 17 + Android SDK command-line tools (platform 35, build-tools 35.0.0)
-# + Gradle. Used by `make apk` / `make apk-test`; Gradle's dependency cache
+# JDK 17 + Android SDK command-line tools (platform 35, build-tools 35.0.0,
+# NDK + CMake for the Android Auto session, app/src/main/cpp) + Gradle. Used by `make apk` / `make apk-test`; Gradle's dependency cache
 # is NOT in the image but in build/android-home (mounted), so it survives
 # image rebuilds and is reused across builds.
 FROM eclipse-temurin:17.0.13_11-jdk-jammy
@@ -22,7 +22,8 @@ RUN mkdir -p $ANDROID_HOME/cmdline-tools \
  && rm /tmp/ct.zip \
  && yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null \
  && $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
-        "platforms;android-35" "build-tools;35.0.0" "platform-tools" > /dev/null \
+        "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
+        "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null \
  && chmod -R a+rX $ANDROID_HOME
 
 RUN wget -q https://services.gradle.org/distributions/gradle-${GRADLE}-bin.zip -O /tmp/g.zip \

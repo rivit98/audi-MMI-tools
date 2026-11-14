@@ -4,3 +4,5 @@ build/
 app/build/
 out/
 local.properties
+# the NDK build of the Android Auto session (CMake)
+app/.cxx/

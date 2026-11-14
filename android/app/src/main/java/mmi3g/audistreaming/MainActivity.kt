@@ -51,6 +51,15 @@ import android.widget.TextView
  * stream. Every option has an info button that explains it (setUpInfo). Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
  *
+ * Two modes, as two pages side by side ([SwipePager]): slide them (or tap
+ * a tab) to switch. "Screen" is the mirroring above. "Android Auto" makes
+ * this app the head unit for Android Auto on this phone ([AaService]); the
+ * MMI shows Android Auto, and the page shows the same picture to touch.
+ * The page shown is the mode (remembered): sliding to Android Auto stops
+ * the mirroring and starts the Android Auto mode, sliding back stops it.
+ * Only one ever streams to the MMI. The MMI link is the activity's, for
+ * both.
+ *
  * Turning the phone must not recreate the activity (configChanges in the
  * manifest): otherwise every rotation closes the link and opened a new
  * one, and the old activity's late onClosed then cleared Streaming.link,
@@ -72,6 +81,11 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var fpsLabel: TextView
     private lateinit var videoView: TextView
     private lateinit var clockView: TextView
+    private lateinit var pager: SwipePager
+    private lateinit var tabs: List<TextView>
+    private lateinit var aaStatus: TextView
+    private lateinit var aaToggle: Button
+    private var mode = MODE_SCREEN
     private var clockOn = false
     private val clockFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -212,6 +226,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             })
         }
         setUpInfo()
+        setUpModes()
 
         val filter = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED)
@@ -298,9 +313,72 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         if (Streaming.running) {
             CaptureService.stop(this)
         } else {
+            AaService.stop(this)
             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             @Suppress("DEPRECATION")
             startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
+        }
+    }
+
+    /** The tabs, the pages and the Android Auto page's controls; the
+     * remembered mode comes back (Android Auto starts again). */
+    private fun setUpModes() {
+        pager = findViewById(R.id.pager)
+        tabs = listOf(findViewById(R.id.tab_screen), findViewById(R.id.tab_aa))
+        aaStatus = findViewById(R.id.aa_status)
+        aaToggle = findViewById(R.id.aa_toggle)
+        tabs.forEachIndexed { i, t -> t.setOnClickListener { pager.setPage(i) } }
+        aaToggle.setOnClickListener {
+            if (AaService.running) AaService.stop(this) else startAa()
+        }
+        findViewById<Button>(R.id.aa_settings).setOnClickListener { openAaSettings() }
+        mode = getPreferences(MODE_PRIVATE).getInt(PREF_MODE, MODE_SCREEN).coerceIn(MODE_SCREEN, MODE_AA)
+        pager.setPage(mode, animate = false)
+        pager.onPage = ::onMode
+        showTabs()
+        if (mode == MODE_AA) startAa()
+    }
+
+    private fun onMode(m: Int) {
+        if (m == mode) return
+        mode = m
+        AppLog.i("mode: ${if (m == MODE_AA) "Android Auto" else "screen"}")
+        getPreferences(MODE_PRIVATE).edit().putInt(PREF_MODE, m).apply()
+        showTabs()
+        if (m == MODE_AA) startAa() else AaService.stop(this)
+        showVideo()
+    }
+
+    /** Android Auto mode, the mirroring stopped first: one stream to the MMI. */
+    private fun startAa() {
+        if (Streaming.running) CaptureService.stop(this)
+        AaService.start(this)
+    }
+
+    private fun showTabs() {
+        tabs.forEachIndexed { i, t ->
+            val on = i == mode
+            t.setTextColor(if (on) Status.CONNECTED.colour else 0xFF5A6472.toInt())
+            t.paintFlags = if (on) t.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+                           else t.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
+        }
+    }
+
+    /** Android Auto's own settings (its developer menu has the head unit
+     * server), or its app info if that screen can't be opened. */
+    private fun openAaSettings() {
+        val settings = Intent().setClassName(AA_PACKAGE,
+            "com.google.android.projection.gearhead.companion.settings.DefaultSettingsActivity")
+        try {
+            startActivity(settings)
+        } catch (e: Exception) {
+            AppLog.w("Android Auto settings: ${e.message}")
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:$AA_PACKAGE")))
+            } catch (e2: Exception) {
+                aaStatus.text = "Android Auto is not installed"
+            }
         }
     }
 
@@ -327,8 +405,11 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private fun showVideo() {
         val l = link
         val caps = l?.videoCaps
+        aaToggle.text = getString(if (AaService.running) R.string.aa_stop else R.string.aa_start)
+        aaStatus.text = if (AaService.running) AaService.status else getString(R.string.aa_off)
         streamButton.text = getString(if (Streaming.running) R.string.stream_stop else R.string.stream_start)
-        streamButton.isEnabled = Streaming.running || caps != null
+        // the screen page streams only while Android Auto mode is off
+        streamButton.isEnabled = Streaming.running || (caps != null && !AaService.running)
         videoView.text = when {
             Streaming.running && l != null -> {
                 val v = l.video
@@ -422,6 +503,10 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val PREF_SHARP = "sharp_h264"
         private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
+        private const val PREF_MODE = "mode"
+        private const val MODE_SCREEN = 0
+        private const val MODE_AA = 1
+        private const val AA_PACKAGE = "com.google.android.projection.gearhead"
         private val INFO = listOf(
             Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
             Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
@@ -432,6 +517,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             Triple(R.id.info_clock, R.string.info_clock_title, R.string.info_clock),
             Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
             Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
+            Triple(R.id.info_aa, R.string.info_aa_title, R.string.info_aa),
         )
     }
 }
