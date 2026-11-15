@@ -69,7 +69,7 @@ import java.nio.ByteOrder
  * 25, [FrameClock]), a still screen too; the MMI times its stream at 25 fps
  * and fills the rest with skip frames. The frames go to the MMI through
  * [MmiH264] (queue, IDRs, the MMI's H264_STATUS); a REFUSED falls back to
- * JPEG for this connection.
+ * JPEG until H.264 is tried again ([RefusedBackoff]: 5 s, doubling to 60 s).
  *
  * H.264 is landscape only: a portrait screen would fill a narrow strip of
  * the MMI with unreadable text, so while the phone is portrait the scaler
@@ -337,7 +337,7 @@ class CaptureService : Service() {
         if (Streaming.format != Format.H264) return false
         val link = Streaming.link ?: return enc != null      // keep it through a replug
         val caps = link.videoCaps ?: return false
-        return caps.h264 && link !== mmi.refusedLink && h264Failed.isEmpty() && Build.VERSION.SDK_INT >= 29
+        return caps.h264 && !mmi.refused(link) && h264Failed.isEmpty() && Build.VERSION.SDK_INT >= 29
     }
 
     /** One step of the H.264 stream; returns the delay to the next. */
@@ -375,7 +375,7 @@ class CaptureService : Service() {
         // restarts its stream), then the frames
         if (!mmi.step(link)) {
             stopEncoder()
-            Streaming.status = "the MMI refused H.264 (see its log): JPEG instead"
+            Streaming.status = "the MMI refused H.264 (see its log): JPEG for now"
             return POLL_MS
         }
         val sc = scaler
@@ -528,7 +528,7 @@ class CaptureService : Service() {
             "H.264 off: " + when {
                 Build.VERSION.SDK_INT < 29 -> "needs Android 10"
                 h264Failed.isNotEmpty() -> h264Failed
-                link === mmi.refusedLink -> "the MMI refused it"
+                link === mmi.refusedLink -> "the MMI refused it (trying again soon)"
                 else -> "the MMI app has none (older audi_stream_receiver?)"
             } + ", JPEG instead"
         } else ""

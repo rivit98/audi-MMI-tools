@@ -88,7 +88,6 @@ class AaService : Service() {
     private var pipelineFailed = ""
     // the video size of the current session ([mode] when it started)
     @Volatile private var sessionMode = AaGeometry.MODES[0]
-    private var refusedNoted: AccessoryLink? = null
     private var sessions = 0
     private var lastEnd = ""
     private var statusAt = 0L
@@ -453,11 +452,7 @@ class AaService : Service() {
         val link = Streaming.link ?: return
         val caps = link.videoCaps ?: return
         if (!caps.h264 || mmi.enc == null) return
-        if (link === mmi.refusedLink) {
-            if (refusedNoted !== link) AppLog.w("AA mode: the MMI refused H.264 on this connection")
-            refusedNoted = link
-            return
-        }
+        if (mmi.refused(link)) return         // tried again after a wait (MmiH264)
         mmi.step(link)
     }
 
@@ -486,7 +481,7 @@ class AaService : Service() {
                         pipelineFailed.isNotEmpty() -> "; picture path failed: $pipelineFailed"
                         link == null -> "; MMI not connected"
                         link.videoCaps?.h264 != true -> "; the MMI app takes no H.264"
-                        link === mmi.refusedLink -> "; the MMI refused H.264"
+                        link === mmi.refusedLink -> "; the MMI refused H.264, trying again soon"
                         e != null -> "; MMI: " + mmi.describe(e) + if (link.h264.playing) "" else ", MMI starting"
                         else -> ""
                     }

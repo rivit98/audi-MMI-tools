@@ -14,7 +14,8 @@ import android.os.SystemClock
  * up to the next IDR are dropped and an IDR is asked for. A frame that
  * doesn't fit also raises the size (a new H264_CONFIG; the MMI restarts its
  * stream). The MMI's H264_STATUS: SYNC asks for an IDR, CONFIG for the
- * config again, REFUSED ends H.264 on that link ([step] returns false).
+ * config again, REFUSED pauses H.264 on that link ([step] returns false;
+ * [refused] says when to try again, [RefusedBackoff]).
  * After an H264_CONFIG no frame goes until the MMI says PLAYING (it would
  * only be refused while the MMI sets its stream up), and then the stream
  * starts at an IDR. A new capture mode is a new config on the same encoder.
@@ -30,8 +31,11 @@ class MmiH264 {
     private var waitIdr = true
     private var configLink: AccessoryLink? = null     // the link the config went to
     private var configVcapMode = VcapMode.WEAVE        // the capture mode it asked for
-    /** The link that answered REFUSED. */
+    /** The link that answered REFUSED, until H.264 is tried on it again. */
     var refusedLink: AccessoryLink? = null
+        private set
+    private var lastRefusedLink: AccessoryLink? = null
+    private val backoff = RefusedBackoff()
     private var playingSeen = false                   // PLAYING since the last config
     private var nextId = 1
     val stats = Stats()
@@ -70,7 +74,13 @@ class MmiH264 {
     fun step(link: AccessoryLink): Boolean {
         val encoder = enc ?: return true
         if (link.h264.refused.getAndSet(false)) {
+            if (link !== lastRefusedLink) backoff.reset()
+            lastRefusedLink = link
             refusedLink = link
+            queue.clear()
+            waitIdr = true
+            val wait = backoff.refused(SystemClock.elapsedRealtime())
+            AppLog.w("H.264: the MMI refused it: trying again in ${wait / 1000} s")
             return false
         }
         if (configLink === link && configVcapMode != Streaming.vcapMode) sendConfig(link, "capture mode")
@@ -92,6 +102,19 @@ class MmiH264 {
         return true
     }
 
+    /** True while H.264 waits after the MMI's REFUSED on [link]. Once the
+     * wait is over, the config goes again (if the encoder has one; else the
+     * encoder's start sends it) and this says false. */
+    fun refused(link: AccessoryLink): Boolean {
+        if (link !== refusedLink) return false
+        if (!backoff.due(SystemClock.elapsedRealtime())) return true
+        refusedLink = null
+        AppLog.i("H.264: trying again after the MMI's REFUSED (waited ${backoff.delayMs / 1000} s)")
+        configLink = null
+        if (enc != null) sendConfig(link, "trying again after REFUSED")
+        return false
+    }
+
     /** The status line's H.264 part. */
     fun describe(e: HwEncoder): String =
         "${e.fps} fps, ${stats.kbps} of ${e.bitRate / 1000} kbit/s, " +
@@ -105,6 +128,8 @@ class MmiH264 {
         val p = pps ?: return
         val caps = link.videoCaps ?: return
         val mode = Streaming.vcapMode
+        // PLAYING from before this config says nothing about it
+        link.h264.playing = false
         link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.wire))
         configLink = link
         configVcapMode = mode
@@ -126,7 +151,7 @@ class MmiH264 {
     /** One encoded frame (the encoder's callback). */
     fun onFrame(data: ByteArray, key: Boolean) {
         val link = Streaming.link
-        if (link == null || configLink !== link) return      // the MMI has no stream for it
+        if (link == null || configLink !== link || link === refusedLink) return      // the MMI has no stream for it
         if (!playingSeen) {
             // the MMI is still setting its stream up: it would refuse it
             stats.dropped++
