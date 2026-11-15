@@ -18,7 +18,7 @@
     <string name="info_format_title">Format</string>
     <string name="info_format">H.264 (recommended): smooth video, up to 25 fps, about half a second behind the phone. The MMI\'s video chip decodes it. Needs Android 10 or newer.\n\nJPEG: a few separate pictures a second (about 3), decoded by the MMI\'s main processor. Each picture is sharp, but it is no good for moving content.\n\nIf H.264 is not possible (older Android, or the MMI refuses it), the app uses JPEG instead and says so in the status line.</string>
     <string name="info_bit_rate_title">H.264 rate</string>
-    <string name="info_bit_rate">How much video data is sent a second. A higher rate keeps text and fast-moving content cleaner. A lower rate sends less over USB. It does not change the picture size, which is always 720x432.\n\n4 Mbit/s (default) gives sharp text on the car. 2.5 can blur text. 6 and 8 have not been measured on the car: if the picture stutters or restarts, go back to 4.\n\nNo effect in JPEG. A change while streaming applies within about a second.</string>
+    <string name="info_bit_rate">How much video data is sent a second. A higher rate keeps text and fast-moving content cleaner. A lower rate sends less over USB. It does not change the picture size, which is always 720x432.\n\n4 Mbit/s (default) gives sharp text on the car. 2.5 can blur text. 6 gives bigger key frames: if the picture freezes now and then, go back to 4.\n\nNo effect in JPEG. A change while streaming applies within about a second.</string>
     <string name="info_vcap_mode_title">Capture mode</string>
     <string name="info_vcap_mode">How the MMI\'s video capture handles the two fields of each picture.\n\nWeave (best): both fields together, all 480 lines. The phone\'s picture is not interlaced, so nothing is lost. It is also the MMI\'s own setting for the rear camera. Odd only: one field, each line shown twice, so half the lines; text can look slightly softer.\n\nNo effect in JPEG. A change while streaming restarts the MMI\'s stream, a short break in the picture. When streaming ends, the MMI goes back to Weave, so the rear camera is not affected.</string>
     <string name="info_sharp_title">Sharp H.264</string>
@@ -50,7 +50,6 @@
         <item>2.5 Mbit/s</item>
         <item>4 Mbit/s</item>
         <item>6 Mbit/s</item>
-        <item>8 Mbit/s</item>
     </string-array>
     <!-- in the order of enum VcapMode (CaptureService.kt) -->
     <string-array name="vcap_modes">

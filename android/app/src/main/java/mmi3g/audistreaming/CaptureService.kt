@@ -677,7 +677,9 @@ class CaptureService : Service() {
         private const val SCREEN_CHECK_MS = 200L
         // H.264 bit rates of the drop-down (res/values/strings.xml bit_rates);
         // 2.5 Mbit/s is ~12 KB a frame at 25 fps
-        val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000, 8_000_000)
+        // no 8 Mbit/s: its IDRs (up to ~170 KB at 720x432) outgrow the MMI's
+        // 128 KB frames
+        val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000)
         const val DEFAULT_BIT_RATE = 4_000_000
 
         fun start(context: Context, resultCode: Int, data: Intent) {
