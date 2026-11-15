@@ -80,6 +80,7 @@ std::string stop_why;
 bool restart_pending = false;           // stream full: same config again
 std::deque<std::pair<u8, const char *>> statuses;   // code, why (REFUSED)
 unsigned last_sync_ms = 0;
+ErrorRestarts error_restarts;           // restarts after io-media errors
 u32 refused_total = 0, refused_logged = 0;
 u64 win_bytes = 0;                 // frames taken into the stream this window (before padding)
 u32 win_max_bytes = 0;
@@ -488,15 +489,46 @@ void run()
 			}
 			const PlayStats &ps = h->player().stats();
 			if (ps.error_events > 0) {
-				// io-media gave up on the stream: maybe the HMI took the
-				// video (its media, the rear camera). Not restarted, and
-				// VCAP left as it is (End::Error); the phone goes back to
-				// pictures for this connection.
+				// io-media gave up on the stream: it fell behind past the
+				// ring, or the HMI took the video (its media, the rear
+				// camera). VCAP is left as it is (End::Error). The stream
+				// starts again from the same config, the phone's frames
+				// going on into it from the next IDR; errors too often
+				// (ErrorRestarts) and the phone is told REFUSED.
 				log_msg("h264: io-media error: %s", ps.first_error.c_str());
 				slogmark("h264: io-media error: %s", ps.first_error.c_str());
 				dump_error(*h);
+				std::vector<u8> again;
+				bool other = false, restart = false;
+				unsigned recent = 0;
+				{
+					std::lock_guard<std::mutex> lock(mu);
+					other = config_pending || stop_pending;
+					again = gate.current();
+					restart = !other && !again.empty() && error_restarts.allow(log_ms());
+					recent = error_restarts.recent();
+				}
 				teardown("io-media reported an error", End::Error);
-				status(proto::kH264Refused, "io-media error");
+				if (other)
+					continue;            // a new config or a stop is next anyway
+				if (!restart) {
+					log_msg("h264: %u io-media errors in %u s: giving up on H.264 for now",
+					        recent, ErrorRestarts::kWindowMs / 1000);
+					status(proto::kH264Refused, "io-media error");
+					continue;
+				}
+				log_msg("h264: starting the stream again after the io-media error (%u of %u "
+				        "allowed in %u s)", recent, ErrorRestarts::kMax,
+				        ErrorRestarts::kWindowMs / 1000);
+				slogmark("h264: stream restart after an io-media error");
+				{
+					std::lock_guard<std::mutex> lock(mu);
+					gate.offer(again);   // the phone's copy of it changes nothing
+				}
+				setup(again);
+				w = Window();
+				window_t0 = log_ms();
+				was_playing = false;
 				continue;
 			}
 			if (h->playing() && !was_playing) {
@@ -575,6 +607,7 @@ void config(const u8 *payload, unsigned n)
 	{
 		std::lock_guard<std::mutex> lock(mu);
 		if (gate.offer(p)) {
+			error_restarts.reset();      // a new stream from the phone
 			config_next.swap(p);
 			config_pending = true;
 			return;

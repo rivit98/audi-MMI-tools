@@ -6,6 +6,10 @@
 // the config, and each copy of the config restarted the stream, the stream
 // would never get to play. So one config means one restart, whether it is
 // running, being set up or still waiting for that.
+//
+// ErrorRestarts: after an io-media error the stream starts again from the
+// same config, unless errors come too often (the HMI may hold the video):
+// then the phone is told REFUSED.
 #ifndef AUDI_STREAM_RECEIVER_CONFIG_GATE_H
 #define AUDI_STREAM_RECEIVER_CONFIG_GATE_H
 
@@ -53,6 +57,38 @@ private:
 	std::vector<u8> current_;
 	bool asked_ = false;
 	unsigned asked_ms_ = 0;
+};
+
+// Restarts after io-media errors: at most kMax within kWindowMs.
+class ErrorRestarts {
+public:
+	static constexpr unsigned kMax = 3;
+	static constexpr unsigned kWindowMs = 60000;
+
+	// An io-media error at now_ms (may wrap). true: restart the stream;
+	// false: too many lately, give up (REFUSED).
+	bool allow(unsigned now_ms)
+	{
+		unsigned kept = 0;
+		for (unsigned i = 0; i < n_; i++)
+			if (now_ms - at_[i] < kWindowMs)
+				at_[kept++] = at_[i];
+		n_ = kept;
+		if (n_ >= kMax)
+			return false;
+		at_[n_++] = now_ms;
+		return true;
+	}
+
+	// Restarts within the window (after the last allow()).
+	unsigned recent() const { return n_; }
+
+	// A new stream from the phone (a new config, a stop): a clean slate.
+	void reset() { n_ = 0; }
+
+private:
+	unsigned at_[kMax] = {};
+	unsigned n_ = 0;
 };
 
 #endif

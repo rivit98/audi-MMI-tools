@@ -6,9 +6,12 @@ puts them back, as the phone sees them:
     AckGate        acks held back for HOLD_S, or let out at SLOW_ACK_FPS a second
     IoMediaModel   io-media reading the MMI's CS-MP4: every frame padded to S, read at
                    READ_BYTES_S. Too slow for the frames, so the reader falls behind.
-                   Past the ring: the io-media error (the MMI sends REFUSED). With the
+                   Past the ring: the io-media error. With the
                    catch-up on, the MMI drops frames until io-media is back, then asks
                    for an IDR (src/common/live_stream.h).
+    ErrorRestarts  after an io-media error the MMI restarts its stream, up to
+                   RESTARTS_MAX per RESTARTS_WINDOW_S; one more and it sends REFUSED
+                   (src/audi_stream_receiver/config_gate.h).
 
 Pure: the caller passes the time; tests/test_aoa_sim.py.
 """
@@ -25,6 +28,8 @@ FPS = 25
 RING_BYTES = 8 << 20
 CATCH_UP_FRAMES = 12
 FILLER_MIN = 6
+RESTARTS_MAX = 3
+RESTARTS_WINDOW_S = 60.0
 # What io-media read on the car: ~24 frames a second of 260 KB (266240 B)
 READ_BYTES_S = 6_400_000
 
@@ -159,3 +164,23 @@ class IoMediaModel:
         state = " catching up" if self.catching else ""
         return (f"io-media {self.s // 1024} KB frames, {self.behind()}/{self.ring} behind"
                 f"{state}, {self.catch_ups} catch-ups")
+
+
+class ErrorRestarts:
+    """Restarts after io-media errors: at most RESTARTS_MAX within RESTARTS_WINDOW_S."""
+
+    def __init__(self) -> None:
+        """No error yet."""
+        self.at: list[float] = []
+
+    def allow(self, now: float) -> bool:
+        """An io-media error at now: True restarts the stream, False gives up (REFUSED)."""
+        self.at = [t for t in self.at if now - t < RESTARTS_WINDOW_S]
+        if len(self.at) >= RESTARTS_MAX:
+            return False
+        self.at.append(now)
+        return True
+
+    def reset(self) -> None:
+        """A new config from the phone: a clean slate."""
+        self.at.clear()

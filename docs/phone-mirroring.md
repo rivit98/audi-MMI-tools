@@ -973,8 +973,10 @@ arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
   `/dev/videoctrl` is touched only when the user starts or stops a stream:
   restarts (new config, stream full)
   keep the picture and swap only the graph; an io-media ERROR ends the
-  stream without touching VCAP and sends the phone back to pictures
-  (`REFUSED`).
+  stream without touching VCAP and starts it again from the same config
+  (up to 3 per 60 s; one more and the phone is sent back to pictures with
+  `REFUSED`). After a `REFUSED` the phone tries H.264 again after 5 s,
+  doubling up to 60 s [unverified: built, not yet run on the car].
 - **Desk:** `make aoa-host` speaks H.264 like the MMI (limits, config,
   the same frame checks and statuses) and writes
   `build/aoa-host/stream.h264`.

@@ -105,3 +105,14 @@ def test_controls_take_known_switches_only():
     c.update({"iomedia": True, "catch_up": False, "bogus": True})
     assert c.iomedia and not c.catch_up
     assert not hasattr(c, "bogus")
+
+
+def test_error_restarts_three_per_window_then_refused():
+    r = aoa_sim.ErrorRestarts()
+    assert r.allow(0.0)
+    assert r.allow(1.0)
+    assert r.allow(2.0)
+    assert not r.allow(3.0)
+    assert r.allow(aoa_sim.RESTARTS_WINDOW_S)  # the first one has left the window
+    r.reset()
+    assert r.allow(aoa_sim.RESTARTS_WINDOW_S + 1)

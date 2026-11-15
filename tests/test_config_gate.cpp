@@ -69,5 +69,35 @@ int main()
 		g.forget();
 		CHECK(g.ask(1001));
 	}
+	// io-media errors: kMax restarts per window, then REFUSED
+	{
+		ErrorRestarts r;
+		CHECK(r.allow(1000));
+		CHECK(r.allow(2000));
+		CHECK(r.allow(3000));
+		CHECK(r.recent() == 3);
+		CHECK(!r.allow(4000));
+		CHECK(!r.allow(1000 + ErrorRestarts::kWindowMs - 1));
+		// the first one has left the window
+		CHECK(r.allow(1000 + ErrorRestarts::kWindowMs));
+		CHECK(!r.allow(1000 + ErrorRestarts::kWindowMs + 1));
+	}
+	// rare errors restart every time; a reset forgets the count; the clock wraps
+	{
+		ErrorRestarts r;
+		for (unsigned i = 0; i < 10; i++)
+			CHECK(r.allow(i * (ErrorRestarts::kWindowMs / 2 + 1)));
+		ErrorRestarts f;
+		for (unsigned i = 0; i < ErrorRestarts::kMax; i++)
+			CHECK(f.allow(i));
+		f.reset();
+		CHECK(f.recent() == 0);
+		CHECK(f.allow(10));
+		ErrorRestarts w;
+		CHECK(w.allow(0xfffffff0u));
+		CHECK(w.allow(0xfffffff8u));
+		CHECK(w.allow(5));
+		CHECK(!w.allow(10));
+	}
 	CHECK_DONE();
 }

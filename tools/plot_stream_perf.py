@@ -26,7 +26,7 @@ the app started (the log's [N ms]):
                  stacked, and latency
 
 Events are vertical lines across all panels: stream start / end, config,
-io-media error, REFUSED, rear camera up / off, USB link up / down, HIGH
+io-media error, restart after it, REFUSED, rear camera up / off, USB link up / down, HIGH
 load, WARNING lines and the phone's settings (rx STREAM_SETTINGS). A short summary per log goes to stdout.
 
 Logs without the newer fields (evicted, cap) still plot; those series are
@@ -61,6 +61,7 @@ PERF_CAP = re.compile(r"cap \d+ fps: (\d+) delayed \S+, (\d+) acks held")
 EVENTS = [
     ("io-media error", re.compile(r"^h264: io-media error")),
     ("REFUSED", re.compile(r"H264_STATUS REFUSED")),
+    ("restart", re.compile(r"^h264: starting the stream again after the io-media error")),
     ("stream start", re.compile(r"^h264: streaming at |^video: JPEG fallback|^video: #1 id")),
     ("stream end", re.compile(r"^h264: stream ended|^video: stopped")),
     ("config", re.compile(r"^h264: config:")),
@@ -79,6 +80,7 @@ SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#62
 EVENT_STYLE = {
     "io-media error": ("#d03b3b", "-", 1.6),
     "REFUSED": ("#d03b3b", "--", 1.2),
+    "restart": ("#eb6834", "--", 1.2),
     "stream start": ("#52514e", "-", 0.8),
     "stream end": ("#52514e", ":", 0.8),
     "config": ("#9a9994", ":", 0.6),
@@ -234,7 +236,8 @@ def summary(run: Run) -> list[str]:
                        f"(min {min(r['free_mb'] for r in mem)}), heap {mem[0]['heap_mb']} -> "
                        f"{mem[-1]['heap_mb']} MB (max {max(r['heap_mb'] for r in mem)})")
     count = lambda k: sum(1 for e in run.events if e[1] == k)
-    out.append(f"  events: {count('io-media error')} io-media errors, {count('REFUSED')} REFUSED, "
+    out.append(f"  events: {count('io-media error')} io-media errors, {count('restart')} restarts, "
+               f"{count('REFUSED')} REFUSED, "
                f"{count('warning')} warnings, {count('HIGH load')} HIGH main load, "
                f"{count('camera up')} camera, {count('USB link down')} USB link down")
     return out

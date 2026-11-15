@@ -265,8 +265,8 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each).
   `VIDEO_ACKS` counts them as they enter the stream, every 5 frames or
   200 ms (`ack_batch.h`), well under the phone's 12 in flight. The MMI answers `H264_STATUS` (0x0C): `PLAYING`, `SYNC`
-  (send an IDR), `REFUSED` (fall back to pictures), `CONFIG` (send the
-  config again).
+  (send an IDR), `REFUSED` (fall back to pictures, H.264 tried again after
+  a back-off), `CONFIG` (send the config again).
 - **`hwvideo.cpp`** checks the config (Baseline, level ≤ 3.0, ≤ 720×576,
   `live::check_decodable`), then runs `src/common/hw_stream.h` on its own
   thread: the CS-MP4 header from the phone's SPS/PPS, frames padded to the
@@ -294,11 +294,15 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   its path back. Otherwise `/dev/videoctrl` is touched only when the user
   starts or stops streaming. A restart (new config, stream full) keeps the picture and
   VCAP as they are and swaps only the io-media graph and the server.
-  **When io-media reports an error** (perhaps the HMI took the video for
-  its media or the camera), the stream ends without touching
-  `/dev/videoctrl`, and the phone is told `REFUSED` (pictures for the rest
-  of the connection). If no new stream follows a restart within 5 s, the
-  CPU-drawn screen comes back.
+  **When io-media reports an error** (it fell behind past the ring, or the
+  HMI took the video for its media or the camera), the stream ends without
+  touching `/dev/videoctrl` and starts again from the same config at once
+  (~1-2 s black); the phone's frames go on into it from the next IDR. Up to
+  3 errors per 60 s restart it (`config_gate.h`, `ErrorRestarts`; a new
+  config starts the count again). One more within those 60 s and the phone is told
+  `REFUSED`; the phone tries H.264 again later (5 s, doubling up to 60 s).
+  Restarted after an io-media error, not yet confirmed on the car. If no
+  new stream follows a restart within 5 s, the CPU-drawn screen comes back.
 - **io-media reads every padded byte, and too many are more than it reads in
   time** [confirmed: 11 of 11 `ERROR event: Input/output error` in one
   27-minute session, the `h264:` windows and `at the error:` dumps]. With
@@ -332,11 +336,12 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   timestamped log tells a freeze ("no frames for") from a stop ("stream ended:
   VIDEO_STOP"). Acks go out at once, so this shows when the phone stops sending,
   not the MMI's timing. A toolbar under the window (keys 1-9) plays the MMI's
-  faults to the phone (`tools/aoa_sim.py`): *Refuse* (`REFUSED`, as after an
-  io-media error), *Sync*, *Config* (`CONFIG_WANTED`), *Hold acks* (3 s),
+  faults to the phone (`tools/aoa_sim.py`): *Refuse* (`REFUSED`, as after too
+  many io-media errors), *Sync*, *Config* (`CONFIG_WANTED`), *Hold acks* (3 s),
   *Stall USB* (3 s), *Drop link* (port reset), and the switches *Slow acks*
   (5 a second), *io-media* (a read model at ~6.4 MB/s of padded frames: 256 KB
-  frames fall behind and end in `REFUSED` as on the car, 128 KB ones keep up)
+  frames fall behind into an io-media error as on the car, then the stream
+  restarts as on the MMI; 128 KB ones keep up)
   and *Catch-up* (the MMI's drop until io-media is back). Its status line shows
   held acks and how far the modelled io-media reads behind.
 - **Latency:** the phone app's *Latency clock* switch shows a big
@@ -387,7 +392,9 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
     median N ms, over 1000 ms`.
   - `h264: tx H264_STATUS REFUSED (reason: ...)`: `malformed H264_CONFIG`,
     `config not decodable`, `stream setup failed`, `the graph would not play`,
-    `io-media error`.
+    `io-media error` (after `h264: N io-media errors in 60 s: giving up`).
+  - `h264: starting the stream again after the io-media error (N of 3 allowed
+    in 60 s)`: the restart after an io-media error.
 - **Tests:** on the build host, `make test` (header, padding, push / fill
   / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
   protocol and H.264 helpers); the same MMI code with a clip instead of

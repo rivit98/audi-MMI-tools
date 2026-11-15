@@ -30,10 +30,11 @@ out before a frame reaches the window, so they say nothing about decoding: this
 shows when and why the phone stops sending, not the MMI's timing.
 
 Toolbar under the window (tools/aoa_sim.py): the MMI's faults, played to the
-phone. Refuse (REFUSED, as after an io-media error), Sync (asks for an IDR),
+phone. Refuse (REFUSED, as after too many io-media errors), Sync (asks for an IDR),
 Config (CONFIG_WANTED), Hold acks (3 s), Stall USB (no reads for 3 s), Drop
 link (USB port reset); switches: Slow acks (5 a second), io-media (the read
-model: 260 KB frames fall behind and end in REFUSED, as on the car) and
+model: 260 KB frames fall behind into an io-media error, as on the car; the
+stream restarts, the 4th error in 60 s ends in REFUSED) and
 Catch-up (the MMI drops frames while io-media catches up). Keys 1-9 too.
 
 A phone already in accessory mode that this run didn't switch may belong to
@@ -442,6 +443,7 @@ class H264:
         self.refused, self.files, self.t0 = 0, 0, time.monotonic()
         self.model: aoa_sim.IoMediaModel | None = None
         self.last_sync = 0.0
+        self.restarts = aoa_sim.ErrorRestarts()
 
     def status(self, code: int, ep_out) -> None:
         """Send H264_STATUS."""
@@ -454,8 +456,23 @@ class H264:
             self.last_sync = now
             self.status(H264_SYNC, ep_out)
 
+    def io_error(self, ep_out, now: float) -> None:
+        """The io-media model's error: restart from the same config, as the MMI does,
+        or REFUSED when errors come too often."""
+        if self.model is None or not self.restarts.allow(now):
+            self.refuse("io-media model: read past the ring, too often", ep_out)
+            return
+        log(f"io-media model: read past the ring after {self.frames} frames: stream restarted "
+            f"({len(self.restarts.at)} of {aoa_sim.RESTARTS_MAX} in "
+            f"{aoa_sim.RESTARTS_WINDOW_S:.0f} s)")
+        self.model = aoa_sim.IoMediaModel(self.frame_bytes, now, self.model.catch_up)
+        self.started = False
+        self.status(H264_PLAYING, ep_out)
+        self.last_sync = 0.0
+        self.sync(ep_out)
+
     def refuse(self, why: str, ep_out) -> None:
-        """End the stream as the MMI does after an io-media error: REFUSED."""
+        """End the stream as the MMI does after a refused config or too many errors."""
         log(f"REFUSED ({why}) after {self.frames} frames")
         self.status(H264_REFUSED, ep_out)
         self.config, self.model, self.started = None, None, False
@@ -497,6 +514,7 @@ class H264:
         if profile != 66 or level > 30:
             log("  (the MMI refuses this: Baseline 3.0 at most)")
         self.config, self.frame_bytes, self.started = payload, frame_bytes, False
+        self.restarts.reset()
         self.frames = self.bytes = self.biggest = self.idrs = self.refused = 0
         if self.model is not None:
             self.model = aoa_sim.IoMediaModel(frame_bytes, time.monotonic(), self.model.catch_up)
@@ -649,7 +667,7 @@ class Faults:
                 log("io-media model: back at the newest frame: asking for an IDR")
                 h264.sync(ep_out)
             elif got == "eio":
-                h264.refuse("io-media model: read past the ring (the car's io-media error)", ep_out)
+                h264.io_error(ep_out, now)
         if now - self.status_at >= SIM_STATUS_S:
             self.status_at = now
             SCREEN.send("sim", text=self.describe(now))
