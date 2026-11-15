@@ -9,7 +9,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 ENV UV_CACHE_DIR=/tmp/uv-cache
-COPY aoa_host.py aoa_screen.py /opt/
+COPY aoa_host.py aoa_screen.py aoa_sim.py /opt/
 # Resolve the script's pinned dependencies at build time.
 RUN uv run --script /opt/aoa_host.py --check \
  && chmod -R a+rwX /tmp/uv-cache

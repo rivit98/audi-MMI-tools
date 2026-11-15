@@ -547,7 +547,7 @@ aoa-host-test:
 	docker run --rm -e SDL_VIDEODRIVER=dummy -e PYTHONPATH=/tools -e PYTHONDONTWRITEBYTECODE=1 \
 	    -v $(CURDIR)/tools:/tools:ro -w /tools --entrypoint uv mmi-aoa-host run --no-project \
 	    --with pyusb==1.3.1 --with av==19.0.2 --with pygame==2.6.1 --with pytest==9.2.0 \
-	    pytest -q -p no:cacheprovider tests/test_aoa_host.py tests/test_aoa_screen.py
+	    pytest -q -p no:cacheprovider tests/test_aoa_host.py tests/test_aoa_screen.py tests/test_aoa_sim.py
 
 # A car run's audi_stream_receiver logs as plots (tools/plot_stream_perf.py):
 # a PNG per log into the run directory, a summary on stdout.

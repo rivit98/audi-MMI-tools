@@ -172,3 +172,20 @@ def test_no_data_yet_decides_nothing():
     peer = aoa_host.Peer()
     assert not peer.foreign(0, [])
     assert peer.foreign(0, [(0, b"")])
+
+
+def test_caps_announce_128k_frames():
+    assert aoa_host.H264_MAX_FRAME == 128 * 1024
+    assert aoa_host.CAPS[-4:] == (128 * 1024).to_bytes(4, "little")
+
+
+def test_control_link_reads_json_lines():
+    r, w = os.pipe()
+    link = aoa_host.ControlLink(r)
+    assert link.poll() == []
+    os.write(w, b'{"action": "sync"}\n{"toggles": {"iomedia": tr')
+    assert link.poll() == [{"action": "sync"}]
+    os.write(w, b'ue}}\n')
+    assert link.poll() == [{"toggles": {"iomedia": True}}]
+    os.close(w)
+    os.close(r)

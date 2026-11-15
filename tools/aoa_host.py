@@ -15,7 +15,7 @@ src/audi_stream_receiver/video.cpp), reassembles the phone's pictures, acks each
 shown and, with --save DIR, keeps the newest one as DIR/latest.jpg.
 
 H.264 (the phone app's "H.264" format): announces the MMI's limits
-(720x576, 25 fps, frames up to 256 KB), takes H264_CONFIG, checks every
+(720x576, 25 fps, frames up to 128 KB), takes H264_CONFIG, checks every
 frame the way the MMI does (an IDR first, no bigger than the config's
 frame size), acks it at once and answers H264_STATUS like
 src/audi_stream_receiver/hwvideo.cpp. With --save DIR the stream goes to
@@ -28,6 +28,13 @@ the MMI's screen would show. It runs in this process; USB runs in a child
 process, because that one starts over whenever the USB bus changes. Acks go
 out before a frame reaches the window, so they say nothing about decoding: this
 shows when and why the phone stops sending, not the MMI's timing.
+
+Toolbar under the window (tools/aoa_sim.py): the MMI's faults, played to the
+phone. Refuse (REFUSED, as after an io-media error), Sync (asks for an IDR),
+Config (CONFIG_WANTED), Hold acks (3 s), Stall USB (no reads for 3 s), Drop
+link (USB port reset); switches: Slow acks (5 a second), io-media (the read
+model: 260 KB frames fall behind and end in REFUSED, as on the car) and
+Catch-up (the MMI drops frames while io-media catches up). Keys 1-9 too.
 
 A phone already in accessory mode that this run didn't switch may belong to
 another app (Android Auto after `make aa-host`), and so may one whose first
@@ -58,6 +65,8 @@ from pathlib import Path
 import usb.core
 import usb.util
 
+import aoa_sim
+
 MANUFACTURER, MODEL = "mmi3g", "audi_stream_receiver"  # = aoa.h, matched by accessory_filter.xml
 STRINGS = [MANUFACTURER, MODEL, "desk aoa_host.py", "1", "https://github.com/dspl1236/MMI3G-Toolkit",
            "desk-0001"]
@@ -75,7 +84,7 @@ VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
 SCREEN_W, SCREEN_H, MAX_BYTES = 800, 480, 512 * 1024
 FMT_JPEG, FMT_H264 = 1, 3
-H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME = 720, 576, 25, 256 * 1024  # = hwvideo.h
+H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME = 720, 576, 25, 128 * 1024  # = hwvideo.h
 CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES,
                    1 << (FMT_JPEG - 1) | 1 << (FMT_H264 - 1),
                    H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME)
@@ -87,6 +96,9 @@ PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, H264_CON
 RESWITCH_TRIES = 3
 SWITCHED_ENV = "AOA_HOST_SWITCHED"  # "1": the accessory is ours (survives the re-exec)
 PIPE_BYTES = 1024 * 1024
+READ_TIMEOUT_MS = 100  # the faults' clock ticks at least this often
+SIM_STATUS_S = 0.25
+SYNC_EVERY_S = 0.5     # = hwvideo.cpp kSyncEveryMs
 
 
 def log(message: str) -> None:
@@ -127,6 +139,40 @@ def read_messages(fd: int) -> Iterator[tuple[dict, bytes]]:
 
 SCREEN = ScreenLink(int(sys.argv[sys.argv.index("--screen-fd") + 1])
                     if "--screen-fd" in sys.argv else None)
+
+
+class ControlLink:
+    """The USB process's end of the pipe from the toolbar: JSON lines, read without blocking."""
+
+    def __init__(self, fd: int | None) -> None:
+        """fd None: no toolbar."""
+        self.fd, self.buf = fd, b""
+        if fd is not None:
+            os.set_blocking(fd, False)
+
+    def poll(self) -> list[dict]:
+        """The commands that came since the last call."""
+        if self.fd is None:
+            return []
+        try:
+            while chunk := os.read(self.fd, 4096):
+                self.buf += chunk
+        except BlockingIOError:
+            pass
+        except OSError:
+            self.fd = None
+        *lines, self.buf = self.buf.split(b"\n")
+        out = []
+        for line in lines:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                log(f"toolbar: bad command {line[:40]!r}")
+        return out
+
+
+CONTROL = ControlLink(int(sys.argv[sys.argv.index("--control-fd") + 1])
+                      if "--control-fd" in sys.argv else None)
 
 
 def link_state(state: str, detail: str) -> None:
@@ -394,10 +440,36 @@ class H264:
         self.config, self.frame_bytes, self.out = None, 0, None
         self.started, self.frames, self.bytes, self.biggest, self.idrs = False, 0, 0, 0, 0
         self.refused, self.files, self.t0 = 0, 0, time.monotonic()
+        self.model: aoa_sim.IoMediaModel | None = None
+        self.last_sync = 0.0
 
     def status(self, code: int, ep_out) -> None:
         """Send H264_STATUS."""
         ep_out.write(frame(H264_STATUS, bytes([code])), timeout=2000)
+
+    def sync(self, ep_out) -> None:
+        """Ask for an IDR, at most every SYNC_EVERY_S (as the MMI)."""
+        now = time.monotonic()
+        if now - self.last_sync >= SYNC_EVERY_S:
+            self.last_sync = now
+            self.status(H264_SYNC, ep_out)
+
+    def refuse(self, why: str, ep_out) -> None:
+        """End the stream as the MMI does after an io-media error: REFUSED."""
+        log(f"REFUSED ({why}) after {self.frames} frames")
+        self.status(H264_REFUSED, ep_out)
+        self.config, self.model, self.started = None, None, False
+        SCREEN.send("stop", why=f"refused: {why}")
+
+    def use_model(self, on: bool, catch_up: bool) -> None:
+        """The io-media switch: a model for the running stream, or none."""
+        if not on:
+            self.model = None
+        elif self.model is None and self.config is not None:
+            self.model = aoa_sim.IoMediaModel(self.frame_bytes, time.monotonic(), catch_up,
+                                              started=self.started)
+        if self.model is not None:
+            self.model.catch_up = catch_up
 
     def on_config(self, payload: bytes, ep_out) -> None:
         """A new stream (or the same config again: nothing to do)."""
@@ -426,6 +498,8 @@ class H264:
             log("  (the MMI refuses this: Baseline 3.0 at most)")
         self.config, self.frame_bytes, self.started = payload, frame_bytes, False
         self.frames = self.bytes = self.biggest = self.idrs = self.refused = 0
+        if self.model is not None:
+            self.model = aoa_sim.IoMediaModel(frame_bytes, time.monotonic(), self.model.catch_up)
         self.t0 = time.monotonic()
         if self.out:
             self.out.close()
@@ -456,6 +530,11 @@ class H264:
             self.refused += 1
             self.started = False
             return VIDEO_BAD
+        if self.model is not None:
+            got = self.model.frame(idr, time.monotonic())
+            if got != "ok":
+                self.refused += 1
+                return VIDEO_DROPPED
         self.started = True
         self.frames += 1
         self.bytes += len(data)
@@ -478,6 +557,12 @@ class Pictures:
         """Nothing received yet."""
         self.cur, self.data, self.shown, self.t0 = None, b"", 0, time.monotonic()
         self.h264, self.gaps = H264(), FrameGaps()
+        self.acks = aoa_sim.AckGate()
+
+    def ack(self, status: int, ep_out) -> None:
+        """Ack one picture, through the toolbar's ack gate."""
+        for out in self.acks.add(ack_frame(status), time.monotonic()):
+            ep_out.write(out, timeout=2000)
 
     def start(self, payload: bytes, ep_out) -> None:
         """A new picture; refused like vasm.h does."""
@@ -489,7 +574,7 @@ class Pictures:
         if (fmt not in EXT and fmt != FMT_H264) or not 0 < size <= MAX_BYTES or \
                 not (0 < w <= box[0] and 0 < h <= box[1]):
             log(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes (box {box[0]}x{box[1]})")
-            ep_out.write(ack_frame(VIDEO_BAD), timeout=2000)
+            self.ack(VIDEO_BAD, ep_out)
             self.cur = None
             return
         self.cur, self.data = (pid, w, h, fmt, size, phone_ms), b""
@@ -505,12 +590,15 @@ class Pictures:
         self.cur = None
         if fmt == FMT_H264:
             ack = self.h264.on_frame(self.data)
-            ep_out.write(ack_frame(ack), timeout=2000)
+            self.ack(ack, ep_out)
             if ack == VIDEO_SHOWN:
                 self.gaps.frame(time.monotonic())
                 SCREEN.send("h264", self.data)
-            if ack == VIDEO_DROPPED or (ack == VIDEO_BAD and self.h264.config):
-                self.h264.status(H264_SYNC, ep_out)
+            model = self.h264.model
+            if model is not None and model.catching and not model.caught:
+                pass  # the MMI asks for the IDR once io-media is back
+            elif ack == VIDEO_DROPPED or (ack == VIDEO_BAD and self.h264.config):
+                self.h264.sync(ep_out)
             elif ack == VIDEO_BAD:
                 self.h264.status(H264_CONFIG_WANTED, ep_out)
             return
@@ -520,13 +608,80 @@ class Pictures:
             with open(name + ".tmp", "wb") as f:
                 f.write(self.data)
             os.replace(name + ".tmp", name)
-        ep_out.write(ack_frame(VIDEO_SHOWN), timeout=2000)
+        self.ack(VIDEO_SHOWN, ep_out)
         self.gaps.frame(time.monotonic())
         SCREEN.send("jpeg", self.data)
         if self.shown <= 3 or self.shown % 20 == 0:
             fps = self.shown / max(time.monotonic() - self.t0, 0.001)
             log(f"picture #{self.shown} id {pid}: {w}x{h} {'portrait' if w < h else 'landscape'}, "
                   f"{EXT[fmt]} {size} bytes (phone {phone_ms} ms), {fps:.1f} fps on average")
+
+
+class Faults:
+    """The toolbar's faults for one session (tools/aoa_sim.py)."""
+
+    def __init__(self, acc, pics: Pictures) -> None:
+        """Nothing on; the switches come with the toolbar's first command."""
+        self.acc, self.pics = acc, pics
+        self.controls = aoa_sim.Controls()
+        self.stall_until, self.status_at = 0.0, 0.0
+
+    def stalled(self, now: float) -> bool:
+        """Stall USB: no reads from the phone now."""
+        return now < self.stall_until
+
+    def poll(self, ep_out, now: float) -> None:
+        """Commands from the toolbar, held acks, the io-media model, the toolbar's status line."""
+        for cmd in CONTROL.poll():
+            self.controls.update(cmd.get("toggles", {}))
+            if cmd.get("action"):
+                self.act(cmd["action"], ep_out, now)
+        pics, h264 = self.pics, self.pics.h264
+        pics.acks.slow = self.controls.slow_acks
+        h264.use_model(self.controls.iomedia, self.controls.catch_up)
+        for out in pics.acks.due(now):
+            ep_out.write(out, timeout=2000)
+        if h264.model is not None:
+            got = h264.model.tick(now)
+            if got == "catch_up":
+                log(f"io-media model: {h264.model.behind()} frames behind: dropping until it is back")
+            elif got == "sync":
+                log("io-media model: back at the newest frame: asking for an IDR")
+                h264.sync(ep_out)
+            elif got == "eio":
+                h264.refuse("io-media model: read past the ring (the car's io-media error)", ep_out)
+        if now - self.status_at >= SIM_STATUS_S:
+            self.status_at = now
+            SCREEN.send("sim", text=self.describe(now))
+
+    def act(self, action: str, ep_out, now: float) -> None:
+        """One toolbar button."""
+        h264 = self.pics.h264
+        log(f"toolbar: {action}")
+        if action == "refuse":
+            h264.refuse("toolbar", ep_out)
+        elif action == "sync":
+            h264.status(H264_SYNC, ep_out)
+        elif action == "config":
+            h264.status(H264_CONFIG_WANTED, ep_out)
+        elif action == "hold_acks":
+            self.pics.acks.hold(now)
+        elif action == "stall_usb":
+            self.stall_until = now + aoa_sim.STALL_S
+        elif action == "drop_link":
+            self.acc.reset()  # the session ends with a USB error, as on unplugging
+
+    def describe(self, now: float) -> str:
+        """The toolbar's status line."""
+        parts = [f"acks held {self.pics.acks.held()}"]
+        if self.stalled(now):
+            parts.append(f"USB stalled {self.stall_until - now:.1f} s")
+        model = self.pics.h264.model
+        if model is not None:
+            parts.append(model.describe())
+        elif self.controls.iomedia:
+            parts.append("io-media model: waiting for a stream")
+        return " | ".join(parts)
 
 
 def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
@@ -562,6 +717,7 @@ def session(acc, may_reswitch: bool = True) -> bool:
     log(f"accessory {acc.idVendor:04x}:{acc.idProduct:04x} open, IN 0x{ep_in.bEndpointAddress:02x} "
           f"OUT 0x{ep_out.bEndpointAddress:02x}; open Audi streaming on the phone")
     dec, pics, peer = Decoder(), Pictures(), Peer()
+    faults = Faults(acc, pics)
     link_state("accessory", "open Audi streaming on the phone")
     try:
         ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)
@@ -570,8 +726,12 @@ def session(acc, may_reswitch: bool = True) -> bool:
         log("(HELLO not taken yet - the phone app is not open)")
     try:
         while True:
+            faults.poll(ep_out, time.monotonic())
+            if faults.stalled(time.monotonic()):
+                time.sleep(READ_TIMEOUT_MS / 1000)
+                continue
             try:
-                data = bytes(ep_in.read(16384, timeout=1000))
+                data = bytes(ep_in.read(16384, timeout=READ_TIMEOUT_MS))
             except usb.core.USBTimeoutError:
                 pics.gaps.idle(time.monotonic())
                 continue
@@ -608,14 +768,24 @@ def run_with_window() -> int | None:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so that the worker is stopped too
     read_end, write_end = os.pipe()
     fcntl.fcntl(write_end, fcntl.F_SETPIPE_SZ, PIPE_BYTES)
-    worker = subprocess.Popen([sys.executable, *sys.argv, "--screen-fd", str(write_end)],
-                              pass_fds=(write_end,))
+    control_read, control_write = os.pipe()
+    worker = subprocess.Popen([sys.executable, *sys.argv, "--screen-fd", str(write_end),
+                               "--control-fd", str(control_read)],
+                              pass_fds=(write_end, control_read))
     os.close(write_end)
+    os.close(control_read)
     model = aoa_screen.ScreenModel()
     threading.Thread(target=aoa_screen.pump, args=(read_messages(read_end), model),
                      daemon=True).start()
+
+    def control(cmd: dict) -> None:
+        try:
+            os.write(control_write, json.dumps(cmd).encode() + b"\n")
+        except OSError:
+            pass  # the USB process is restarting; the toolbar sends its switches again
+
     try:
-        return screen.run(model, lambda: worker.poll() is None)
+        return screen.run(model, lambda: worker.poll() is None, control)
     finally:
         worker.terminate()
         worker.wait()

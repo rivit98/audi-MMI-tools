@@ -331,7 +331,14 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   MMI's screen and saves it to `build/aoa-host/stream.h264` (`ffplay` it). The
   timestamped log tells a freeze ("no frames for") from a stop ("stream ended:
   VIDEO_STOP"). Acks go out at once, so this shows when the phone stops sending,
-  not the MMI's timing.
+  not the MMI's timing. A toolbar under the window (keys 1-9) plays the MMI's
+  faults to the phone (`tools/aoa_sim.py`): *Refuse* (`REFUSED`, as after an
+  io-media error), *Sync*, *Config* (`CONFIG_WANTED`), *Hold acks* (3 s),
+  *Stall USB* (3 s), *Drop link* (port reset), and the switches *Slow acks*
+  (5 a second), *io-media* (a read model at ~6.4 MB/s of padded frames: 256 KB
+  frames fall behind and end in `REFUSED` as on the car, 128 KB ones keep up)
+  and *Catch-up* (the MMI's drop until io-media is back). Its status line shows
+  held acks and how far the modelled io-media reads behind.
 - **Latency:** the phone app's *Latency clock* switch shows a big
   seconds.milliseconds clock. Stream with it on screen and take one photo
   of the phone and the MMI together: the difference is the delay.

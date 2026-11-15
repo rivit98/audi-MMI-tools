@@ -9,6 +9,11 @@ Lays things out like src/audi_stream_receiver/ui.cpp:
 
 Messages come from aoa_host.py's USB process and are decoded on a thread that keeps
 only the newest picture. Q or Esc closes the window.
+
+Under the screen, the toolbar: the MMI's faults (tools/aoa_sim.py), by click or keys
+1-9, sent to the USB process as JSON lines; switches are lit while on, and sent
+again every second (the USB process restarts when the bus changes). Its status
+line is the USB process's "sim" message.
 """
 
 import copy
@@ -16,7 +21,7 @@ import io
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 import av
@@ -25,6 +30,15 @@ import pygame
 SCREEN_W, SCREEN_H = 800, 480
 FPS_WINDOW_S = 2.0
 REFRESH_HZ = 30
+TOOLBAR_H, BUTTON_H, BUTTON_GAP = 60, 28, 4
+TOGGLES_EVERY_S = 1.0
+C_BUTTON, C_BUTTON_ON = (0x2A, 0x36, 0x44), (0xB0, 0x7A, 0x10)
+
+# The toolbar: (name, label, is a switch); = aoa_sim.ACTIONS / TOGGLES
+BUTTONS = [("refuse", "Refuse", False), ("sync", "Sync", False), ("config", "Config", False),
+           ("hold_acks", "Hold acks", False), ("stall_usb", "Stall USB", False),
+           ("drop_link", "Drop link", False), ("slow_acks", "Slow acks", True),
+           ("iomedia", "io-media", True), ("catch_up", "Catch-up", True)]
 
 STATUS_H, DETAIL_Y, BODY_TOP, FOOTER_H, MARGIN = 48, 54, 80, 24, 12  # = ui.cpp
 C_BG, C_TEXT, C_DIM = (0x10, 0x18, 0x20), (0xE8, 0xE8, 0xE8), (0x8A, 0x92, 0x9E)
@@ -88,6 +102,7 @@ class ScreenState:
     size: tuple[int, int] = (0, 0)
     bytes: int = 0
     shown: int = 0
+    sim: str = ""  # the toolbar's status line
     times: deque = field(default_factory=lambda: deque(maxlen=128))
 
     def fps(self, now: float) -> float:
@@ -136,6 +151,11 @@ class ScreenModel:
         picture = pygame.image.load(io.BytesIO(body), "picture.jpg")
         self.show("jpeg", picture, picture.get_size(), len(body))
 
+    def on_sim(self, head: dict, _body: bytes) -> None:
+        """The faults' state, for the toolbar's status line."""
+        with self.lock:
+            self.state.sim = head["text"]
+
     def on_stop(self, _head: dict, _body: bytes) -> None:
         """The picture ends; back to the status panel."""
         self.decoder = None
@@ -158,6 +178,60 @@ class ScreenModel:
             state = copy.copy(self.state)
             state.times = self.state.times.copy()
         return state
+
+
+class Toolbar:
+    """The fault buttons under the screen: what a click or key sends to the USB process."""
+
+    def __init__(self) -> None:
+        """Switches as aoa_sim.Controls starts them."""
+        self.toggles = {name: name == "catch_up" for name, _, switch in BUTTONS if switch}
+        self.sent_at = 0.0
+
+    @staticmethod
+    def rects() -> list[pygame.Rect]:
+        """Each button's place in the window."""
+        width = (SCREEN_W - BUTTON_GAP) // len(BUTTONS)
+        return [pygame.Rect(BUTTON_GAP + i * width, SCREEN_H + BUTTON_GAP, width - BUTTON_GAP,
+                            BUTTON_H) for i in range(len(BUTTONS))]
+
+    def press(self, index: int) -> dict:
+        """Button index pressed: the command for the USB process."""
+        name, _, switch = BUTTONS[index]
+        if switch:
+            self.toggles[name] = not self.toggles[name]
+            return {"toggles": dict(self.toggles)}
+        return {"action": name, "toggles": dict(self.toggles)}
+
+    def click(self, pos: tuple[int, int]) -> dict | None:
+        """A mouse click: the command, or None off the buttons."""
+        for i, rect in enumerate(self.rects()):
+            if rect.collidepoint(pos):
+                return self.press(i)
+        return None
+
+    def key(self, key: int) -> dict | None:
+        """Keys 1-9 press the buttons."""
+        index = key - pygame.K_1
+        return self.press(index) if 0 <= index < len(BUTTONS) else None
+
+    def heartbeat(self, now: float) -> dict | None:
+        """The switches again, every TOGGLES_EVERY_S."""
+        if now - self.sent_at < TOGGLES_EVERY_S:
+            return None
+        self.sent_at = now
+        return {"toggles": dict(self.toggles)}
+
+    def paint(self, target: pygame.Surface, font: pygame.font.Font, status: str) -> None:
+        """The buttons and the status line, below the screen."""
+        target.fill(C_FOOTER_BG, (0, SCREEN_H, SCREEN_W, TOOLBAR_H))
+        for i, (rect, (name, label, switch)) in enumerate(zip(self.rects(), BUTTONS, strict=True)):
+            on = switch and self.toggles[name]
+            target.fill(C_BUTTON_ON if on else C_BUTTON, rect)
+            text = font.render(f"{i + 1} {label}", True, C_TEXT)
+            target.blit(text, text.get_rect(center=rect.center))
+        target.blit(font.render(status, True, C_DIM),
+                    (MARGIN, SCREEN_H + BUTTON_GAP + BUTTON_H + 6))
 
 
 def wrap(font: pygame.font.Font, text: str, width: int) -> list[str]:
@@ -244,23 +318,38 @@ class Screen:
         try:
             pygame.display.init()
             pygame.font.init()
-            self.window = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+            self.window = pygame.display.set_mode((SCREEN_W, SCREEN_H + TOOLBAR_H))
         except pygame.error as e:
             raise NoDisplayError(str(e)) from e
         if pygame.display.get_driver() in ("dummy", "offscreen"):
             raise NoDisplayError(f"SDL driver {pygame.display.get_driver()}")
-        pygame.display.set_caption("MMI screen (aoa_host.py)   Q: quit")
+        pygame.display.set_caption("MMI screen (aoa_host.py)   1-9: faults   Q: quit")
 
-    def run(self, model: ScreenModel, worker_alive) -> int:
-        """Redraw until the window is closed or worker_alive() turns false."""
-        painter, clock = Painter(self.window), pygame.time.Clock()
+    def run(self, model: ScreenModel, worker_alive,
+            control: Callable[[dict], None] = lambda _cmd: None) -> int:
+        """Redraw until the window is closed or worker_alive() turns false; control() gets
+        the toolbar's commands."""
+        painter = Painter(self.window.subsurface((0, 0, SCREEN_W, SCREEN_H)))
+        toolbar, clock = Toolbar(), pygame.time.Clock()
         while worker_alive():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return 0
-                if event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    return 0
-            painter.paint(model.snapshot(), time.monotonic())
+                cmd = None
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                        return 0
+                    cmd = toolbar.key(event.key)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    cmd = toolbar.click(event.pos)
+                if cmd is not None:
+                    control(cmd)
+            now = time.monotonic()
+            if (cmd := toolbar.heartbeat(now)) is not None:
+                control(cmd)
+            state = model.snapshot()
+            painter.paint(state, now)
+            toolbar.paint(self.window, painter.small, state.sim)
             pygame.display.flip()
             clock.tick(REFRESH_HZ)
         return 0

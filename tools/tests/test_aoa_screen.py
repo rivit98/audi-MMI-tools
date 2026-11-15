@@ -119,3 +119,39 @@ def test_wrap_keeps_lines_within_the_width(target):
     lines = aoa_screen.wrap(font, aoa_screen.LINKS["connected"][2], 300)
     assert len(lines) > 1
     assert all(font.size(line)[0] <= 300 for line in lines)
+
+
+def test_toolbar_buttons_send_actions_with_the_switches(target):
+    bar = aoa_screen.Toolbar()
+    cmd = bar.key(pygame.K_1)
+    assert cmd == {"action": "refuse", "toggles": {"slow_acks": False, "iomedia": False,
+                                                   "catch_up": True}}
+
+
+def test_toolbar_switches_flip_and_are_resent(target):
+    bar = aoa_screen.Toolbar()
+    rect = bar.rects()[7]                      # io-media
+    assert bar.click(rect.center) == {"toggles": {"slow_acks": False, "iomedia": True,
+                                                  "catch_up": True}}
+    assert bar.heartbeat(100.0) == {"toggles": {"slow_acks": False, "iomedia": True,
+                                                "catch_up": True}}
+    assert bar.heartbeat(100.5) is None
+    assert bar.click((5, 5)) is None           # on the screen, not the toolbar
+    assert bar.key(pygame.K_0) is None
+
+
+def test_toolbar_paints_below_the_screen(target):
+    window = pygame.Surface((aoa_screen.SCREEN_W, aoa_screen.SCREEN_H + aoa_screen.TOOLBAR_H))
+    window.fill((1, 2, 3))
+    bar = aoa_screen.Toolbar()
+    bar.toggles["iomedia"] = True
+    bar.paint(window, pygame.font.Font(None, 20), "acks held 0")
+    assert window.get_at((5, 5))[:3] == (1, 2, 3)
+    on = bar.rects()[7]
+    assert window.get_at((on.x + 1, on.y + 1))[:3] == aoa_screen.C_BUTTON_ON
+
+
+def test_sim_message_sets_the_status_line():
+    model = ScreenModel()
+    model.apply({"kind": "sim", "text": "acks held 3"}, b"")
+    assert model.snapshot().sim == "acks held 3"
