@@ -259,7 +259,7 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
 25 fps and fills the rest with skip frames.
 
 - **Protocol** (`proto.h`): `VIDEO_CAPS` sets bit 2 (H.264) and appends the
-  limits (720×576, 25 fps, frames up to 256 KB). The phone sends
+  limits (720×576, 25 fps, frames up to 128 KB). The phone sends
   `H264_CONFIG` (0x0B: fps, the largest frame, SPS, PPS, VCAP 0's field
   mode), then its frames
   as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each).
@@ -275,7 +275,11 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   in, the picture 1 s later. Gaps are filled with skip frames. A stream
   more than 500 ms ahead of its frame clock (a phone faster than 25 fps, a
   burst after a stall) drops frames until it is on time, then goes on from
-  an IDR (`live_stream.h`, clock cap): the lag can't grow. A new
+  an IDR (`live_stream.h`, clock cap): the lag can't grow. When
+  io-media reads more than 12 frames behind the newest one (it reads
+  slower than 25 fps: frames too big), frames are dropped until it is back,
+  then the stream goes on from an IDR (`live_stream.h`, catch-up): a short
+  freeze instead of an io-media error. A new
   config restarts the stream; the same config again changes nothing. The
   stream ends on `VIDEO_STOP`, a JPEG picture, unplugging, or when
   its declared frames run out (the 4 GB limit: ~1.6 h at 28 KB frames,
@@ -294,16 +298,23 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   its media or the camera), the stream ends without touching
   `/dev/videoctrl`, and the phone is told `REFUSED` (pictures for the rest
   of the connection). If no new stream follows a restart within 5 s, the
-  CPU-drawn screen comes back. An `ERROR event: Input/output error` also came
-  minutes into a stream with no camera and no HMI media [confirmed, twice]:
-  our resource manager never answers EIO and slog has no io-media line then,
-  so the cause is unknown. Both times io-media's waited reads per window had
-  dropped from ~250 to 0 20–170 s before it, at a steady ~340 ms lag; reads of
-  frames already gone from the ring (answered with filler) are the suspect
-  [unverified]. The log lines below are there to answer that.
+  CPU-drawn screen comes back.
+- **io-media reads every padded byte, and too many are more than it reads in
+  time** [confirmed: 11 of 11 `ERROR event: Input/output error` in one
+  27-minute session, the `h264:` windows and `at the error:` dumps]. With
+  256 KB frames (6.7 MB/s) its reads keep up for ~20 s, then fall behind by
+  ~1 frame a second (`waited` drops to 0, `reader B frames behind` grows).
+  Once past the 8 MB ring (31 frames) a read gets filler, and io-media fails
+  ~45 s after the config. 144 KB frames drift ~0.4 frame a second and failed
+  after 210 s; 128 KB frames (3.4 MB/s) kept up for 70–90 s without drift.
+  A bigger ring only delays the error, and the picture is as late as the
+  reader is behind. So the MMI announces 128 KB as its largest frame, and
+  the catch-up drops frames before the ring runs out [built, not yet
+  confirmed on the car].
 - **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
   MediaCodec, Baseline 3.0, CBR at the *H.264 rate* drop-down (2.5, 4
-  (default), 6 or 8 Mbit/s). With *Sharp H.264* (default on) the screen
+  (default) or 6 Mbit/s; 8 Mbit/s made IDRs of up to ~170 KB, over the
+  MMI's 128 KB). With *Sharp H.264* (default on) the screen
   is captured at k× and box-filtered k:1 on the GPU into the encoder
   (`GlScaler.kt`), as the pictures are; off = the direct capture path,
   which blurs text (docs/phone-mirroring.md §7.13). An IDR only at the start and
@@ -349,8 +360,11 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
     bytes; `unblocked` reads io-media gave up on; `reader B frames behind`:
     the newest frame minus the furthest byte io-media was answered, at log
     time.
-  - `stream ended (...)` adds totals `E evicted, F far, O eof; ring N frames =
-    X.X s`.
+  - `stream ended (...)` adds totals `C catching up (T times, max B frames
+    behind)` (frames dropped while io-media caught up) and `E evicted, F far,
+    O eof; ring N frames = X.X s`.
+  - `h264: io-media reads over 12 frames behind the newest ...: dropping
+    frames until it is back, then an IDR`: a catch-up started.
   - On an io-media `ERROR` event, before the stream goes: `h264: at the error:`
     (frames in, the reader's byte, reads waiting, evicted, ring, the cpumon
     load of the last second), the last 32 reads (`h264:   <ms>: #seq

@@ -26,7 +26,9 @@ namespace hwvideo {
 constexpr unsigned kMaxW = 720;
 constexpr unsigned kMaxH = 576;
 constexpr unsigned kFps = 25;
-constexpr u32 kMaxFrame = 256u * 1024;
+// Every frame is padded to the phone's frame size, and io-media reads it all:
+// 256 KB frames (6.7 MB/s) are more than it reads in time, 128 KB ones keep up.
+constexpr u32 kMaxFrame = 128u * 1024;
 
 void start();
 void shutdown();

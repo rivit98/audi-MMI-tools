@@ -964,7 +964,7 @@ arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
   they queue on the phone while acks are outstanding (up to 12 in
   flight); 25 queued = something is stuck, so the queue is dropped and an
   IDR asked for. A frame bigger than `frame_bytes` (64 KB at first) raises
-  it (×2 or ×1.5 the frame, 16 KB steps, at most the MMI's 256 KB) with a
+  it (×2 or ×1.5 the frame, 16 KB steps, at most the MMI's 128 KB) with a
   new config - the MMI restarts its stream, ~1-2 s black, once. In-band
   SPS/PPS that differ from the codec config's become the config.
 - **MMI** (`hwvideo.cpp`): keeps 8 MB of frames (16-128). The rear camera shares VCAP 0, so while it is up (known from
@@ -1017,6 +1017,11 @@ well in use: 720×432 Baseline, POC type 0, sharp text.
 **Restarts cost a short break in the picture.** An `H264_CONFIG` with other
 contents restarts the graph. Keeping them rare [confirmed]:
 
+- io-media reads every frame's padding too. At 256 KB frames (6.7 MB/s) its
+  reads fall ~1 frame a second behind after ~20 s, run past the 8 MB ring
+  and end in `ERROR event: Input/output error` ~45 s after the config; 128 KB
+  frames keep up [confirmed, audi_stream_receiver README]. Frames are
+  capped at 128 KB and the 8 Mbit/s rate is gone.
 - IDRs go over 64 KB, so the phone grows the frame size to 128–160 KB. The
   size stays when its encoder restarts, so a later big IDR causes no restart.
 - One config means one restart (`config_gate.h`). Copies of the config being
@@ -1037,7 +1042,7 @@ screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
 frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
 **k× capture + GPU box filter, 4 Mbit/s default:** text is sharp on the car.
-Neither the *Sharp H.264* switch alone nor the rate (2.5 to 8 Mbit/s) makes a
+Neither the *Sharp H.264* switch alone nor the rate (2.5 to 8 Mbit/s) made a
 visible difference. The higher rates are applied (at 6–8 Mbit/s IDRs pass
 64 KB and the frame size grows to 144 KB), but a phone UI at 720×432 is
 mostly still, and its P-frames need a fraction of 2.5 Mbit/s whatever the
@@ -1057,7 +1062,8 @@ real rate (`N of M kbit/s`).
   failing later) falls back to the direct path for the rest of the
   session. Shaders checked with glslang; `GlBoxTest` covers the taps.
 - Switch **Sharp H.264** (default on, off = k 1) for an A/B; drop-down
-  **H.264 rate** 2.5 / 4 (default) / 6 / 8 Mbit/s. The rate restarts the
+  **H.264 rate** 2.5 / 4 (default) / 6 Mbit/s (8 made IDRs of up to ~170 KB,
+  over the MMI's 128 KB frames). The rate restarts the
   encoder like the fps slider; the switch doesn't. The status line shows
   `(x3)` or `(direct)` and the rate.
 

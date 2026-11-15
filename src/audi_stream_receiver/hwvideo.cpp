@@ -48,13 +48,19 @@ constexpr u32 kRingBytes = 8u << 20; // frames kept for io-media: 8 MB (>= 16 fr
 // IDR (live_stream.h, clock cap). A phone at 26 fps against the stream's 25
 // took the lag from 0.5 s to 3.3 s in 3 minutes; this keeps it under ~1 s.
 constexpr unsigned kShedAheadMs = 500;
+// io-media reads more frames than this behind the newest: frames dropped
+// until it is back, then an IDR (live_stream.h, catch-up). It reads slower
+// than 25 fps when the frames are big (256 KB: ~24 fps, 1 frame/s behind,
+// the 8 MB ring overrun in ~45 s, then an io-media error). At most half
+// the ring.
+constexpr unsigned kCatchUpFrames = 12;
 // warnings: each at most once per this, with a count of the ones held back
 constexpr unsigned kWarnEveryMs = 10000;
 constexpr i64 kLagWarnMs = 1000;    // lag median over this
 
 // Per-window deltas: the counters at the window's start.
 struct Window {
-	u32 real = 0, skips = 0, refused = 0, sheds = 0, evicted = 0, idr = 0;
+	u32 real = 0, skips = 0, refused = 0, sheds = 0, catch_ups = 0, evicted = 0, idr = 0;
 	unsigned reads = 0, waited = 0, far = 0, eof = 0, unblocked = 0;
 	bool waited_before = false;          // a window of this stream had waited reads
 	std::vector<i64> lags;
@@ -210,11 +216,13 @@ void teardown(const char *why, End how = End::Stop)
 	const PlayStats &ps = h->player().stats();
 	log_msg("h264: stream ended (%s): %u frames in (%u IDR), %u skips in %u gaps, refused: %u "
 	        "too big, %u waiting for an IDR, %u bad, %u SPS/PPS changed, %u ahead of the clock "
-	        "(%u times, max %lld ms ahead); io-media: %u reads, %u "
+	        "(%u times, max %lld ms ahead), %u catching up (%u times, max %lld frames behind); "
+	        "io-media: %u reads, %u "
 	        "waited (max %u ms), %u unblocked, %u evicted, %u far, %u eof; ring %u frames = "
 	        "%.1f s; %u TIME events, position %.1f s, %u errors%s%s",
 	        why, ls.real, ls.idr, ls.skips, ls.gaps, ls.too_big, ls.wait_idr, ls.bad,
-	        ls.config_changed, ls.shed, ls.sheds, (long long)ls.ahead_ms_max, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked,
+	        ls.config_changed, ls.shed, ls.sheds, (long long)ls.ahead_ms_max, ls.caught_up,
+	        ls.catch_ups, (long long)ls.behind_max, ss.reads, ss.waited, ss.wait_ms_max, ss.unblocked,
 	        ls.evicted_reads, ss.far, ss.eof, h->stream().config().ring_frames,
 	        ring_s(h->stream().config()), ps.time_events,
 	        ps.max_pos_ms < 0 ? 0.0 : ps.max_pos_ms / 1000.0, ps.error_events,
@@ -249,6 +257,7 @@ void setup(const std::vector<u8> &payload)
 	o.cfg.fill = true;
 	o.cfg.ring_frames = std::min<u32>(128, std::max<u32>(16, kRingBytes / o.cfg.sample_size));
 	o.cfg.shed_ahead_ms = kShedAheadMs;
+	o.cfg.catch_up_frames = std::min<u32>(kCatchUpFrames, o.cfg.ring_frames / 2);
 	o.path = kPath;
 	char g[48];
 	std::snprintf(g, sizeof(g), "audi_stream_%d_%u", (int)getpid(), ++graphs);
@@ -509,6 +518,13 @@ void run()
 				        "%u fps, or caught up after a stall): dropping frames until on time",
 				        kShedAheadMs, h->stream().config().fps);
 			}
+			h->stream().reader_at(h->server().stats().served_end);
+			if (now.catch_ups != w.catch_ups) {
+				w.catch_ups = now.catch_ups;
+				log_msg("h264: io-media reads over %u frames behind the newest (it reads slower "
+				        "than %u fps): dropping frames until it is back, then an IDR",
+				        h->stream().config().catch_up_frames, h->stream().config().fps);
+			}
 			if (h->stream().sync_wanted()) {
 				log_msg("h264: frames were dropped: asking for an IDR");
 				status(proto::kH264Sync);
@@ -602,9 +618,9 @@ proto::PicStatus frame(const u8 *data, unsigned size)
 				if (size > win_max_bytes)
 					win_max_bytes = size;
 			}
-			if (p == live::Push::Shed) {
-				// logged once per time by the hw thread, which also asks
-				// for the IDR when the stream is back on its clock
+			if (p == live::Push::Shed || p == live::Push::CatchUp) {
+				// logged once per time by the hw thread; the IDR is asked
+				// for when the stream is back on its clock / io-media is back
 				refused_total++;
 				ack = PicStatus::Dropped;
 			} else if (p != live::Push::Ok) {

@@ -31,6 +31,17 @@
 // the stream goes on from it. On screen: the picture plays the backlog,
 // then jumps to the present.
 //
+// Catch-up (Config::catch_up_frames, 0 = off): the clock cap watches the
+// sender; this watches io-media. When io-media reads slower than fps (too
+// many bytes a second: every frame costs S), its read position slides back
+// from the newest frame, and once it is past ring_frames it reads frames no
+// longer kept (filler: an io-media error). The owner passes io-media's read
+// position (reader_at()); more than catch_up_frames behind, every frame
+// pushed is dropped (Push::CatchUp) until the reader is back within a frame
+// of the newest one, then an IDR is wanted (WaitIdr) and the stream goes on
+// from it, with the frame clock moved to it (fill() does not make up the
+// gap). On screen: a short freeze, then the present.
+//
 // Thread-safe: push() from the receiving thread, fill() and read() from the
 // server's.
 #ifndef COMMON_LIVE_STREAM_H
@@ -57,6 +68,8 @@ struct Config {
 	unsigned ring_frames = 128;      // frames kept for io-media to read (S each)
 	unsigned shed_ahead_ms = 0;      // more ahead of the frame clock: drop up to
 	                                 // it, then wait for an IDR (0: never)
+	unsigned catch_up_frames = 0;    // io-media reads more frames behind the newest:
+	                                 // drop until it is back, then wait for an IDR (0: never)
 };
 
 enum class Push {
@@ -67,6 +80,7 @@ enum class Push {
 	ConfigChanged,    // dropped: in-band SPS/PPS differ: restart with them
 	Full,             // dropped: the declared frames are all used: restart
 	Shed,             // dropped: the stream is too far ahead of its clock
+	CatchUp,          // dropped: io-media reads too far behind, letting it catch up
 	NotConfigured,
 };
 const char *push_name(Push p);
@@ -87,6 +101,9 @@ struct Stats {
 	u32 shed = 0;          // frames dropped ahead of the clock
 	u32 sheds = 0;         // times the stream got too far ahead
 	i64 ahead_ms_max = 0;   // furthest ahead of the clock a frame was pushed
+	u32 catch_ups = 0;     // times io-media read too far behind
+	u32 caught_up = 0;     // frames dropped while it caught up
+	i64 behind_max = 0;    // furthest behind the newest frame io-media read
 };
 
 class Stream {
@@ -106,6 +123,10 @@ public:
 	// An IDR is wanted from the sender (a frame was dropped); cleared by
 	// the call.
 	bool sync_wanted();
+	// io-media has read up to byte served_end (the server's highest answered
+	// offset): drives the catch-up. Any thread, e.g. the owner's poll.
+	void reader_at(u64 served_end);
+	bool catching_up() const;
 
 	// ---- serving ----
 	u64 data_off() const { return data_off_; }
@@ -147,6 +168,8 @@ private:
 	bool started_ = false, need_idr_ = false, finished_ = false, sync_ = false;
 	u64 t0_ms_ = 0, last_push_ms_ = 0;
 	bool filling_ = false, shedding_ = false;
+	bool catching_ = false;    // io-media too far behind: dropping until the IDR after it caught up
+	bool caught_ = false;      // the reader is back: waiting for that IDR
 	unsigned prev_ref_frame_num_ = 0, last_poc_lsb_ = 0;
 	std::vector<u8> sample_, filler_;
 	Stats st_;

@@ -27,6 +27,7 @@ const char *push_name(Push p)
 	case Push::ConfigChanged: return "SPS/PPS changed";
 	case Push::Full: return "stream full";
 	case Push::Shed: return "ahead of the clock";
+	case Push::CatchUp: return "io-media catching up";
 	case Push::NotConfigured: return "not configured";
 	}
 	return "?";
@@ -60,6 +61,7 @@ std::string Stream::configure(const Config &c)
 	ring_ms_.clear();
 	frames_ = 0;
 	started_ = need_idr_ = finished_ = sync_ = filling_ = shedding_ = false;
+	catching_ = caught_ = false;
 	t0_ms_ = last_push_ms_ = 0;
 	prev_ref_frame_num_ = last_poc_lsb_ = 0;
 	st_ = Stats();
@@ -138,6 +140,11 @@ Push Stream::push(const u8 *annexb, usize n, u64 now_ms, std::string *why)
 		st_.bad++;
 		return fail(Push::Bad, "no slice in the frame");
 	}
+	// io-media too far behind: nothing more for it until it is back
+	if (catching_ && !caught_) {
+		st_.caught_up++;
+		return fail(Push::CatchUp, "io-media reads too far behind");
+	}
 	h264::Slice s;
 	std::string err = h264::parse_slice(first->p, first->n, sps_, pps_, s);
 	if (!err.empty()) {
@@ -189,6 +196,14 @@ Push Stream::push(const u8 *annexb, usize n, u64 now_ms, std::string *why)
 	if (!started_) {
 		started_ = true;
 		t0_ms_ = now_ms;
+	}
+	if (catching_ && s.idr()) {
+		// the frame clock goes on from this IDR: the dropped stretch is
+		// not filled with skips (more bytes for io-media)
+		u64 at = frames_ * 1000 / cfg_.fps;
+		if (now_ms >= at)
+			t0_ms_ = now_ms - at;
+		catching_ = caught_ = false;
 	}
 	need_idr_ = false;
 	if (started_) {
@@ -260,6 +275,32 @@ bool Stream::sync_wanted()
 	bool s = sync_;
 	sync_ = false;
 	return s;
+}
+
+void Stream::reader_at(u64 served_end)
+{
+	std::lock_guard<std::mutex> lock(mu_);
+	if (!started_ || cfg_.catch_up_frames == 0 || served_end <= data_off_)
+		return;
+	i64 reading = (i64)((served_end - data_off_) / cfg_.sample_size);
+	i64 behind = (i64)frames_ - reading;
+	if (behind > st_.behind_max)
+		st_.behind_max = behind;
+	if (!catching_ && behind > (i64)cfg_.catch_up_frames) {
+		catching_ = true;
+		caught_ = false;
+		need_idr_ = true;                // no gap fill, and an IDR to go on from
+		st_.catch_ups++;
+	} else if (catching_ && !caught_ && behind <= 1) {
+		caught_ = true;
+		sync_ = true;
+	}
+}
+
+bool Stream::catching_up() const
+{
+	std::lock_guard<std::mutex> lock(mu_);
+	return catching_;
 }
 
 u64 Stream::available() const

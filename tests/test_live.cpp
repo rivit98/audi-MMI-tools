@@ -892,6 +892,80 @@ void test_shed()
 	CHECK(burst.stats().ahead_ms_max <= 540);
 }
 
+// the catch-up: io-media reading at 24 fps against a 25 fps sender (the
+// 15.11 car run's 256 KB frames) - without it the reader falls past the
+// ring; with it, it drops until the reader is back, then goes on from an
+// IDR without filling the gap
+struct CatchUpRun {
+	unsigned catch_ups = 0, sync_asks = 0, idr_sent = 0, skips = 0;
+	i64 behind_max = 0;
+	bool overrun = false;
+	u64 frames = 0;
+};
+
+CatchUpRun run_catch_up(unsigned catch_up_frames, unsigned secs)
+{
+	h264::Sps s;
+	h264::parse_sps(kSps.data(), kSps.size(), s);
+	live::Config c = cfg(8192, 0, true, 32);
+	c.shed_ahead_ms = 500;
+	c.catch_up_frames = catch_up_frames;
+	live::Stream st;
+	CHECK_OK(st.configure(c));
+	CatchUpRun r;
+	f64 reader = 0;                      // frames io-media has read
+	bool want_idr = false;
+	unsigned k = 0;
+	for (u64 t = 0; t <= secs * 1000ull; t += 10) {
+		if (t % 40 == 0) {
+			bool idr = k == 0 || want_idr;
+			std::vector<u8> f = idr ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
+			live::Push p = st.push(f.data(), f.size(), t);
+			CHECK(p == live::Push::Ok || p == live::Push::CatchUp || p == live::Push::WaitIdr);
+			if (idr && p == live::Push::Ok) {
+				want_idr = false;
+				r.idr_sent++;
+			}
+			if (p == live::Push::WaitIdr)
+				want_idr = true;             // hwvideo asks with SYNC
+			k++;
+		}
+		st.fill(t);
+		// io-media: 24 frames a second, never past the newest frame
+		reader = std::min<f64>(reader + 0.24, (f64)st.frames());
+		u64 at = (u64)reader;
+		if (at + c.ring_frames < st.frames())
+			r.overrun = true;
+		st.reader_at(st.data_off() + at * c.sample_size);
+		if (st.sync_wanted()) {
+			r.sync_asks++;
+			want_idr = true;
+		}
+		i64 behind = (i64)st.frames() - (i64)at;
+		if (behind > r.behind_max)
+			r.behind_max = behind;
+	}
+	r.catch_ups = st.stats().catch_ups;
+	r.skips = st.stats().skips;
+	r.frames = st.frames();
+	return r;
+}
+
+void test_catch_up()
+{
+	CatchUpRun off = run_catch_up(0, 120);
+	CHECK(off.overrun);
+	CHECK_EQ(off.catch_ups, 0);
+
+	CatchUpRun on = run_catch_up(12, 120);
+	CHECK(!on.overrun);
+	CHECK(on.behind_max <= 14);
+	CHECK(on.catch_ups >= 5 && on.catch_ups <= 12);   // 1 frame/s: every ~12-20 s
+	CHECK(on.idr_sent >= on.catch_ups + 1);
+	CHECK_EQ(on.skips, 0);               // the dropped stretch is not filled
+	CHECK(on.frames >= 24 * 115 && on.frames <= 24 * 121);
+}
+
 void test_burst()
 {
 	plan::Schedule b(25.0, {}, 5);
@@ -1076,6 +1150,7 @@ int main()
 	test_stream();
 	test_fill();
 	test_shed();
+	test_catch_up();
 	test_burst();
 	test_with_clip();
 	CHECK_DONE();
