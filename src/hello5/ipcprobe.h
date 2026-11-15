@@ -21,11 +21,26 @@
 #ifndef HELLO5_IPCPROBE_H
 #define HELLO5_IPCPROBE_H
 
+#include <sys/types.h>
+
 /* Runs the probe, writes the files into out_dir. 0 if both MMI3G
  * processes were found, -1 if not. */
 int ipc_probe(const char *out_dir);
 
 /* Worst-case run time in ms (the bounded pidin calls), for the watchdog. */
 unsigned ipc_probe_max_ms(void);
+
+/* MMI3GApplication's pid, and the channels of it to send HBDSI to, best
+ * first: the ones MMI3GNavigation holds a plain (non-side) connection to,
+ * then its side-channel ones, then the channels MMI3GApplication's own
+ * threads receive on. Returns how many chids were written, or -1 if the
+ * process is not running. Logs what it found ("step d: ..." lines). */
+int ipc_app_channels(pid_t *app_pid, int *chids, unsigned max);
+
+/* Is `from` connected to pid/chid? 1 yes, 0 no. Used to tell whether a
+ * service accepted a ConnectRequest: the server answers every request,
+ * but it only connects back to the client's channels when it found the
+ * service. */
+int ipc_connected_to(pid_t from, pid_t to_pid, int to_chid);
 
 #endif

@@ -27,7 +27,10 @@
  *   d  the nav voice channel: hello5 asks audio management for it over
  *      HBDSI, as the navigation does (does the radio get quieter?), plays
  *      pings on io-audio "navi" while it is open, gives it back, then plays
- *      3 control pings with no channel (play_duck below).
+ *      3 control pings with no channel (play_duck below). The broker does
+ *      not know the interface, so it sends the ConnectRequest straight to
+ *      MMI3GApplication with a server id looked for in that process's own
+ *      memory (duck_internal, svcscan.c).
  *   p  no sound: which channels MMI3GApplication, MMI3GNavigation and the
  *      servicebroker are connected to and receive on (ipcprobe.c), the
  *      evidence for how the navigation reaches audio management.
@@ -151,6 +154,8 @@
 #include "iom.h"
 #include "ipcprobe.h"
 #include "pulse.h"
+#include "svcid.h"
+#include "svcscan.h"
 
 #define DEFAULT_STEPS   "mntv"
 #define DEFAULT_OUTPUTS "m2,m1,m6,m4,m7"
@@ -1087,6 +1092,12 @@ static int play_native(const struct step *s, const char *log_file, struct play *
  * broker's interface list goes to var/hello5_broker.txt. */
 
 #define DUCK_IFACE        "SGAudioManagement"
+#define DUCK_ROLE         "AudioManagementDevCtrl"      /* its component */
+#define DUCK_MAX_CHIDS    8             /* channels of the server we collect */
+#define DUCK_TRY_CHIDS    3             /* and how many we send to */
+#define DUCK_MAX_IDS      (SVC_MAX_IDS + 2)
+#define DUCK_MAX_TRIES    6             /* ConnectRequests in all */
+#define DUCK_CONNECT_MS   1000          /* for a ConnectRequest reply */
 #define DUCK_TIMEOUT_MS   2000          /* for a server's reply */
 #define DUCK_HOLD_MS      6000          /* phases 1 and 3 */
 #define DUCK_PINGS        6             /* phase 2 */
@@ -1162,6 +1173,87 @@ static int duck_attach(struct hbdsi *c)
 		if (status != HBDSI_BROKER_VERSION_MISMATCH && i > 0)
 			break;
 	}
+	return -1;
+}
+
+/* The other way in, when the broker does not know the interface: send the
+ * ConnectRequest straight to MMI3GApplication, the way its own child
+ * processes do (docs/hbdsi.md section 4). Three things are needed and
+ * none of them comes from the broker:
+ *   the server's pid         /proc
+ *   the channel to send to   the channels MMI3GNavigation is connected to
+ *                            and the ones MMI3GApplication receives on
+ *                            (ipcprobe.c)
+ *   the service's server id  the component id from the bootstrap table,
+ *                            looked for in the process's own memory
+ *                            (svcscan.c), with the id read from the
+ *                            binary as the fallback
+ * The server answers every ConnectRequest, found or not, with its own
+ * channels, so the reply says nothing about success. What does: it only
+ * connects back to our channels when it found the service. */
+static int duck_internal(struct hbdsi *c)
+{
+	pid_t app = 0;
+	int chids[DUCK_MAX_CHIDS];
+	u32 ids[SVC_MAX_IDS + 2];
+	unsigned nids = 0, tries = 0, k;
+	struct svc_result scan;
+	char path[256];
+	int n, i, rc;
+
+	n = ipc_app_channels(&app, chids, DUCK_MAX_CHIDS);
+	if (n <= 0) {
+		log_msg("step d: no channel of MMI3GApplication to send to");
+		return -1;
+	}
+	snprintf(path, sizeof(path), "%s/hello5_services.txt", out_dir);
+	if (svc_scan(app, DUCK_ROLE, path, &scan) == 0)
+		for (k = 0; k < scan.nids && nids < DUCK_MAX_IDS; k++)
+			ids[nids++] = scan.ids[k];
+	/* the ids the binary's bootstrap table gives, in case the scan found
+	 * nothing: they are what the table says audio management is */
+	for (k = 0; k < 2; k++) {
+		u32 id = k == 0 ? SVC_ID_AUDIO_DEVCTRL : SVC_ID_AUDIO_PRESCTRL;
+		unsigned j;
+
+		for (j = 0; j < nids; j++)
+			if (ids[j] == id)
+				break;
+		if (j == nids && nids < DUCK_MAX_IDS)
+			ids[nids++] = id;
+	}
+	svc_ids_rank(ids, nids);
+
+	for (i = 0; i < n && i < DUCK_TRY_CHIDS; i++) {
+		for (k = 0; k < nids && tries < DUCK_MAX_TRIES; k++) {
+			if (i > 0 && k > 0)
+				break;  /* a second channel is tried with the best id only */
+			tries++;
+			hbdsi_target(c, (u32)app, (u32)chids[i], ids[k]);
+			rc = hbdsi_connect(c, DUCK_CONNECT_MS);
+			if (rc != EOK) {
+				log_msg("step d: chid %d, server id 0x%08x: ConnectRequest: %s",
+				        chids[i], (unsigned)ids[k], strerror(rc));
+			} else if (ipc_connected_to(app, getpid(), c->chid[0])) {
+				log_msg("RESULT step d: %s answered on chid %d with server id "
+				        "0x%08x and connected back", DUCK_ROLE, chids[i],
+				        (unsigned)ids[k]);
+				snprintf(duck_note, sizeof(duck_note),
+				         "chid %d, server id 0x%08x", chids[i],
+				         (unsigned)ids[k]);
+				return 0;
+			} else {
+				log_msg("step d: chid %d, server id 0x%08x: answered (its chids "
+				        "%u/%u pid %u) but did not connect back: that id is not "
+				        "a service of it", chids[i], (unsigned)ids[k],
+				        (unsigned)c->srv.chid[0], (unsigned)c->srv.chid[1],
+				        (unsigned)c->srv.pid);
+			}
+			hbdsi_close(c);
+			hbdsi_init(c);
+		}
+	}
+	log_msg("step d: %u ConnectRequest(s), none reached %s", tries, DUCK_ROLE);
 	return -1;
 }
 
@@ -1250,22 +1342,33 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	train.bits = 16;
 
 	duck_screen(s->todo, NULL, "asking the MMI", 0);
-	if (duck_attach(&c) != 0) {
-		log_msg("RESULT step d: no attach to %s", DUCK_IFACE);
-		snprintf(duck_note, sizeof(duck_note), "%s: not attached", DUCK_IFACE);
-		p->refused = 1;
-		goto out;
+	if (duck_attach(&c) == 0) {
+		duck_log_attach(&c.r);
+		rc = hbdsi_connect(&c, DUCK_TIMEOUT_MS);
+		if (rc != EOK) {
+			log_msg("RESULT step d: ConnectRequest: %s", strerror(rc));
+			snprintf(duck_note, sizeof(duck_note), "connect: %s", strerror(rc));
+			p->refused = 1;
+			goto out;
+		}
+	} else {
+		/* the broker does not know it: the way its own children go */
+		log_msg("step d: no attach to %s through the broker, going straight to "
+		        "MMI3GApplication", DUCK_IFACE);
+		hbdsi_close(&c);
+		hbdsi_init(&c);
+		duck_screen(s->todo, NULL, "reading the MMI", 0);
+		if (duck_internal(&c) != 0) {
+			log_msg("RESULT step d: no connection to %s", DUCK_IFACE);
+			snprintf(duck_note, sizeof(duck_note), "%s: no connection",
+			         DUCK_IFACE);
+			p->refused = 1;
+			goto out;
+		}
 	}
-	duck_log_attach(&c.r);
-	rc = hbdsi_connect(&c, DUCK_TIMEOUT_MS);
-	if (rc != EOK) {
-		log_msg("RESULT step d: ConnectRequest: %s", strerror(rc));
-		snprintf(duck_note, sizeof(duck_note), "connect: %s", strerror(rc));
-		p->refused = 1;
-		goto out;
-	}
-	log_msg("RESULT step d: connected to %s (server pid %u)", DUCK_IFACE,
-	        (unsigned)c.r.pid);
+	log_msg("RESULT step d: connected to %s (server pid %u chid %u, server id "
+	        "<%u.%u>)", DUCK_IFACE, (unsigned)c.r.pid, (unsigned)c.r.chid,
+	        (unsigned)c.r.server_id[0], (unsigned)c.r.server_id[1]);
 	if (audio_open(0, DUCK_DEVICE, &train, &h) != 0)
 		log_msg("step d: navi would not open, the pings stay silent");
 
@@ -1378,6 +1481,10 @@ static unsigned step_max_ms(const struct step *s)
 {
 	if (s->play == play_probe)
 		return ipc_probe_max_ms() + STEP_DONE_MS;
+	if (s->play == play_duck)
+		return s->intro_s * 1000 + STEP_DONE_MS + svc_scan_max_ms() +
+		       DUCK_MAX_TRIES * DUCK_CONNECT_MS + 2 * DUCK_HOLD_MS +
+		       (DUCK_PINGS + DUCK_CONTROL) * PULSE_PERIOD_MS + STEP_SLACK_MS;
 	return s->intro_s * 1000 + STEP_DONE_MS + 2000 +
 	       2 * ((s->pings + s->chain) * PULSE_PERIOD_MS + STEP_SLACK_MS);
 }

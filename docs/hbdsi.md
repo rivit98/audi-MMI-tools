@@ -197,6 +197,69 @@ car]** (MMI3GNavigation addresses unless noted):
 
 So what a sender needs is the parent's pid and root chid, plus the
 server id of `SGAudioManagement`, which exists only inside the two
-processes **[inferred]**. hello5 step `p` records, from
-the kernel, which channels of MMI3GApplication the navigation and the
-broker are connected to and which of its threads receive on them.
+processes **[inferred]**.
+
+The parent's pid and root chid can be read from the kernel: hello5 step
+`p` lists which channels of MMI3GApplication the navigation and the
+broker are connected to, and which of its threads receive on them.
+
+A process also keeps its parent's pid and chid in shared memory, but that
+way is closed to us: the memory is created as
+`/HarmanBecker.MoCCAV2.<pid>.<n>` and unlinked straight away
+(`FUN_08099834`), so only the children, which inherit the fd through the
+spawn's fd map, can map it **[seen in code]**. Its per-process entries
+(`0x1c` bytes, pid and chid first) are what `FUN_08085b5c` returns, and
+small commands go to that channel: `4` asks the parent for the process
+table, `0xB` is the "ready" message above.
+
+## 5. Server ids are the bootstrap table's component ids
+
+Each process builds its components in one generated function
+(MMI3GApplication `FUN_0804b0c0`, MMI3GNavigation `FUN_0804c5c0`): a role
+name, the interfaces it provides and uses, and a 32-bit **component id**
+of two halves - the low half a subsystem number, the high half the
+component's place in that subsystem, from 1 **[seen in code]**:
+
+| id | component |
+|---|---|
+| `0x0001.0x0020` | RingerTonePresCtrl |
+| `0x0001.0x0022` | KeyPanelDevCtrl |
+| `0x000e.0x0026` | CarDeviceList |
+| `0x0001.0x0027` | AudioManagementPresCtrl |
+| **`0x0002.0x0027`** | **AudioManagementDevCtrl** (serves `SGAudioManagement`) |
+| `0x0003.0x0064` | NavDevCtrl (MMI3GNavigation) |
+| `0x0001.0x0065` | PHydraGoogleServer (MMI3GNavigation) |
+
+MMI3GApplication's subsystems start at `0x20`, MMI3GNavigation's at
+`0x64`, so the ids are unique across the unit - what a registry shared
+between processes needs. The export table's entries carry one of these
+per service **[inferred]**, so the server id to send for audio
+management is `0x00020027`.
+
+The registry itself is built from the table at runtime
+(`FUN_08066acc` copies each entry of the thread's service list into the
+root's `+0x50` registry), so the id is in MMI3GApplication's memory next
+to the role name. hello5's step `d` looks for it there (`svcscan.c`): it
+reads the process's segment list (`/proc/<pid>/as`,
+`DCMD_PROC_MAPINFO`), finds every place that holds
+`"AudioManagementDevCtrl"` or points at a copy of it, and dumps the words
+around each one. Words shaped like a component id become the ids it
+tries, with `0x00020027` first.
+
+## 6. Connecting without the broker
+
+hello5 step `d` sends the ConnectRequest itself, with the pid and chid
+from §4 and the server id from §5. Two things make this readable:
+
+- **The reply says nothing.** MMI3GApplication answers every
+  ConnectRequest with its own two channels, its pid and its node, whether
+  it found the service or not (`FUN_08068dc4`, `replyConnectRequest`)
+  **[seen in code]**. What does say is whether it **connected back**: only
+  the "start new service" branch attaches to the client's two channels, so
+  step `d` looks for a connection from MMI3GApplication to its own channel
+  afterwards (`ConnectServerInfo` over MMI3GApplication's connections).
+- **There is no client id to send.** The broker hands one out; here the
+  server makes one up (`FUN_080727b4`, the root's node and a counter) and
+  keeps it in the connection record. So step `d` sends client id 0 and
+  takes the id from the first message the server sends back
+  (`hbdsi.c`), for the requests that follow.

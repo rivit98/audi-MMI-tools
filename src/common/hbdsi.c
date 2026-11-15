@@ -74,6 +74,15 @@ int hbdsi_attach(struct hbdsi *c, const char *name, u16 major, u16 minor,
 	return EOK;
 }
 
+void hbdsi_target(struct hbdsi *c, u32 pid, u32 chid, u32 server_id)
+{
+	memset(&c->r, 0, sizeof(c->r));
+	c->r.nd = 0;            /* ND_LOCAL_NODE */
+	c->r.pid = pid;
+	c->r.chid = chid;
+	c->r.server_id[0] = server_id;
+}
+
 /* One receiver per channel: take every message, reply at once (the
  * server's sender waits for that), log it. Pulses are logged too. Ends
  * when the channel is destroyed. */
@@ -115,6 +124,15 @@ static void *rx_thread(void *arg)
 			int i, n = info.msglen - (int)sizeof(h);
 
 			memcpy(&h, buf, sizeof(h));
+			/* With no broker there is no client id until the server
+			 * sends one: take it from the first message that has one. */
+			if (c->r.client_id[0] == 0 && h.client_id[0] != 0) {
+				c->r.client_id[0] = h.client_id[0];
+				c->r.client_id[1] = h.client_id[1];
+				log_msg("hbdsi rx %d: client id <%u.%u> from the server, used "
+				        "for the requests that follow", k,
+				        (unsigned)h.client_id[0], (unsigned)h.client_id[1]);
+			}
 			for (i = 0; i < n && i < 16 && (int)sizeof(h) + i < RX_BUF; i++)
 				snprintf(hex + i * 3, 4, "%02x ", buf[sizeof(h) + i]);
 			hex[i * 3] = '\0';

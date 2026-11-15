@@ -19,17 +19,34 @@ playing:
 Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
 
 Step `d` talks to MMI3GApplication over HBDSI ([docs/hbdsi.md](../../docs/hbdsi.md),
-`common/hbdsi.c`): it attaches to `SGAudioManagement` through the
-servicebroker, connects, and sends `RequestAudioFocus(eSRC_NAVTTS,
-eSNK_SPEAKERS)`. Then it writes its pings to io-audio `navi` and sends
+`common/hbdsi.c`) and sends `RequestAudioFocus(eSRC_NAVTTS,
+eSNK_SPEAKERS)`, then writes its pings to io-audio `navi` and sends
 `ReleaseAudioFocus`. It always releases before it exits. Every HBDSI step
-and every message the server sends back goes to `hello5.log`. The broker's
-interface list goes to `var/hello5_broker.txt`. Run it with
-`hello5 <sd> d`. **On the car the attach fails: the broker answers
-status 2, unknown interface, for `SGAudioManagement` 1.0 and 1.1
-[confirmed].** MMI3GApplication registers only `PHydraGoogleServer` with the
-broker, so step `d` never sends a request and plays nothing
+and every message the server sends back goes to `hello5.log`.
+
+It tries the servicebroker first and saves the broker's interface list to
+`var/hello5_broker.txt`. **The broker answers status 2, unknown
+interface, for `SGAudioManagement` 1.0 and 1.1 [confirmed]:**
+MMI3GApplication registers only `PHydraGoogleServer` with it, and serves
+audio management to its own child processes instead
 ([docs/hbdsi.md](../../docs/hbdsi.md) §4).
+
+So step `d` then goes that way itself, which needs three things the
+broker would have given it:
+
+| what | where it comes from |
+|---|---|
+| the server's pid | `/proc` (`ipcprobe.c`) |
+| the channel to send to | the channels MMI3GNavigation holds a connection to, then the ones MMI3GApplication's threads receive on (`ipcprobe.c`) |
+| the service's server id | `0x00020027`, the component id of AudioManagementDevCtrl in the binary's bootstrap table, plus anything shaped like a component id found next to the role name in MMI3GApplication's own memory (`svcscan.c`, report in `var/hello5_services.txt`) |
+
+Each candidate gets one ConnectRequest, best first, at most six in all.
+The server answers all of them the same way, so what counts as success is
+that it **connects back** to our channels; the log says for each attempt
+whether it did. The client id is 0 to start with and is taken from the
+first message the server sends back
+([docs/hbdsi.md](../../docs/hbdsi.md) §6). Run it with `hello5 <sd> d`.
+**Status: built, not yet run on the car.**
 
 Step `p` reads, without sending anything, every connection (`coid` ->
 nd, pid, chid, scoid, as `pidin fd` shows them) and every thread's state
@@ -38,11 +55,14 @@ MMI3GNavigation and the servicebroker. The listing goes to
 `var/hello5_ipc.txt`, the unit's own `pidin -p <pid>` (threads, `fd`,
 `arg`) to `var/hello5_pidin.txt`, each pidin call stopped after 15 s. The
 `step p:` lines in `hello5.log` name the connections between the three
-processes and the chids their threads receive on. It runs by default
-(apps.conf). **Status: built, not yet run on the car.**
+processes and the chids their threads receive on. **Status: built, not
+yet run on the car.**
+
+Steps `p` and `d` are the default run (apps.conf), `p` first so its
+listing is on the card even if `d` upsets the MMI.
 
 - **Run:** `hello5 <sd_path> [steps] [outputs]`. The default steps are
-  `mntv`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).
+  `mntv`; the card runs `pd`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).
 - **Output** (in `var/` on the card): `hello5.log` (`RESULT` lines; step `n`'s timed events),
   `hello5_<step>.log` (`testapp-file`'s output).
 - **Status:** all four steps are answered (below): our sound replaces the

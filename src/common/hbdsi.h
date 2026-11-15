@@ -42,6 +42,15 @@ int hbdsi_broker_list(char *buf, usize size);
 int hbdsi_attach(struct hbdsi *c, const char *name, u16 major, u16 minor,
                  int *status);
 
+/* The other way to a service: no broker. A process serves the interfaces
+ * it never registered to its own child processes, which address them by a
+ * server id that exists only inside those processes (docs/hbdsi.md
+ * section 4). Given the server's pid, the channel to send to and that id,
+ * this fills in what the attach would have filled in. The client id
+ * starts at 0: the server makes one up and the first message it sends
+ * back carries it, which hbdsi then uses for the requests that follow. */
+void hbdsi_target(struct hbdsi *c, u32 pid, u32 chid, u32 server_id);
+
 /* After a successful attach: create our channels, start the receivers,
  * send ConnectRequest to the server (timeout_ms for its reply). 0, or an
  * errno. */

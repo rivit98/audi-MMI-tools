@@ -227,6 +227,135 @@ static unsigned list_threads(FILE *f, int self)
 	return n;
 }
 
+/* Add chid to chids[] if it is not there yet. The new count. */
+static unsigned add_chid(int *chids, unsigned n, unsigned max, int chid)
+{
+	unsigned i;
+
+	if (chid <= 0 || n >= max)
+		return n;
+	for (i = 0; i < n; i++)
+		if (chids[i] == chid)
+			return n;
+	chids[n++] = chid;
+	return n;
+}
+
+/* The chids of procs[self] that procs[other] holds a connection to: plain
+ * connections first (HBDSI requests go over those), then side-channel
+ * ones (the child's "process ready" message uses a side channel). */
+static unsigned conn_chids(int self, int other, int *chids, unsigned n,
+                           unsigned max, int side)
+{
+	struct _server_info info;
+	int coid = side ? _NTO_SIDE_CHANNEL : 0;
+	int limit = side ? 0 : _NTO_SIDE_CHANNEL;
+	unsigned seen = 0;
+	int c;
+
+	while (seen < MAX_CONNS) {
+		memset(&info, 0, sizeof(info));
+		c = ConnectServerInfo(procs[other].pid, coid, &info);
+		if (c < 0 || c < coid || (limit > 0 && c >= limit))
+			break;
+		seen++;
+		if (info.pid == procs[self].pid)
+			n = add_chid(chids, n, max, (int)info.chid);
+		coid = c + 1;
+	}
+	return n;
+}
+
+/* The chids procs[self]'s own threads are RECEIVE-blocked on. */
+static unsigned recv_chids(int self, int *chids, unsigned n, unsigned max)
+{
+	char path[32];
+	union {
+		procfs_status st;
+		u8            room[1024];
+	} u;
+	int fd, tid = 1;
+	unsigned seen = 0;
+
+	snprintf(path, sizeof(path), "/proc/%d/as", (int)procs[self].pid);
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return n;
+	while (seen < MAX_THREADS) {
+		memset(&u, 0, sizeof(u));
+		u.st.tid = tid;
+		if (devctl(fd, DCMD_PROC_TIDSTATUS, &u, sizeof(u), NULL) != EOK)
+			break;
+		if (u.st.tid < tid)
+			break;
+		seen++;
+		if (u.st.state == STATE_RECEIVE)
+			n = add_chid(chids, n, max, (int)u.st.blocked.channel.chid);
+		tid = u.st.tid + 1;
+	}
+	close(fd);
+	return n;
+}
+
+int ipc_app_channels(pid_t *app_pid, int *chids, unsigned max)
+{
+	unsigned n = 0;
+
+	find_procs();
+	*app_pid = procs[0].pid;
+	if (procs[0].pid == 0) {
+		log_msg("step d: MMI3GApplication is not running");
+		return -1;
+	}
+	if (procs[1].pid != 0) {
+		n = conn_chids(0, 1, chids, n, max, 0);
+		log_msg("step d: MMI3GNavigation holds plain connections to %u of "
+		        "MMI3GApplication's channels", n);
+		n = conn_chids(0, 1, chids, n, max, 1);
+	} else {
+		log_msg("step d: MMI3GNavigation is not running, no connection to "
+		        "learn the channel from");
+	}
+	n = recv_chids(0, chids, n, max);
+	if (n > 0) {
+		char list[16 * 6 + 1];
+		usize len = 0;
+		unsigned i;
+
+		list[0] = '\0';
+		for (i = 0; i < n && len + 7 < sizeof(list); i++)
+			len += (usize)snprintf(list + len, sizeof(list) - len, "%s%d",
+			                       i ? " " : "", chids[i]);
+		log_msg("step d: MMI3GApplication pid %d, candidate chids: %s",
+		        (int)procs[0].pid, list);
+	}
+	return (int)n;
+}
+
+int ipc_connected_to(pid_t from, pid_t to_pid, int to_chid)
+{
+	struct _server_info info;
+	int coid = 0, c, side;
+	unsigned seen = 0;
+
+	for (side = 0; side < 2; side++) {
+		coid = side ? _NTO_SIDE_CHANNEL : 0;
+		while (seen < 2 * MAX_CONNS) {
+			int limit = side ? 0 : _NTO_SIDE_CHANNEL;
+
+			memset(&info, 0, sizeof(info));
+			c = ConnectServerInfo(from, coid, &info);
+			if (c < 0 || c < coid || (limit > 0 && c >= limit))
+				break;
+			seen++;
+			if (info.pid == to_pid && (int)info.chid == to_chid)
+				return 1;
+			coid = c + 1;
+		}
+	}
+	return 0;
+}
+
 int ipc_probe(const char *out_dir)
 {
 	char path[256], pidin_path[256], cmd[96];
