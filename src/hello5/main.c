@@ -28,6 +28,9 @@
  *      HBDSI, as the navigation does (does the radio get quieter?), plays
  *      pings on io-audio "navi" while it is open, gives it back, then plays
  *      3 control pings with no channel (play_duck below).
+ *   p  no sound: which channels MMI3GApplication, MMI3GNavigation and the
+ *      servicebroker are connected to and receive on (ipcprobe.c), the
+ *      evidence for how the navigation reaches audio management.
  * The train is written to /tmp (RAM) first: an app should not need the SD
  * card for its sound. If io-media does not play it from there, the step
  * retries from a copy on the card. The /tmp files are deleted at exit.
@@ -123,7 +126,7 @@
  * (src/common/quit.c). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
- *   steps: any of "mnvtdg", run in that order (default mntv)
+ *   steps: any of "mnvtdpg", run in that order (default mntv)
  *   outputs: step g's groups, comma-separated, one group each: mK =
  *   mixers[K], a number = an io-audio dindex (default m2,m1,m6,m4,m7)
  * Step g plays <sd_path>/beep.wav.
@@ -146,6 +149,7 @@
 #include "quit.h"
 #include "h5ui.h"
 #include "iom.h"
+#include "ipcprobe.h"
 #include "pulse.h"
 
 #define DEFAULT_STEPS   "mntv"
@@ -1310,6 +1314,18 @@ out:
 	return 0;
 }
 
+/* Step p: no sound, just the probe. */
+static int play_probe(const struct step *s, const char *log_file, struct play *p)
+{
+	(void)log_file;
+	ui_step(cur_index, cur_count, s->title, s->todo, NULL, "reading", 1, NULL);
+	if (ipc_probe(out_dir) == 0)
+		p->eof = 1;
+	else
+		p->refused = 1;
+	return 0;
+}
+
 static const struct step step_list[] = {
 	{ 'm', "radio + our sound",
 	  "Radio on at a normal volume. Then pings, one every 2 s, for 12 s.",
@@ -1339,6 +1355,10 @@ static const struct step step_list[] = {
 	  "on it, then gives it back.",
 	  "LISTEN: does the radio get QUIETER (not silent) while the channel is "
 	  "open?", 10, DUCK_PINGS + DUCK_CONTROL, 0, play_duck },
+	{ 'p', "who talks to audio management",
+	  "Nothing to do, no sound. hello5 reads which processes the MMI's own "
+	  "programs are connected to.",
+	  NULL, 0, 0, 0, play_probe },
 };
 #define NSTEPS ((int)(sizeof(step_list) / sizeof(step_list[0])))
 
@@ -1356,6 +1376,8 @@ static const struct step *find_step(char key)
  * /tmp one and the card retry) up to their cap, the done screen. */
 static unsigned step_max_ms(const struct step *s)
 {
+	if (s->play == play_probe)
+		return ipc_probe_max_ms() + STEP_DONE_MS;
 	return s->intro_s * 1000 + STEP_DONE_MS + 2000 +
 	       2 * ((s->pings + s->chain) * PULSE_PERIOD_MS + STEP_SLACK_MS);
 }
@@ -1368,9 +1390,12 @@ static void run_step(const struct step *s, int index, int count)
 	unsigned i;
 	int rc;
 
-	log_msg("step %d/%d %c (%s): %u s to get ready, then %u pings on %s",
-	        index, count, s->key, s->title, s->intro_s, s->pings + s->chain,
-	        mixers[STEP_MIXER].name);
+	if (s->pings + s->chain > 0)
+		log_msg("step %d/%d %c (%s): %u s to get ready, then %u pings on %s",
+		        index, count, s->key, s->title, s->intro_s, s->pings + s->chain,
+		        mixers[STEP_MIXER].name);
+	else
+		log_msg("step %d/%d %c (%s): no sound", index, count, s->key, s->title);
 	snprintf(log_file, sizeof(log_file), "%s/hello5_%c.log", out_dir, s->key);
 	for (i = s->intro_s; i > 0; i--) {
 		snprintf(big, sizeof(big), "pings in %u s", i);
@@ -1400,11 +1425,15 @@ static void run_step(const struct step *s, int index, int count)
 	step_note(s, note, sizeof(note));
 	if (s->key == 'v')
 		log_msg("step v: %s during the pings", note);
-	result = rc != 0 ? "nothing to play it with" :
-	         p.refused ? "the output would not attach" :
-	         p.eof ? "played to the end" : "NOT played to the end";
+	if (s->play == play_probe)
+		result = p.eof ? "both MMI3G processes read" :
+		         "MMI3GApplication or MMI3GNavigation not found";
+	else
+		result = rc != 0 ? "nothing to play it with" :
+		         p.refused ? "the output would not attach" :
+		         p.eof ? "played to the end" : "NOT played to the end";
 	log_msg("RESULT step %c (%s): %s", s->key, s->title, result);
-	ui_step(index, count, s->title, s->listen, NULL, "done", 0,
+	ui_step(index, count, s->title, s->listen ? s->listen : s->todo, NULL, "done", 0,
 	        s->key == 'v' ? note : result);
 	wait_ms(STEP_DONE_MS);
 }
@@ -1502,7 +1531,7 @@ int main(int argc, char *argv[])
 	for (c = steps; *c != '\0' && (*c == 'g' || find_step(*c) != NULL); c++)
 		;
 	if (nout <= 0 || *c != '\0') {
-		log_msg("hello5: bad step list \"%s\" (any of mnvtdg) or output list "
+		log_msg("hello5: bad step list \"%s\" (any of mnvtdpg) or output list "
 		        "\"%s\" (want e.g. %s)", steps, outspec, DEFAULT_OUTPUTS);
 		log_close();
 		return 2;

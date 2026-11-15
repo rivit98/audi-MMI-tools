@@ -14,7 +14,8 @@ car is hello5 step `d` ([src/hello5/README.md](../src/hello5/README.md)).
 Our client is [`src/common/hbdsi.c`](../src/common/hbdsi.c). The wire structs
 are in [`src/common/hbdsi_wire.h`](../src/common/hbdsi_wire.h) with
 `_Static_assert`s, host-tested by `tests/test_hbdsi.c`.
-**[confirmed in code; not tried on the car]**
+**[confirmed in code]**; on the car the broker does not know
+`SGAudioManagement` (§4).
 
 ## 1. The servicebroker
 
@@ -144,5 +145,58 @@ requestRequestAudioFocus") sends id 2 with source 48 or 49 and sink 0.
 Neither has a name in MMI3GApplication's source table, nor an entry in its
 logical-source table, so MMI3GApplication would refuse them ("invalid
 src/sink"). Either that client talks to another `SGAudioManagement` server
-or its source enum differs **[unverified]**. The broker list saved by hello5
-step `d` shows which process serves the interface.
+or its source enum differs **[unverified]**.
+
+## 4. SGAudioManagement is not in the broker
+
+hello5 step `d`'s attach to `SGAudioManagement` 1.0 and 1.1 gets broker
+status 2, unknown interface **[confirmed]**. The broker's list has 34
+interfaces. The only one from MMI3GApplication is
+`PHydraGoogleServer.SPHydraGoogle` 5.0; the rest come from the phone /
+Bluetooth process (`Bluephone.SGPhone`, `MediaPlayer.SGMedia`, …) and the
+network process (`NWS*`, `UPNP`) **[confirmed]**. So the broker path of
+§1–2 cannot reach audio management.
+
+The parent/child path, from the code **[seen in code, not traced on the
+car]** (MMI3GNavigation addresses unless noted):
+
+- MMI3GNavigation is MMI3GApplication's child: MMI3GApplication
+  `FUN_08063784` ("spawning child process %s") spawns it through
+  `FUN_08080c38` with an fd map. Its command line is `MMI3GNavigation 3
+  --memtrace=0 --bp --tp=/etc/DefaultScope.hbtc` **[confirmed]**; `3` is
+  the child's slot in a per-child table **[inferred]** (`FUN_08080188`
+  takes it). Entry `+0x08` of that table is the parent's receive chid for
+  this child.
+- The child signals "ready" (`FUN_08080848`): `ConnectAttach(0,
+  parent_pid, entry+0x08, _NTO_SIDE_CHANNEL, 1)`, `MsgSend` of 8 bytes
+  `{u32 0xB, u32 getpid()}`, then `ConnectDetach`. The parent
+  (MMI3GApplication `FUN_080862e8`) receives it on that chid and takes
+  word 1 (the child's pid) when word 0 is `0xB`. On failure the child logs
+  "cannot signal process ready to parent process".
+- The parent then sends the child an export table with the InternalUse
+  command (15). The child (`FUN_080654bc`, "rec aExportTable.size() %d")
+  copies each entry's server id, by interface name, into its registry at
+  root `+0x50` (`0x18`-byte entries: `+0x04` name, `+0x08` u16 process
+  index, `+0x0C`/`+0x10` server id). These server ids are the processes'
+  own; the broker never sees them.
+- Proxies are bound by role name, `"<component>.<interface>"`
+  (`"AudioManagementDevCtrl.SGAudioManagement"`; CHBProxyBase
+  MMI3GApplication `FUN_08095a7c` / MMI3GNavigation `FUN_0808bfb8`, "service
+  with rolename %s doesn't exist!"). The navigation's audio-focus client is
+  built in `FUN_08221834` / `FUN_08221930` (request id 2).
+- With the server id from the export table, the child uses the §2 wire
+  unchanged: ConnectRequest (9) to the parent's root channel, then
+  DataRequest (7). The parent's handler (MMI3GApplication `FUN_080659bc`)
+  finds the server id in its own registry; when the entry's process index
+  is its own it takes the "start new service" branch and connects back to
+  the client's two channels.
+- Interfaces a process exports to other applications are the ones it
+  registers with the broker (MMI3GApplication `FUN_08064cd0` →
+  `FUN_080690c0`, REGISTER_INTERFACE); imports from other applications
+  are attached through it (`FUN_08069690`, "Filled IFD for imported %s").
+
+So what a sender needs is the parent's pid and root chid, plus the
+server id of `SGAudioManagement`, which exists only inside the two
+processes **[inferred]**. hello5 step `p` records, from
+the kernel, which channels of MMI3GApplication the navigation and the
+broker are connected to and which of its threads receive on them.

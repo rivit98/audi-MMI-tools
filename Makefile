@@ -143,8 +143,10 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # input 1, is rechecked by hello9's c5 control on every hello9 run. What
 # it leaves open needs RE or new tests (src/hello6/README.md).
 #
-# hello5 runs step d by default (sd/apps.conf): sound over a lowered radio
-# through the nav voice channel (docs/hbdsi.md). Its other steps have
+# hello5 runs step p by default (sd/apps.conf): no sound, it reads which
+# channels MMI3GApplication and MMI3GNavigation use, to find how the nav
+# reaches audio management (step d's broker attach is refused on the car,
+# docs/hbdsi.md §4). Its other steps have
 # answered on the car (the sound replaces radio and music and follows the
 # volume knob, the re-shown screen comes back over the Media screen;
 # src/hello5/README.md).
@@ -178,8 +180,8 @@ TESTS   := hello5 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
-PRE_S   := 5
-POST_S  := 8
+PRE_S   := 4
+POST_S  := 5
 
 .PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan plot plot-test aa-sources
 all: $(addprefix build/,$(APPS) $(TOOLS))
