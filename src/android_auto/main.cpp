@@ -4,8 +4,8 @@
 //
 //   phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  SD
 //
-// The phone's H.264 video is written to <sd>/var/android_auto.h264 (first
-// save= MB) for a look on a PC; the audio channels are acked and counted,
+// The phone's H.264 video is counted, not kept (writing it to the card for
+// hours only risked the card); the audio channels are acked and counted,
 // not played. Nothing of the projection is shown: the DM642 refuses 800-wide
 // video (docs/android-auto.md). The screen is a CPU-drawn status page: a
 // checklist of the connection steps (done / in progress / failed) with a
@@ -19,13 +19,12 @@
 // Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
 // Writes <sd>/var/android_auto.log (the previous run's: android_auto.prev.log).
 //
-// usage: android_auto <sd_path> [audio=0|1] [version=M.m] [save=MB] [tls=N] [fps=N]
+// usage: android_auto <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]
 //   audio=0     advertise no audio channels (default 1: media, guidance,
 //               system; their PCM is counted and dropped)
 //   fps=N       ack video frames at most N per second (default 25; 0 = at
 //               once): the phone sends the next frame only after the ack
 //   version=    AAP version we ask for (default 1.1)
-//   save=MB     cap of android_auto.h264 (default 64, 0 = don't save)
 //   tls=N       mbedTLS trace level in the log (default 1: errors)
 #include "types.h"
 #include <cstdarg>
@@ -79,7 +78,6 @@ const aoa_host::Config kUsb = {
 
 struct Options {
 	aa::Config cfg;
-	unsigned   save_mb = 64;
 	int        tls_debug = 1;
 };
 
@@ -97,7 +95,6 @@ struct Status {
 	unsigned        kbps = 0;
 	unsigned        held_pct = 0;          // video acks held back by pacing, % (last second)
 	unsigned        wait_avg = 0;          // their average wait, ms
-	u64        saved = 0;             // bytes in android_auto.h264
 	unsigned        version = 0;           // bumped on every change
 	char            pace_label[16] = "";   // "25 fps" or "off"
 };
@@ -144,8 +141,8 @@ std::deque<std::string> tail_snapshot()
 
 class App : public aoa_host::Client, public aa::Host {
 public:
-	App(const Options &o, const char *out_dir, std::string cert, std::string key)
-		: opt_(o), out_(out_dir), cert_(std::move(cert)), key_(std::move(key)) {}
+	App(const Options &o, std::string cert, std::string key)
+		: opt_(o), cert_(std::move(cert)), key_(std::move(key)) {}
 
 	bool start()
 	{
@@ -209,13 +206,7 @@ public:
 			st.phase_detail = detail;
 		});
 	}
-	void video(const u8 *p, usize n, u64, bool) override
-	{
-		if (video_ == nullptr || video_saved_ + n > (u64)opt_.save_mb << 20)
-			return;
-		if (std::fwrite(p, 1, n, video_) == n)
-			video_saved_ += n;
-	}
+	void video(const u8 *, usize, u64, bool) override {}  // counted in aa::Stats
 	unsigned now_ms() override { return log_ms(); }
 
 private:
@@ -238,13 +229,6 @@ private:
 			st.fps10 = st.kbps = 0;
 		});
 		session_.reset(new aa::Session(opt_.cfg, *this));
-		if (opt_.save_mb > 0 && video_ == nullptr) {
-			char path[300];
-			std::snprintf(path, sizeof(path), "%s/android_auto.h264", out_.c_str());
-			video_ = std::fopen(path, "wb");
-			if (video_ == nullptr)
-				log_msg("session: cannot write %s", path);
-		}
 		session_->start(cert_, key_);
 	}
 
@@ -261,8 +245,6 @@ private:
 		unsigned long long frames = s.video_frames;
 		std::string error = s.error;
 		session_.reset();
-		if (video_ != nullptr)
-			std::fflush(video_);
 		update([&](Status &st) {
 			if (st.phase != aa::Phase::Failed)
 				st.phase = aa::Phase::Idle;
@@ -285,10 +267,9 @@ private:
 		unsigned kbps = dt ? (unsigned)(bytes * 8 / dt) : 0;
 		if (now - last_log_ >= kStatsEveryMs && session_->phase() == aa::Phase::Running) {
 			last_log_ = now;
-			log_msg("stats: video %llu frames, %u.%u fps, %u kbit/s, saved %llu KB; audio %llu/%llu/%llu KB; "
+			log_msg("stats: video %llu frames, %u.%u fps, %u kbit/s; audio %llu/%llu/%llu KB; "
 			        "rtt %u ms, pings %u/%u, phone's pings %u; out queue %zu B",
 			        (unsigned long long)s.video_frames, fps10 / 10, fps10 % 10, kbps,
-			        (unsigned long long)(video_saved_ >> 10),
 			        (unsigned long long)(s.audio_bytes[0] >> 10), (unsigned long long)(s.audio_bytes[1] >> 10),
 			        (unsigned long long)(s.audio_bytes[2] >> 10), s.last_rtt_ms, s.pongs, s.pings_sent,
 			        s.pings_answered, aoa_host::out_pending());
@@ -305,8 +286,6 @@ private:
 			log_held_ = s.acks_held;
 			log_frames_ = s.video_frames;
 			log_wait_sum_ = s.ack_wait_ms_sum;
-			if (video_ != nullptr)
-				std::fflush(video_);
 		}
 		if (dt >= 1000) {
 			last_report_ = now;
@@ -323,7 +302,6 @@ private:
 				st.held_pct = frames ? (unsigned)(held * 100 / frames) : 0;
 				st.wait_avg = held ? (unsigned)(wait_sum / held) : 0;
 			}
-			st.saved = video_saved_;
 		});
 	}
 
@@ -368,12 +346,10 @@ private:
 		if (session_)
 			session_->bye();
 		close_session("stopping");
-		if (video_ != nullptr)
-			std::fclose(video_);
 	}
 
 	Options     opt_;
-	std::string out_, cert_, key_;   // out_: <sd>/var
+	std::string cert_, key_;
 	std::thread thread_;
 
 	std::mutex                       lock_;
@@ -386,8 +362,6 @@ private:
 
 	// session thread only
 	std::unique_ptr<aa::Session> session_;
-	FILE    *video_ = nullptr;
-	u64 video_saved_ = 0;
 	unsigned last_report_ = 0, last_log_ = 0;
 	u64 last_frames_ = 0, last_bytes_ = 0, last_held_ = 0, last_wait_sum_ = 0;
 	u64 log_held_ = 0, log_frames_ = 0, log_wait_sum_ = 0;
@@ -535,9 +509,8 @@ void render(struct canvas *c, const Status &s, const std::deque<std::string> &lo
 		line(c, col2, y, kText, "Channels open:%s", ch);
 	}
 	if (st.video_session >= 0 || st.video_frames > 0) {
-		line(c, col2, y, kText, "Video: %llu frames, %u.%u fps, %u kbit/s, %llu KB saved",
-		     (unsigned long long)st.video_frames, s.fps10 / 10, s.fps10 % 10, s.kbps,
-		     (unsigned long long)(s.saved >> 10));
+		line(c, col2, y, kText, "Video: %llu frames, %u.%u fps, %u kbit/s",
+		     (unsigned long long)st.video_frames, s.fps10 / 10, s.fps10 % 10, s.kbps);
 		line(c, col2, y, kText, "Pacing: %s, %u %% held (%u ms), age +%u ms", s.pace_label, s.held_pct,
 		     s.wait_avg, st.age_ms);
 	}
@@ -621,9 +594,7 @@ bool parse_args(int argc, char *argv[], Options &o)
 		else if (std::sscanf(a, "version=%u.%u", &m, &n) == 2) {
 			o.cfg.version_major = (u16)m;
 			o.cfg.version_minor = (u16)n;
-		} else if (std::strncmp(a, "save=", 5) == 0)
-			o.save_mb = (unsigned)std::atoi(a + 5);
-		else if (std::strncmp(a, "tls=", 4) == 0)
+		} else if (std::strncmp(a, "tls=", 4) == 0)
 			o.tls_debug = std::atoi(a + 4);
 		else if (std::strncmp(a, "fps=", 4) == 0 && std::atoi(a + 4) >= 0 && std::atoi(a + 4) <= 60)
 			o.cfg.video_fps = (unsigned)std::atoi(a + 4);
@@ -641,20 +612,19 @@ int main(int argc, char *argv[])
 	Options opt;
 
 	if (argc < 2 || !parse_args(argc, argv, opt)) {
-		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [version=M.m] [save=MB] [tls=N] [fps=N]\n",
+		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]\n",
 		             argv[0]);
 		return 2;
 	}
 	const char *sd_path = argv[1];
 	const char *out_dir = var_dir(sd_path);
 	keep(out_dir, "android_auto.log", "android_auto.prev.log");
-	keep(out_dir, "android_auto.h264", "android_auto.prev.h264");
 	std::snprintf(path, sizeof(path), "%s/android_auto.log", out_dir);
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "android_auto: cannot open %s, logging to stdout only\n", path);
 	log_set_tap(tail_tap);
-	log_msg("android_auto start, pid=%d, protocol %u.%u, audio %s, save %u MB, tls trace %d, video acks %s%u%s",
-	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off", opt.save_mb,
+	log_msg("android_auto start, pid=%d, protocol %u.%u, audio %s, tls trace %d, video acks %s%u%s",
+	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off",
 	        opt.tls_debug, opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
 	        opt.cfg.video_fps ? " fps" : "");
 	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
@@ -685,7 +655,7 @@ int main(int argc, char *argv[])
 		else
 			std::snprintf(st.pace_label, sizeof(st.pace_label), "off");
 	});
-	App app(opt, out_dir, cert, key);
+	App app(opt, cert, key);
 	aoa_host::Config usb = kUsb;
 	usb.sd_path = sd_path;
 	bool running = !cert.empty() && !key.empty() && app.start() && aoa_host::start(usb, app);

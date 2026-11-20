@@ -33,7 +33,7 @@ same code on the PC (`make aa-host`, which also serves as step 1's spike).
 On the car the whole session works [repo]: the current Android Auto app
 accepts aasdk's certificate and protocol 1.1, TLS takes ~370 ms on the SH4,
 and 800x480 video arrives at ~30 fps and ~0.5-1 Mbit/s. The connectivity
-risk is gone; video and audio (above) remain. The video is saved, not shown. Sections 2 and 3 below are checked against
+risk is gone; video and audio (above) remain. The video is counted and dropped, not shown. Sections 2 and 3 below are checked against
 aasdk's source (opencardev/aasdk) where android_auto relies on them.
 
 ## 2. How wired Android Auto works [recalled]

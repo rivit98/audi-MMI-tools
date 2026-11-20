@@ -2,29 +2,29 @@
 
 An Android Auto head unit, proof of connectivity: a stock Android phone
 with the Android Auto app, plugged into the car's USB port, connects to
-the MMI and streams its projected screen (works on the car). Nothing is shown yet: the
-phone's H.264 video is written to the card for a look on a PC, and the
-MMI screen is a status page. Why there is no picture, and what the full
+the MMI and streams its projected screen (works on the car). Nothing is shown: the
+phone's H.264 video is counted and dropped, and the MMI screen is a status
+page. (The phone relay ([docs/android-auto.md](../../docs/android-auto.md) §4.3) is the path that shows Android
+Auto on the MMI.) Why there is no picture, and what the full
 receiver needs: [docs/android-auto.md](../../docs/android-auto.md).
 
 ```
-phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  android_auto.h264 + log
+phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  log
 ```
 
-- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [save=MB] [tls=N] [fps=N]`.
+- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]`.
   Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
   - `audio=0`: advertise no audio channels (default: media 48 kHz stereo,
     guidance and system 16 kHz mono; the PCM is counted and dropped, so the
     phone's sound is silent while connected)
   - `version=`: protocol version asked for (default 1.1)
-  - `save=MB`: cap of `android_auto.h264` (default 64; 0 = don't save)
   - `tls=N`: mbedTLS trace level in the log (default 1, errors only; 2 shows
     each handshake step)
   - `fps=N`: ack pacing, video frames acked at most N per second (default
     25; 0 = every frame acked at once). Below.
 - **Output** (in `var/` on the card): `android_auto.log` (USB, every protocol step, a `stats:` and
-  a `pace:` line every 10 s, a `cpu:` line every 10 s); `android_auto.h264` (Annex-B,
-  `ffplay android_auto.h264`); USB slog snapshots in `var/`. The previous
+  a `pace:` line every 10 s, a `cpu:` line every 10 s); USB slog snapshots in `var/`. To look at the video,
+  use the desk build (`make aa-host`, below), which saves it. The previous
   run's files are kept as `*.prev.*`.
 - **Build:**
 
@@ -108,7 +108,7 @@ the unit needed:
   lets the parser skip the offset (the dates are never checked).
 
 **Threads:** io-usb's callback thread queues bulk IN bytes; the session
-thread runs the protocol (TLS, acks, the video file); the USB manager thread
+thread runs the protocol (TLS, acks); the USB manager thread
 handles devices; main draws the status page once a second and on every
 change, and gives the screen to the rear camera like audi_stream_receiver.
 
