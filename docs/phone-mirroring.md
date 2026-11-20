@@ -1214,10 +1214,10 @@ Since the VCAP always stretches the 720-wide signal to the panel's 800,
 the phone can send the 800×480 picture squeezed to 720×480 (width ×0.9
 only, height 1:1). The MMI's stretch undoes the squeeze. Compared with
 720×432 (×0.9 both ways) it keeps all 480 lines, and it fills the panel
-[inferred; untested]. Whether a 432-line picture is stretched to 480 lines
-or sits in a 480-line frame with black rows below depends on who sets the
-VCAP's input size for a stream (io-media's render manager over nMSDK IPC,
-or nobody) [unverified]. A 720×576 anamorphic stream at 25 fps is only
+[inferred; untested]. The capture is always 720×480 (NTSC) whatever the
+stream's size (step 5 above), and the decoder writes its picture into the
+top of the frame, so a 720×432 picture should sit above 48 black lines
+rather than be stretched to 480 [inferred]. A 720×576 anamorphic stream at 25 fps is only
 worth trying if the PAL signal really reaches the VCAP as 576 lines.
 
 #### What 800×480 pixel for pixel would take
@@ -1235,8 +1235,9 @@ Four changes, all needed together:
    - threshold 90 → 100 (pitch / 8; the driver asserts it divides the
      frame).
    The frame buffers' pitch follows the picture width
-   (`(imgHSize+7)&~7`) [confirmed]. Also: the black-fill constants
-   720 / 360 at 0x80860324 / 0x80860330 → 800 / 400.
+   (`(imgHSize+7)&~7`) [confirmed]. The mixer's frame pool must match:
+   its pitch 720 / 360 at 0x80860324 / 0x80860330 → 800 / 400 (the same
+   code clears the frames to black).
 2. **DSP image: the decoder.** ELF file offsets, words checked against the
    unit's image:
 
