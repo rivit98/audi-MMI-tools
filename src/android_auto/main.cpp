@@ -19,13 +19,12 @@
 // Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
 // Writes <sd>/var/android_auto.log (the previous run's: android_auto.prev.log).
 //
-// usage: android_auto <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]
+// usage: android_auto <sd_path> [audio=0|1] [version=M.m] [fps=N]
 //   audio=0     advertise no audio channels (default 1: media, guidance,
 //               system; their PCM is counted and dropped)
 //   fps=N       ack video frames at most N per second (default 25; 0 = at
 //               once): the phone sends the next frame only after the ack
 //   version=    AAP version we ask for (default 1.1)
-//   tls=N       mbedTLS trace level in the log (default 1: errors)
 #include "types.h"
 #include <cstdarg>
 #include <cstdio>
@@ -78,7 +77,6 @@ const aoa_host::Config kUsb = {
 
 struct Options {
 	aa::Config cfg;
-	int        tls_debug = 1;
 };
 
 // --- what the screen shows (written by the other threads) -----------------
@@ -414,7 +412,7 @@ const Step kSteps[] = {
 	{"Protocol version", "Waiting for the phone's VERSION_RESPONSE",
 	 "The phone refused the version: try version=1.6 in apps.conf"},
 	{"TLS handshake", "Encrypting the link (a few seconds on this CPU)",
-	 "TLS failed: the phone may refuse the certificate (log; tls=2 in apps.conf)"},
+	 "TLS failed: the phone may refuse the certificate (see the log)"},
 	{"Service discovery", "Waiting for the phone to ask for our services",
 	 "Check the phone's screen for an Android Auto prompt"},
 	{"Video channel open", "Waiting for the phone to open the video channel",
@@ -594,9 +592,7 @@ bool parse_args(int argc, char *argv[], Options &o)
 		else if (std::sscanf(a, "version=%u.%u", &m, &n) == 2) {
 			o.cfg.version_major = (u16)m;
 			o.cfg.version_minor = (u16)n;
-		} else if (std::strncmp(a, "tls=", 4) == 0)
-			o.tls_debug = std::atoi(a + 4);
-		else if (std::strncmp(a, "fps=", 4) == 0 && std::atoi(a + 4) >= 0 && std::atoi(a + 4) <= 60)
+		} else if (std::strncmp(a, "fps=", 4) == 0 && std::atoi(a + 4) >= 0 && std::atoi(a + 4) <= 60)
 			o.cfg.video_fps = (unsigned)std::atoi(a + 4);
 		else
 			return false;
@@ -612,7 +608,7 @@ int main(int argc, char *argv[])
 	Options opt;
 
 	if (argc < 2 || !parse_args(argc, argv, opt)) {
-		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]\n",
+		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [version=M.m] [fps=N]\n",
 		             argv[0]);
 		return 2;
 	}
@@ -623,14 +619,14 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "android_auto: cannot open %s, logging to stdout only\n", path);
 	log_set_tap(tail_tap);
-	log_msg("android_auto start, pid=%d, protocol %u.%u, audio %s, tls trace %d, video acks %s%u%s",
+	log_msg("android_auto start, pid=%d, protocol %u.%u, audio %s, video acks %s%u%s",
 	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off",
-	        opt.tls_debug, opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
+	        opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
 	        opt.cfg.video_fps ? " fps" : "");
 	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
-	aa::Tls::set_debug(opt.tls_debug);
+	aa::Tls::set_debug(1);            // mbedTLS errors into the log
 
 	std::string cert = slurp(std::string(sd_path) + "/aa/headunit.crt");
 	std::string key = slurp(std::string(sd_path) + "/aa/headunit.key");

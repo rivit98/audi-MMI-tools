@@ -12,14 +12,13 @@ receiver needs: [docs/android-auto.md](../../docs/android-auto.md).
 phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  log
 ```
 
-- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [tls=N] [fps=N]`.
+- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [fps=N]`.
   Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
   - `audio=0`: advertise no audio channels (default: media 48 kHz stereo,
     guidance and system 16 kHz mono; the PCM is counted and dropped, so the
     phone's sound is silent while connected)
   - `version=`: protocol version asked for (default 1.1)
-  - `tls=N`: mbedTLS trace level in the log (default 1, errors only; 2 shows
-    each handshake step)
+  - mbedTLS errors always go to the log (trace level 1)
   - `fps=N`: ack pacing, video frames acked at most N per second (default
     25; 0 = every frame acked at once). Below.
 - **Output** (in `var/` on the card): `android_auto.log` (USB, every protocol step, a `stats:` and
