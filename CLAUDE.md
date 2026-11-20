@@ -65,7 +65,8 @@ gradle, adb or gcc.
   dev-videoctrl's `/dev/slog` lines), write nothing to VP1 and show nothing. Retake the screen
   1 s after the camera goes off (docs/rear-camera.md §9.1).
 - Hardware video: DM642 H.264 Baseline up to 720 wide (800 is refused; an 800-wide picture with
-  its SPS cropped to 720 stays black), only through a CS-MP4
+  its SPS cropped to 720 stays black; the DSP's decoder and BT.656 signal are 720 wide, §7.14),
+  only through a CS-MP4
   stream served by our own resource manager. io-media queues ~9 frames, so keep the frame rate
   steady (docs/phone-mirroring.md §7.10–7.13).
 - Nothing touches flash, `srv-starter` or system binaries. Everything runs from the card.

@@ -100,8 +100,8 @@ the same `HwStream`. What differs is who controls the encoder:
 | | Mirroring (option 2a) | Android Auto |
 |---|---|---|
 | Encoder settings | ours: 720x432, 25 fps, Baseline | the phone's, from the offered list only: **800x480 minimum** |
-| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`, phone-mirroring §7.8), and the DSP's `NvMixer_Video.c` has `assert(width < 720)` [repo]; cropped to 720 in the SPS it stays black [repo, hello10] |
-| Level | ≤ 3 | 800x480 at 30 fps is 45 000 MB/s, above level 3's 40 500, which io-media rejects; the phone may signal 3.1 (patching `level_idc` in the SPS: unverified) |
+| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`), and the DSP decoder and its video signal are 720 wide (phone-mirroring §7.14) [repo]; cropped to 720 in the SPS it stays black [repo, hello10] |
+| Level | ≤ 3 | 800x480 at 30 fps is 45 000 MB/s, above level 3's 40 500; io-media only refuses `level_idc` > 39, so 3.1 passes the host (phone-mirroring §2.1) [repo] |
 | Frame rate | 25 | 30 or 60; 30 is allowed at 480 lines |
 | Pacing | batched `VIDEO_ACKS` | the protocol's media acks, held to 25 fps (ack pacing) |
 
@@ -129,14 +129,18 @@ Baseline clip with the cropped SPS through `HwStream` on VCAP 0 input 1:
   following apps run on normally.
 
 So the DM642 shows nothing from a 50-macroblock-wide coded picture,
-whatever the SPS says [repo]. Why is unknown: nothing is logged, so the
-DSP's width check (or a buffer sized for 720) fails silently [inferred]. Android Auto's smallest video (800x480) can't
+whatever the SPS says [repo]. io-media configures the DSP with the `avc1`
+size (720x480), and the decoder, created for at most 720 wide, meets a
+50-macroblock picture; nothing is logged (phone-mirroring §7.14)
+[inferred]. Android Auto's smallest video (800x480) can't
 reach the screen through io-media. The options left:
 
 - **Phone relay** (section 4.3): the phone decodes Android Auto and sends
   the MMI a 720-wide stream. Built.
 - **DSP driven directly** (option 2b): bypasses io-media's check, but the
-  DSP assertion stays; months of work.
+  DSP's decoder and video signal stay 720 wide; months of work. What an
+  800-wide picture would take (DSP image, io-media and VCAP patches):
+  phone-mirroring §7.14.
 - **Software decode, Baseline.** Cheapest profile (no CABAC, no B-frames). Cost
   chain per frame: decode + YUV to RGB on the CPU + texture upload (31 ms for
   800x480 RGBA measured [repo]). My guess is 8-15 fps on mostly static UI

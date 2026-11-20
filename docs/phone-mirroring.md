@@ -76,19 +76,23 @@ not covered here.
   DSP as NVIDIA's "nMSDK" player (`CMediaVideoH264Dsp`, `CNvH264dec`). It opens
   `/dev/nvdsprm%d`, `/dev/nvminirm%d` and `/dev/shmem/NVshm-%04X`.
 - **H.264 limits** (io-media strings at `0x0828fbdc`…`0x0828fd90`):
-  - Only **Baseline profile at Level 3 or below** is accepted: "Baseline
-    profile H.264 bitstreams exceeding level 3 are not supported".
+  - Only **Baseline profile** is accepted (or `constraint_set0`). The
+    message says "Baseline profile H.264 bitstreams exceeding level 3 are
+    not supported", but the code only refuses `level_idc > 39`
+    (`0x080d33e0`), so 3.1 and 3.2 pass io-media [confirmed]. With
+    `constraint_set3` set only `level_idc == 11` passes.
   - Main, High, Extended and the other profiles are each rejected with their
     own message.
   - Level 3 allows 1620 macroblocks per frame and 40 500 macroblocks per
     second.
 - **Size.** io-media refuses width > 720 or height > 576, and more than
-  25 fps above 480 lines (`FUN_080d1760`, §7.8). Both the host
-  (`vmixer.c`) and the DSP (`NvMixer_Video.c`) also contain
-  `assert(width < 720)`. 800×480 H.264 does not play on the car (§7.5).
-  Cropping the SPS to 720 does not help: an 800-wide coded picture that
-  says 720×480 passes io-media but stays black on screen (hello10,
-  [android-auto.md](android-auto.md) §4.1) [confirmed].
+  25 fps above 480 lines (`FUN_080d1760`, §7.8). 800×480 H.264 does not
+  play on the car (§7.5). Cropping the SPS to 720 does not help: an
+  800-wide coded picture that says 720×480 passes io-media but stays black
+  on screen (hello10, [android-auto.md](android-auto.md) §4.1) [confirmed].
+  The real ceiling is the DSP: a decoder created for at most 720×576 that
+  writes straight into the frames of a fixed 720×480 (or 720×576) BT.656
+  video signal, with no scaler anywhere (§7.14).
 - **Containers.** `iom.cfg` maps file extensions to parsers (full table in
   §7.8):
 
@@ -681,8 +685,8 @@ if (width > 720 || height > 576)  log "*** Unsupported video resolution", return
 if (height > 480 && fps > 25.1)   log "*** Unsupported video frame rate", return 0x8000001a;
 ```
 
-The DSP image agrees: `NvDspCodecs.elf` (and a copy inside io-media) has
-`Assertion failed, (width < 720), file NvMixer_Video.c`. **720×576 is the
+The DSP agrees: its H.264 decoder is created with a maximum of 720×576
+and its video signal is 720 pixels wide (§7.14). **720×576 is the
 ceiling.** For a landscape phone that means 720×336 letterboxed, or a
 taller crop up to 720×576 (25 fps above 480 lines). The VCAP scales to the
 panel (§7.4).
@@ -1100,3 +1104,154 @@ game loses the same strip.
 - Whether lag grows on the phone side over long sessions (Latency clock).
 - Whether the video displayable can be shown 1:1 (720×432 centred, no
   VCAP resample) instead of scaled to 800×480.
+- Whether a 720×480 anamorphic stream (§7.14) looks better than 720×432.
+
+### 7.14 What limits the size, and what 800×480 would take
+
+Static RE of io-media-nvidia and of the DSP image `/etc/NvDspCodecs.elf`
+(efs-system). DSP addresses are C64x addresses (IDA `tms320c6`).
+
+**The DSP image.** `.nvidia.dspcode` is a list of records `{u32 addr,
+u32 size, bytes[size]}`, 87 of them, no padding. A few go to internal L2
+(the reset vectors at 0); the rest to SDRAM 0x80000080–0x80a5f19c. `.text`
+is at 0x80780000, `_c_int00` at 0x80a5a740, `main` at 0x8088ca6c
+[confirmed]. NvElfLoader writes the records at their absolute addresses.
+io-media-nvidia also carries an older C64x image in its `.data` (WMA, MP3,
+AC3, MPEG-4, `vportdis.c`, `vmixer.c`; no H.264). Nothing references it
+[confirmed]; the `vmixer.c` `width < 720` assert lives there.
+
+**The chain, and the limit at each step:**
+
+```
+MP4 avc1 w×h ──> io-media check ──> DSP config ──> H.264 decoder ──> VP2 frame ──> BT.656 ──> VCAP 0 in 1 ──> layer
+                 ≤ 720×576          {w,h,fps}      max 720×576        720 pitch     720×480i    708×480 → 800×480
+```
+
+1. **io-media** (`FUN_080d1760`, the `configure` slot of
+   `CDspMediaVideoBase`, shared by every DSP video codec) refuses width >
+   720 or height > 576 [confirmed]. Width and height come from the MP4
+   `avc1` sample entry (`FUN_08139fa0`); io-media never parses the SPS
+   dimensions [confirmed]. It then sends the DSP a 20-byte block, command
+   0x4000 (`nvTiCodecConfigure`, `0x08156020`): width, height, fps×100,
+   one unset word, a flag [confirmed]. No pitch, buffer count or TV
+   standard comes from the host. A DSP answer of −10 comes back as
+   `0x8000001a`, the same code as the size refusal.
+2. **The decoder** (create at 0x808619c8) is set up with maxWidth 720
+   (`MVK` at 0x80861b58) and maxHeight 576 (0x80861b44), output format
+   4:2:2 planar. The other video codecs use the same constants
+   [confirmed]. Its run-time parameters (`.const` 0x8093c55c, `{0x18, 0, 0,
+   720, 0, 0}`) carry 720 as the output line pitch [inferred].
+3. **No intermediate picture.** Each decode call (0x8086232c) points the
+   decoder's output at the current video-port frame (Y/Cb/Cr at frame
+   +0x34/+0x38/+0x3c) [confirmed]. **There is no scaler on the DSP:** no
+   zoom code, and the video port's own scaler is off (it can only
+   upscale ×2 anyway). The `width < 720` function in `NvMixer_Video.c`
+   (0x8086073c, re-pitches a picture to 720 in place) has no callers
+   [confirmed]: dead code.
+4. **The video signal is a fixed TV standard.** The port is opened as
+   `/VP2DISPLAY` and configured from one of two static TI `VPORTDIS_Params`
+   tables in `.cinit` [confirmed]:
+
+   | | NTSC (cinit 0x8096f908) | PAL (cinit 0x8096f9a8) |
+   |---|---|---|
+   | mode | BT.656 8-bit, syncs generated by the DSP | same |
+   | frame | 858 × 525 | 864 × 625 |
+   | picture per field | 720 × 240 | 720 × 288 |
+   | horizontal blanking | 720–856 | 720–862 |
+   | frame buffers | 6, pitch 720 (chroma 360), threshold 90 | same |
+
+   VideoStart (0x8085fd3c) picks the table from the stream info: 25 fps (or
+   more than 480 lines at 25 fps) gives PAL, 24 or 30 fps gives NTSC
+   [confirmed in code; what the car's VCAP makes of a PAL signal is
+   unverified]. Each frame is cleared to black at start with hard-coded
+   720 / 360 / 480-or-576 (0x808602e4). The pixel clock comes in from
+   outside (VP2CLK0), almost certainly 27 MHz [inferred].
+5. **The VCAP** captures that signal. The HMI configures VP 1 for 720×480,
+   viewport x 6 width 708, `WEAVE` (§7.3, [rear-camera.md](rear-camera.md)),
+   and the layer scales it to the panel.
+
+So **every hardware-decoded picture is at most 720 pixels wide on the
+wire**, and what the panel shows is 708 of those columns stretched ×1.13.
+800×480 cannot be shown pixel for pixel by patching io-media alone.
+
+This also explains the cropped-SPS test (hello10): io-media read 720×480
+from `avc1` and configured the DSP for it, then the decoder met a coded
+picture 50 macroblocks wide against its maximum of 45 and showed nothing
+[inferred].
+
+**Anything larger than 720×576** (720p, 1080p) is out of reach on the DSP:
+the decoder is sized for SD, Level 3 throughput is the DSP's budget, and
+there is nothing to scale with. A bigger source has to be scaled before it
+reaches the MMI, as the phone app does.
+
+#### Best picture without patches: 720×480 anamorphic
+
+Since the VCAP always stretches the 720-wide signal to the panel's 800,
+the phone can send the 800×480 picture squeezed to 720×480 (width ×0.9
+only, height 1:1). The MMI's stretch undoes the squeeze. Compared with
+720×432 (×0.9 both ways) it keeps all 480 lines, and it fills the panel
+[inferred; untested]. Whether a 432-line picture is stretched to 480 lines
+or sits in a 480-line frame with black rows below depends on who sets the
+VCAP's input size for a stream (io-media's render manager over nMSDK IPC,
+or nobody) [unverified]. A 720×576 anamorphic stream at 25 fps is only
+worth trying if the PAL signal really reaches the VCAP as 576 lines.
+
+#### What 800×480 pixel for pixel would take
+
+Four changes, all needed together:
+
+1. **DSP image: an 800-wide NTSC signal.** The video-port size fields are
+   12 bits, so 800 fits. Keep the 858-sample line (and so the 27 MHz clock
+   and 29.97 Hz) with 800 active samples and 58 of blanking, room for
+   EAV/SAV. In the NTSC table (record holding cinit 0x8096f908):
+   - picture width per field 720 → 800 (both fields);
+   - horizontal blanking start 720 → 800 (stop stays 856);
+   - the vertical-blanking / sync x positions that sit at 720 / 360 / 736
+     move to ≥ 800 / 400 / ~816, sync stop ≤ 856;
+   - threshold 90 → 100 (pitch / 8; the driver asserts it divides the
+     frame).
+   The frame buffers' pitch follows the picture width
+   (`(imgHSize+7)&~7`) [confirmed]. Also: the black-fill constants
+   720 / 360 at 0x80860324 / 0x80860330 → 800 / 400.
+2. **DSP image: the decoder.** maxWidth 720 → 800 (`MVK` at 0x80861b58,
+   constant in bits 7–22). maxHeight 576 → 480 keeps the allocation below
+   today's 720×576. Output pitch 720 → 800 (`.const` 0x8093c568). The
+   bitstream-buffer divisor (414720 = 720×576 at 0x80861f14) gives 1 for
+   800×480 as for 720×576, so it can stay. The other codecs still write
+   720-pitch pictures: with the patched image loaded, the HMI's own video
+   playback would come out skewed. Load it only for our session, or patch
+   their pitches too.
+3. **io-media: the size check.** File offset 0x918ea `d0 02` (720) → `20 03`
+   (800); 0x918ec `40 02` (576) can stay [confirmed bytes]. The stream
+   must be **30 fps** (or 24) so the NTSC table is used; at 25 fps the PAL
+   table would be picked. `avc1` must say 800×480.
+4. **VCAP: an 800-wide input.** On `/dev/videoctrl` VP 1: input dimension
+   800×480 (`0x800c050a`), input viewport x 0 width 800 height 480
+   (`0x80140509`), then `UPDATE`, and the layer at 800×480 unscaled. Put
+   720×480 / x 6 width 708 back afterwards for the rear camera.
+
+How to get the patches onto a running unit (efs-system stays untouched):
+
+- **io-media:** patch the two bytes in the running process through
+  `/proc/<pid>/as` (a debugger-style write; the constant sits in a literal
+  pool in `.text`) [inferred], or stop it and run a patched copy from the
+  SD card with the same arguments (`-c /etc/iom.cfg`, `NMSDK_DSP_PD=1`).
+  The second also restarts the HMI's media stack.
+- **DSP:** NvElfLoader must load the patched image. Options: a procnto
+  path-space link (`ln -sP <sd>/NvDspCodecs.elf /etc/NvDspCodecs.elf`)
+  plus a DSP reload (io-media has crash recovery that runs NvElfLoader
+  again [inferred]), or poking the few words into DSP SDRAM over the same
+  PCI window NvElfLoader uses (RE NvElfLoader first; the DSP's L1/L2 caches
+  may hold stale copies) [unverified]. Whether NvElfLoader checks the image
+  is unknown.
+
+**The two unknowns** that decide whether this works at all:
+
+- Whether the NVIDIA VCAP takes a BT.656 line with more than 720 active
+  samples. Cheap first look: set VP 1's input dimension to 800×480 with
+  today's 720 signal and watch the slog and the picture.
+- Whether the Ittiam H.264 decoder accepts an 800-wide picture once its
+  maximum is raised. 800×480 is 1500 macroblocks, below 720×576's 1620,
+  so decode time is not the problem.
+
+If the VCAP refuses, 720×480 anamorphic is the best this hardware does.
