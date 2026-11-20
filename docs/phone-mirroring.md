@@ -1140,7 +1140,17 @@ MP4 avc1 w×h ──> io-media check ──> DSP config ──> H.264 decoder �
    (`MVK` at 0x80861b58) and maxHeight 576 (0x80861b44), output format
    4:2:2 planar. The other video codecs use the same constants
    [confirmed]. Its run-time parameters (`.const` 0x8093c55c, `{0x18, 0, 0,
-   720, 0, 0}`) carry 720 as the output line pitch [inferred].
+   720, 0, 0}`) carry 720 as the output line pitch [inferred]. The decoder
+   itself (Ittiam, wrapped by Ittiam's "CAL", function tables 0x809c4600 /
+   0x809de500) sizes its buffers from maxWidth/maxHeight with no clamp
+   (`algAlloc` 0x809bc994; reference frames (W+48)×(H+40), per-column
+   arrays scale) [confirmed, `algAlloc` run in a C64x emulator]. Its SPS
+   parser has its own limits: `pic_width_in_mbs` ≥ 46 is an error (`MVK
+   0x2e` at 0x809c0300, error 0xB), more than 1620 macroblocks is an error
+   (0x809c0328), and a coded size above the created maxWidth/maxHeight is
+   error 0x2F (0x809c0498–0x809c0518) [confirmed]. Some maps are fixed at
+   1620 entries (memset 0x654 at 0x809b48a0), so 1620 macroblocks is a hard
+   ceiling [confirmed].
 3. **No intermediate picture.** Each decode call (0x8086232c) points the
    decoder's output at the current video-port frame (Y/Cb/Cr at frame
    +0x34/+0x38/+0x3c) [confirmed]. **There is no scaler on the DSP:** no
@@ -1166,18 +1176,32 @@ MP4 avc1 w×h ──> io-media check ──> DSP config ──> H.264 decoder �
    unverified]. Each frame is cleared to black at start with hard-coded
    720 / 360 / 480-or-576 (0x808602e4). The pixel clock comes in from
    outside (VP2CLK0), almost certainly 27 MHz [inferred].
-5. **The VCAP** captures that signal. The HMI configures VP 1 for 720×480,
-   viewport x 6 width 708, `WEAVE` (§7.3, [rear-camera.md](rear-camera.md)),
-   and the layer scales it to the panel.
+5. **The VCAP** (the NV17/NV18 GPU's media port, programmed by
+   devg-NVMiniRM) captures that signal. **For input 1 the capture size comes
+   from io-media, not from `/dev/videoctrl`:** io-media's IPC handler
+   (0x08119bc0) passes the videoctrl viewport, output size and PAL flag
+   only for source 0 (the ADV7180) [confirmed, 0x08119d08–0x08119d86]. For
+   the DSP input its `CNvRenderNEDL_VIP` capture uses a literal width of
+   720 and a height of 480 (576 for PAL), at 0x0818a190, 0x0818a26e and
+   0x0818ad20 [confirmed]. So the HMI's viewport (x 6, width 708) applies
+   to the camera only. Nothing along the chain (dev-videoctrl, libgf,
+   io-display, devg-nv, libned, NVMiniRM) checks the width against a
+   maximum [confirmed]. The hardware gets the input width only as a scale
+   ratio (`(w_in << 16) / w_out` in 0x20046c, `mpStartImage_NV10`
+   0x080b3148), so it most likely takes the active line from the BT.656
+   SAV/EAV codes [inferred]. The port cannot upscale (the filter setup at
+   0x080b3bb0 fails if output > input) [confirmed]; the layer scales to
+   the panel.
 
 So **every hardware-decoded picture is at most 720 pixels wide on the
-wire**, and what the panel shows is 708 of those columns stretched ×1.13.
+wire**, and what the panel shows is those 720 columns stretched ×1.11.
 800×480 cannot be shown pixel for pixel by patching io-media alone.
 
 This also explains the cropped-SPS test (hello10): io-media read 720×480
-from `avc1` and configured the DSP for it, then the decoder met a coded
-picture 50 macroblocks wide against its maximum of 45 and showed nothing
-[inferred].
+from `avc1` and configured the DSP for it, then the decoder's SPS parser
+met a coded picture 50 macroblocks wide and raised errors 0xB (≥ 46
+wide) and 0x2F (wider than created). The error handler resets the decoder
+and nobody logs it, so no picture comes out [inferred].
 
 **Anything larger than 720×576** (720p, 1080p) is out of reach on the DSP:
 the decoder is sized for SD, Level 3 throughput is the DSP's budget, and
@@ -1213,9 +1237,19 @@ Four changes, all needed together:
    The frame buffers' pitch follows the picture width
    (`(imgHSize+7)&~7`) [confirmed]. Also: the black-fill constants
    720 / 360 at 0x80860324 / 0x80860330 → 800 / 400.
-2. **DSP image: the decoder.** maxWidth 720 → 800 (`MVK` at 0x80861b58,
-   constant in bits 7–22). maxHeight 576 → 480 keeps the allocation below
-   today's 720×576. Output pitch 720 → 800 (`.const` 0x8093c568). The
+2. **DSP image: the decoder.** ELF file offsets, words checked against the
+   unit's image:
+
+   | DSP address | ELF offset | what | old → new |
+   |---|---|---|---|
+   | 0x80861b58 | 0x21f100 | maxWidth 720 → 800 | `0x0201682a` → `0x0201902a` |
+   | 0x80861b44 | 0x21f0ec | maxHeight 576 → 480 | `0x0201202a` → `0x0200f02a` |
+   | 0x809c0300 | 0x585ea | SPS width limit 46 → 51 macroblocks | `0x03001728` → `0x030019a8` |
+   | 0x8093c568 | 0x13c945 | output pitch 720 → 800 | `0x000002d0` → `0x00000320` |
+
+   800×480 is 1500 macroblocks, under the 1620 ceiling. The instance's
+   internal-L2 use grows by ~0.5 KB (~70 KB of the 92 KB segment) and its
+   SDRAM use shrinks [confirmed, emulated `algAlloc`]. The
    bitstream-buffer divisor (414720 = 720×576 at 0x80861f14) gives 1 for
    800×480 as for 720×576, so it can stay. The other codecs still write
    720-pitch pictures: with the patched image loaded, the HMI's own video
@@ -1225,14 +1259,15 @@ Four changes, all needed together:
    (800); 0x918ec `40 02` (576) can stay [confirmed bytes]. The stream
    must be **30 fps** (or 24) so the NTSC table is used; at 25 fps the PAL
    table would be picked. `avc1` must say 800×480.
-4. **VCAP: an 800-wide input.** On `/dev/videoctrl` VP 1: input dimension
-   800×480 (`0x800c050a`), input viewport x 0 width 800 height 480
-   (`0x80140509`), then `UPDATE`, and the layer at 800×480 unscaled. Put
-   720×480 / x 6 width 708 back afterwards for the rear camera.
+4. **io-media: the capture width.** The three 720 literals of the DSP
+   input's capture (file offsets 0x14a190, 0x14a26e, 0x14ad20, `d0 02`) →
+   800 (`20 03`). With input and output both 800 the scale ratio is
+   exactly 1. `/dev/videoctrl` input dimension and viewport do nothing for
+   input 1.
 
 How to get the patches onto a running unit (efs-system stays untouched):
 
-- **io-media:** patch the two bytes in the running process through
+- **io-media:** patch the bytes in the running process through
   `/proc/<pid>/as` (a debugger-style write; the constant sits in a literal
   pool in `.text`) [inferred], or stop it and run a patched copy from the
   SD card with the same arguments (`-c /etc/iom.cfg`, `NMSDK_DSP_PD=1`).
@@ -1245,13 +1280,24 @@ How to get the patches onto a running unit (efs-system stays untouched):
   may hold stale copies) [unverified]. Whether NvElfLoader checks the image
   is unknown.
 
-**The two unknowns** that decide whether this works at all:
+**What is still open:**
 
-- Whether the NVIDIA VCAP takes a BT.656 line with more than 720 active
-  samples. Cheap first look: set VP 1's input dimension to 800×480 with
-  today's 720 signal and watch the slog and the picture.
-- Whether the Ittiam H.264 decoder accepts an 800-wide picture once its
-  maximum is raised. 800×480 is 1500 macroblocks, below 720×576's 1620,
-  so decode time is not the problem.
+- **Whether the media port captures an 800-sample line.** Nothing in
+  software refuses it; the hardware sees only a ratio. Whether it stops at
+  EAV or counts pixels is only answered on the car. The probe needs no DSP
+  change: patch io-media's capture width to 800 and play today's
+  720-wide signal. The right 80 columns black or stale = it stops at EAV
+  (good); garbage or a sheared picture = it counts pixels. A read-only
+  look first: with a clip playing, map the GPU's BAR0 and read 0x200448
+  (pitch), 0x200450 (buffer length), 0x200468 and 0x20046c (scale) to see
+  the sizes io-media really sends.
+- What CAL does if the picture is wider than the output pitch (only
+  matters if the pitch patch is left out).
+- Internal-L2 headroom with other DSP tasks running, and whether
+  NvElfLoader checks the image.
+
+The decoder itself is no longer an unknown: with the four words above it
+should accept 800×480 [inferred from the code and the emulated
+allocation].
 
 If the VCAP refuses, 720×480 anamorphic is the best this hardware does.
