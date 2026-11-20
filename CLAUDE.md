@@ -109,7 +109,8 @@ The user copies the card's `var/` folder and points at it. Typical files:
 | `run.log` | run.sh: apps, timeouts, start errors (`mkdir /tmp` errors are harmless) |
 | `<app>.log` | the app's log; `[N ms]` = monotonic ms since the app started |
 | `<app>_out.log` | stdout/stderr (usually identical to `<app>.log`) |
-| `usb_slog_N.txt` | slog snapshot taken at each USB removal (not at the end of the run) |
+| `usb_slog_<time>.txt` | slog snapshot taken at each USB removal (not at the end of the run); `<time>` = MMI clock, i.e. time since boot (1970-01-01) |
+| `usb_slog_periodic_<time>.txt` | slog snapshot every 60 s while streaming |
 | `<app>_slog.txt`, `summary.txt` | only if the app ended normally under run.sh |
 | `*.h264`, `*_perf.csv` | saved video (check with ffprobe/ffmpeg), perf records |
 

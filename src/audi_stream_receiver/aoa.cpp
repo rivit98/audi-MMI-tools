@@ -995,7 +995,7 @@ std::atomic<int> slog_n{0};
 
 } // namespace
 
-// The system log at this moment, into <sd>/var/usb_slog_<n>.txt, in the
+// The system log at this moment, into <sd>/var/usb_slog_<time>.txt, in the
 // background (sloginfo + SD write take about a second, ~150 KB). The run
 // ends by pulling the card, so run.sh never gets to save audi_stream_receiver's
 // slog; these snapshots are what shows io-usb's and the media launcher's side
@@ -1010,8 +1010,10 @@ void slog_snapshot(const char *why)
 	int n = ++slog_n;
 	if (n > kSlogSnapshots)
 		return;
-	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%d.txt' 2>&1 &", slog_sd, n);
-	log_msg("usb: slog snapshot %d (%s) -> var/usb_slog_%d.txt", n, why, n);
+	char stamp[24];
+	log_stamp(stamp, sizeof(stamp));
+	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%s.txt' 2>&1 &", slog_sd, stamp);
+	log_msg("usb: slog snapshot %d (%s) -> var/usb_slog_%s.txt", n, why, stamp);
 	if (std::system(cmd) != 0)
 		log_msg("usb:   could not start sloginfo");
 }
@@ -1019,13 +1021,12 @@ void slog_snapshot(const char *why)
 namespace {
 
 // Manager thread: while streaming, the system log every kSlogPeriodMs into
-// var/usb_slog_periodic_a.txt and _b.txt in turn. When the unit hangs or
-// reboots, the app's log just stops; the older of the two was complete
-// when it happened, the newer may be cut off by it.
+// var/usb_slog_periodic_<time>.txt, one file each (~150 KB a minute). When
+// the unit hangs or reboots, the app's log just stops; the last but one
+// snapshot was complete when it happened, the last may be cut off by it.
 void slog_periodic()
 {
 	static unsigned since;               // streaming since, or the last snapshot; 0: not streaming
-	static bool next_b;
 	char cmd[400];
 	unsigned now = log_ms() + 1, rx = video_rx_ms;
 
@@ -1042,11 +1043,11 @@ void slog_periodic()
 	if (now - since < kSlogPeriodMs)
 		return;
 	since = now;
-	char which = next_b ? 'b' : 'a';
-	next_b = !next_b;
-	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_periodic_%c.txt' 2>&1 &",
-	              slog_sd, which);
-	log_msg("usb: periodic slog snapshot -> var/usb_slog_periodic_%c.txt", which);
+	char stamp[24];
+	log_stamp(stamp, sizeof(stamp));
+	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_periodic_%s.txt' 2>&1 &",
+	              slog_sd, stamp);
+	log_msg("usb: periodic slog snapshot -> var/usb_slog_periodic_%s.txt", stamp);
 	if (std::system(cmd) != 0)
 		log_msg("usb:   could not start sloginfo");
 }

@@ -20,7 +20,8 @@
 // but the picture data, a "perf:" summary every 10 s of streaming and a
 // "cpu:" line every 10 s (own and unit load, per thread; cpumon.h);
 // <sd>/audi_stream_perf.csv: one line of timings per picture (perf.h).
-// The previous run's files are kept as *.prev* / *_prev_*.
+// The previous run's log and csv are kept as *.prev.*; the slog snapshots
+// carry the time in their names (log_stamp), so runs never overwrite them.
 //
 // usage: audi_stream_receiver <sd_path> [copy=changed|full]
 //   copy=changed  (default) write only the changed part of each row into
@@ -70,22 +71,13 @@ void keep(const char *dir, const char *old_name, const char *new_name)
 }
 
 // A card often goes through several runs before it is read. Without this a
-// second run overwrites the log of the one that saw the phone and leaves that
-// run's slog snapshots behind, looking like this run's.
+// second run overwrites the log of the one that saw the phone.
 void keep_previous_run(const char *sd_path)
 {
 	const char *var = var_dir(sd_path);
-	char name[32], prev[32];
 
 	keep(var, "audi_stream_receiver.log", "audi_stream_receiver.prev.log");
 	keep(var, "audi_stream_perf.csv", "audi_stream_perf.prev.csv");
-	for (int n = 1; n <= aoa::kSlogSnapshots; n++) {
-		std::snprintf(name, sizeof(name), "usb_slog_%d.txt", n);
-		std::snprintf(prev, sizeof(prev), "usb_slog_prev_%d.txt", n);
-		keep(var, name, prev);
-	}
-	keep(var, "usb_slog_periodic_a.txt", "usb_slog_periodic_prev_a.txt");
-	keep(var, "usb_slog_periodic_b.txt", "usb_slog_periodic_prev_b.txt");
 }
 
 } // namespace

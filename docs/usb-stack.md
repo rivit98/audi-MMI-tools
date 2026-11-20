@@ -206,4 +206,4 @@ When checking a log, confirm the `usbd_connect` return code, which
 insertion instances arrive for `18d1:2d0x` (`ff`/`42` adb instances are
 skipped), the AOA `GET_PROTOCOL` result, and how many reopens happen. On a
 handshake failure and on every removal (up to 6) audi_stream_receiver saves
-`sloginfo` to `var/usb_slog_<n>.txt`.
+`sloginfo` to `var/usb_slog_<time>.txt` (the MMI clock's time since boot).

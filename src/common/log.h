@@ -28,4 +28,10 @@ unsigned log_ms(void);
  * fine as the system clock (clock_getres; the QNX tick, often 1 ms). */
 unsigned log_us(void);
 
+/* "YYYYMMDD-HHMMSS-mmm" (UTC, CLOCK_REALTIME) for output file names. The
+ * MMI's clock starts at 1970-01-01 00:00 on every cold boot, so this is the
+ * time since boot, not the date: unique and ordered within one boot only.
+ * buf: at least 20 bytes. */
+void log_stamp(char *buf, unsigned size);
+
 #endif

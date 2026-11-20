@@ -15,13 +15,14 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   change, frame and picture; a `cpu:` line every 10 s with the app's own
   and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake,
   a removal or an io-media error also saves the system log to
-  `var/usb_slog_<n>.txt` (up to 6 per run), and while pictures or frames come
-  it is saved every 60 s into `var/usb_slog_periodic_a.txt` and `_b.txt` in
-  turn: when the unit hangs or reboots the app's log just stops, and the older
-  of the two was complete before it happened (a snapshot is `sloginfo` in the
-  background, ~150 KB to the card). The previous run's files are kept as
-  `audi_stream_receiver.prev.log`, `var/usb_slog_prev_<n>.txt` and
-  `var/usb_slog_periodic_prev_{a,b}.txt`.
+  `var/usb_slog_<time>.txt` (up to 6 per run), and while pictures or frames come
+  it is saved every 60 s into a new `var/usb_slog_periodic_<time>.txt`: when the
+  unit hangs or reboots the app's log just stops, and the last but one snapshot
+  was complete before it happened (a snapshot is `sloginfo` in the background,
+  ~150 KB to the card). `<time>` is `YYYYMMDD-HHMMSS-mmm` from the MMI's clock,
+  which starts at 1970-01-01 00:00 on every cold boot: the time since boot, so
+  names sort within one boot. The previous run's log and csv are kept as
+  `audi_stream_receiver.prev.log` and `audi_stream_perf.prev.csv`.
 - **Build:**
 
   ```sh

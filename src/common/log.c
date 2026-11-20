@@ -19,6 +19,18 @@ void log_set_tap(void (*tap)(const char *line))
 	pthread_mutex_unlock(&log_lock);
 }
 
+void log_stamp(char *buf, unsigned size)
+{
+	struct timespec now;
+	struct tm tm;
+
+	clock_gettime(CLOCK_REALTIME, &now);
+	time_t s = now.tv_sec;
+	gmtime_r(&s, &tm);
+	snprintf(buf, size, "%04d%02d%02d-%02d%02d%02d-%03d", tm.tm_year + 1900, tm.tm_mon + 1,
+	         tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, (int)(now.tv_nsec / 1000000));
+}
+
 static unsigned ms_since(const struct timespec *t0)
 {
 	struct timespec now;

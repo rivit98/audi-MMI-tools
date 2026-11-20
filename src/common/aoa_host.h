@@ -36,13 +36,13 @@ enum class State {
 };
 const char *state_name(State s);
 
-// System log snapshots per run: <sd>/var/usb_slog_1.txt ... _<this>.txt
+// System log snapshots per run, each <sd>/var/usb_slog_<time>.txt (log_stamp)
 constexpr int kSlogSnapshots = 6;
 
 struct Config {
 	// manufacturer, model, description, version, URI, serial
 	const char *strings[6];
-	// <sd>/var/usb_slog_<n>.txt on a failed handshake or a removal;
+	// <sd>/var/usb_slog_<time>.txt on a failed handshake or a removal;
 	// nullptr: none
 	const char *sd_path = nullptr;
 	// Client::tick every this many ms (manager thread)

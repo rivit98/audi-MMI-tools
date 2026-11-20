@@ -853,7 +853,7 @@ void on_insert(usbd_device_instance_t *in)
 	set_state(State::Waiting, detail);
 }
 
-// The system log at this moment, into <sd>/var/usb_slog_<n>.txt, in the
+// The system log at this moment, into <sd>/var/usb_slog_<time>.txt, in the
 // background (sloginfo + SD write take about a second): io-usb's and the
 // media launcher's side of a failed handshake or a removal.
 void slog_snapshot(const char *why)
@@ -864,8 +864,10 @@ void slog_snapshot(const char *why)
 	if (cfg.sd_path == nullptr || n >= kSlogSnapshots)
 		return;
 	n++;
-	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%d.txt' 2>&1 &", cfg.sd_path, n);
-	log_msg("usb: slog snapshot %d (%s) -> var/usb_slog_%d.txt", n, why, n);
+	char stamp[24];
+	log_stamp(stamp, sizeof(stamp));
+	std::snprintf(cmd, sizeof(cmd), "sloginfo > '%s/var/usb_slog_%s.txt' 2>&1 &", cfg.sd_path, stamp);
+	log_msg("usb: slog snapshot %d (%s) -> var/usb_slog_%s.txt", n, why, stamp);
 	if (std::system(cmd) != 0)
 		log_msg("usb:   could not start sloginfo");
 }

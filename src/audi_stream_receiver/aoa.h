@@ -27,11 +27,11 @@
 
 namespace aoa {
 
-// System log snapshots per run: <sd>/var/usb_slog_1.txt ... _<this>.txt
+// System log snapshots per run, each <sd>/var/usb_slog_<time>.txt (log_stamp)
 constexpr int kSlogSnapshots = 6;
 
 // false if the manager thread could not start. sd_path: where a failed
-// handshake or a removal saves a system log snapshot (var/usb_slog_<n>.txt).
+// handshake or a removal saves a system log snapshot (var/usb_slog_<time>.txt).
 bool start(const char *sd_path);
 void stop();    // tear down and join; bounded by quit.c's hard alarm
 
@@ -45,10 +45,10 @@ void ack_later(proto::PicStatus status);
 // Something for the manager to send (any thread).
 void wake();
 
-// The system log now, in the background, into var/usb_slog_<n>.txt (up to
+// The system log now, in the background, into var/usb_slog_<time>.txt (up to
 // kSlogSnapshots per run); logs "usb: slog snapshot <n> (<why>)". Any thread.
 // While pictures or frames come, the manager also saves it every 60 s into
-// var/usb_slog_periodic_a.txt / _b.txt in turn.
+// var/usb_slog_periodic_<time>.txt.
 void slog_snapshot(const char *why);
 
 } // namespace aoa
