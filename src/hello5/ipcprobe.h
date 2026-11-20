@@ -17,6 +17,14 @@
  *
  * Full listing: <out_dir>/hello5_ipc.txt and hello5_pidin.txt; a summary
  * in the log ("step p: ..." lines).
+ *
+ * The three pids come from /proc first (each pid's name through
+ * /proc/<pid>/as, as pidin does). Whatever /proc does not give comes from
+ * the unit's sloginfo ("pid N: application X started"), then from
+ * `pidin arg` (pidscan.c), their output kept in hello5_sloginfo.txt and
+ * hello5_pidin_arg.txt. The walk's failure counts and errnos, the uid and
+ * the source of each pid go into the log ("procs: ..." lines), once per
+ * run.
  */
 #ifndef HELLO5_IPCPROBE_H
 #define HELLO5_IPCPROBE_H
@@ -27,15 +35,21 @@
  * processes were found, -1 if not. */
 int ipc_probe(const char *out_dir);
 
-/* Worst-case run time in ms (the bounded pidin calls), for the watchdog. */
+/* Worst-case run time in ms (the bounded pidin calls, the pid lookup
+ * included), for the watchdog. */
 unsigned ipc_probe_max_ms(void);
+
+/* Worst-case run time in ms of the pid lookup alone (sloginfo, pidin). */
+unsigned ipc_find_max_ms(void);
 
 /* MMI3GApplication's pid, and the channels of it to send HBDSI to, best
  * first: the ones MMI3GNavigation holds a plain (non-side) connection to,
  * then its side-channel ones, then the channels MMI3GApplication's own
- * threads receive on. Returns how many chids were written, or -1 if the
+ * threads receive on (those need /proc). out_dir: where the pid lookup's
+ * tool output goes. Returns how many chids were written, or -1 if the
  * process is not running. Logs what it found ("step d: ..." lines). */
-int ipc_app_channels(pid_t *app_pid, int *chids, unsigned max);
+int ipc_app_channels(const char *out_dir, pid_t *app_pid, int *chids,
+                     unsigned max);
 
 /* Is `from` connected to pid/chid? 1 yes, 0 no. Used to tell whether a
  * service accepted a ConnectRequest: the server answers every request,

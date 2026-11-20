@@ -36,7 +36,7 @@ broker would have given it:
 
 | what | where it comes from |
 |---|---|
-| the server's pid | `/proc` (`ipcprobe.c`) |
+| the server's pid | `/proc`, else the unit's `sloginfo` (`pid N: application MMI3GApplication started`), else `pidin arg` (`ipcprobe.c`, `pidscan.c`) |
 | the channel to send to | the channels MMI3GNavigation holds a connection to, then the ones MMI3GApplication's threads receive on (`ipcprobe.c`) |
 | the service's server id | `0x00020027`, the component id of AudioManagementDevCtrl in the binary's bootstrap table, plus anything shaped like a component id found next to the role name in MMI3GApplication's own memory (`svcscan.c`, report in `var/hello5_services.txt`) |
 
@@ -55,8 +55,21 @@ MMI3GNavigation and the servicebroker. The listing goes to
 `var/hello5_ipc.txt`, the unit's own `pidin -p <pid>` (threads, `fd`,
 `arg`) to `var/hello5_pidin.txt`, each pidin call stopped after 15 s. The
 `step p:` lines in `hello5.log` name the connections between the three
-processes and the chids their threads receive on. **Status: built, not
-yet run on the car.**
+processes and the chids their threads receive on.
+
+**Looking the pids up through `/proc` alone found none of the three
+processes on the car, although all three were running [confirmed: step p
+gave pid 0 for each while the slog shows MMI3GApplication's and
+MMI3GNavigation's start lines].** Which stage fails is not known yet. So the
+lookup now logs, once per run (`procs:` lines): the uid and euid, whether
+hello5 can read its own name through `/proc`, and for the `/proc` walk how
+many entries, pids and names it read and how many `open` and `devctl`
+calls failed, with the first errno of each. Pids `/proc` does not give come
+from `sloginfo`, then `pidin arg`; their output is kept in
+`var/hello5_sloginfo.txt` and `var/hello5_pidin_arg.txt`, and each pid's
+source is logged. Connections (`ConnectServerInfo`) need no `/proc`; thread
+states, the receive chids and step `d`'s memory scan do. **Status: built,
+not yet run on the car.**
 
 Steps `p` and `d` are the default run (apps.conf), `p` first so its
 listing is on the card even if `d` upsets the MMI.

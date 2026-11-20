@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -18,6 +19,7 @@
 
 #include "ipcprobe.h"
 #include "log.h"
+#include "pidscan.h"
 #include "proc.h"
 
 #define MAX_PROCS     4
@@ -26,26 +28,40 @@
 #define NAME_MAX_LEN  64
 #define PIDIN_TIMEOUT 15        /* s, per pidin call */
 #define PIDIN_CALLS   3         /* per process: threads, fd, arg */
+#define TOOL_TIMEOUT  10        /* s, sloginfo / pidin arg for the pids */
+#define TOOL_CALLS    2
 
 struct pinfo {
 	const char *want;       /* basename looked for */
 	pid_t pid;              /* 0: not found */
+	const char *how;        /* where the pid came from */
 };
 
 static struct pinfo procs[] = {
-	{ "MMI3GApplication", 0 },
-	{ "MMI3GNavigation", 0 },
-	{ "servicebroker", 0 },
+	{ "MMI3GApplication", 0, NULL },
+	{ "MMI3GNavigation", 0, NULL },
+	{ "servicebroker", 0, NULL },
 };
 #define NPROCS ((int)(sizeof(procs) / sizeof(procs[0])))
 
-unsigned ipc_probe_max_ms(void)
+unsigned ipc_find_max_ms(void)
 {
-	return (unsigned)(NPROCS * PIDIN_CALLS * (PIDIN_TIMEOUT + 3)) * 1000u + 5000u;
+	return (unsigned)(TOOL_CALLS * (TOOL_TIMEOUT + 3)) * 1000u;
 }
 
-/* The executable's path of pid, basename into buf. 0 or -1. */
-static int proc_name(pid_t pid, char *buf, usize size)
+unsigned ipc_probe_max_ms(void)
+{
+	return ipc_find_max_ms() +
+	       (unsigned)(NPROCS * PIDIN_CALLS * (PIDIN_TIMEOUT + 3)) * 1000u + 5000u;
+}
+
+/* Where reading a name went wrong. */
+enum { NAME_OK, NAME_OPEN, NAME_DEVCTL };
+
+/* The executable's path of pid, basename into buf: through /proc/<pid>/as
+ * and DCMD_PROC_MAPDEBUG_BASE, as the unit's own pidin does. 0, or the
+ * errno, with the failing stage in *stage (may be NULL). */
+static int proc_name_st(pid_t pid, char *buf, usize size, int *stage)
 {
 	char path[32];
 	struct {
@@ -53,23 +69,36 @@ static int proc_name(pid_t pid, char *buf, usize size)
 		char             more[256];
 	} map;
 	const char *base;
-	int fd;
+	int fd, rc;
 
 	snprintf(path, sizeof(path), "/proc/%d/as", (int)pid);
 	fd = open(path, O_RDONLY);
-	if (fd < 0)
-		return -1;
-	memset(&map, 0, sizeof(map));
-	if (devctl(fd, DCMD_PROC_MAPDEBUG_BASE, &map, sizeof(map), NULL) != EOK) {
-		close(fd);
-		return -1;
+	if (fd < 0) {
+		rc = errno;
+		if (stage != NULL)
+			*stage = NAME_OPEN;
+		return rc != 0 ? rc : EIO;
 	}
+	memset(&map, 0, sizeof(map));
+	rc = devctl(fd, DCMD_PROC_MAPDEBUG_BASE, &map, sizeof(map), NULL);
 	close(fd);
+	if (rc != EOK) {
+		if (stage != NULL)
+			*stage = NAME_DEVCTL;
+		return rc;
+	}
 	map.more[sizeof(map.more) - 1] = '\0';
 	base = strrchr(map.info.path, '/');
 	base = base != NULL ? base + 1 : map.info.path;
 	snprintf(buf, size, "%s", base);
+	if (stage != NULL)
+		*stage = NAME_OK;
 	return 0;
+}
+
+static int proc_name(pid_t pid, char *buf, usize size)
+{
+	return proc_name_st(pid, buf, size, NULL) == 0 ? 0 : -1;
 }
 
 /* Name of pid for the listing, cached per call site's buffer. */
@@ -82,30 +111,123 @@ static const char *name_of(pid_t pid, char *buf, usize size)
 	return buf;
 }
 
-static void find_procs(void)
+/* Does pid exist? kill(pid, 0): EPERM still means it does. */
+static int pid_alive(pid_t pid)
 {
-	char name[NAME_MAX_LEN];
+	return kill(pid, 0) == 0 || errno == EPERM;
+}
+
+/* The /proc walk: every pid's name, counting each way it can fail, so a
+ * walk that finds nothing says why. */
+static void walk_proc(void)
+{
+	char name[NAME_MAX_LEN], samples[160];
+	unsigned entries = 0, pids = 0, named = 0, open_fail = 0, dev_fail = 0;
+	int open_err = 0, dev_err = 0, stage, rc, i;
+	usize slen = 0;
 	struct dirent *e;
 	DIR *d = opendir("/proc");
-	int i;
 
 	if (d == NULL) {
-		log_msg("step p: /proc: %s", strerror(errno));
+		log_msg("procs: opendir /proc: %s", strerror(errno));
 		return;
 	}
+	samples[0] = '\0';
 	while ((e = readdir(d)) != NULL) {
 		char *end;
-		long pid = strtol(e->d_name, &end, 10);
+		long pid;
 
-		if (*end != '\0' || pid <= 1)
+		entries++;
+		pid = strtol(e->d_name, &end, 10);
+		if (*end != '\0' || end == e->d_name || pid <= 1)
 			continue;
-		if (proc_name((pid_t)pid, name, sizeof(name)) != 0)
+		pids++;
+		rc = proc_name_st((pid_t)pid, name, sizeof(name), &stage);
+		if (rc != 0) {
+			if (stage == NAME_OPEN) {
+				open_fail++;
+				if (open_err == 0)
+					open_err = rc;
+			} else {
+				dev_fail++;
+				if (dev_err == 0)
+					dev_err = rc;
+			}
 			continue;
+		}
+		named++;
+		if (named <= 4 && slen + 40 < sizeof(samples))
+			slen += (usize)snprintf(samples + slen, sizeof(samples) - slen,
+			                        "%s%ld=%s", slen ? " " : "", pid, name);
 		for (i = 0; i < NPROCS; i++)
-			if (procs[i].pid == 0 && strcmp(name, procs[i].want) == 0)
+			if (procs[i].pid == 0 && strcmp(name, procs[i].want) == 0) {
 				procs[i].pid = (pid_t)pid;
+				procs[i].how = "/proc";
+			}
 	}
 	closedir(d);
+	log_msg("procs: /proc: %u entries, %u pids, %u named, open failed %u (%s), "
+	        "devctl failed %u (%s)", entries, pids, named, open_fail,
+	        open_fail ? strerror(open_err) : "-", dev_fail,
+	        dev_fail ? strerror(dev_err) : "-");
+	if (named > 0)
+		log_msg("procs: first names: %s", samples);
+}
+
+/* The pids /proc did not give, from the text of a unit tool run into
+ * out_dir/file (sloginfo, pidin arg). */
+static void scan_tool(const char *out_dir, const char *file, const char *cmd)
+{
+	char path[256];
+	int i, st, missing = 0;
+
+	for (i = 0; i < NPROCS; i++)
+		if (procs[i].pid == 0)
+			missing++;
+	if (missing == 0 || out_dir == NULL)
+		return;
+	snprintf(path, sizeof(path), "%s/%s", out_dir, file);
+	unlink(path);
+	st = proc_shell(path, TOOL_TIMEOUT, cmd);
+	log_msg("procs: %s -> %s: %s", cmd, file, proc_status_str(st));
+	for (i = 0; i < NPROCS; i++) {
+		pid_t pid;
+
+		if (procs[i].pid != 0)
+			continue;
+		pid = (pid_t)pidscan_file(path, procs[i].want);
+		if (pid == 0)
+			continue;
+		if (!pid_alive(pid)) {
+			log_msg("procs: %s names %s pid %d, but it is gone", cmd,
+			        procs[i].want, (int)pid);
+			continue;
+		}
+		procs[i].pid = pid;
+		procs[i].how = cmd;
+	}
+}
+
+/* Once per run: /proc, then sloginfo, then pidin arg for what is left. */
+static void find_procs(const char *out_dir)
+{
+	static int done;
+	char name[NAME_MAX_LEN];
+	int i, stage, rc;
+
+	if (done)
+		return;
+	done = 1;
+	rc = proc_name_st(getpid(), name, sizeof(name), &stage);
+	log_msg("procs: uid %d euid %d; own name through /proc: %s%s",
+	        (int)getuid(), (int)geteuid(), rc == 0 ? name : strerror(rc),
+	        rc == 0 ? "" : stage == NAME_OPEN ? " (open)" : " (devctl)");
+	walk_proc();
+	scan_tool(out_dir, "hello5_sloginfo.txt", "sloginfo");
+	scan_tool(out_dir, "hello5_pidin_arg.txt", "pidin arg");
+	for (i = 0; i < NPROCS; i++)
+		log_msg("procs: %s: pid %d (%s)", procs[i].want, (int)procs[i].pid,
+		        procs[i].pid != 0 ? procs[i].how : "not found");
 }
 
 /* Is pid one of procs[]? Its index, or -1. */
@@ -279,8 +401,11 @@ static unsigned recv_chids(int self, int *chids, unsigned n, unsigned max)
 
 	snprintf(path, sizeof(path), "/proc/%d/as", (int)procs[self].pid);
 	fd = open(path, O_RDONLY);
-	if (fd < 0)
+	if (fd < 0) {
+		log_msg("step d: %s: %s, so not the channels its threads receive on",
+		        path, strerror(errno));
 		return n;
+	}
 	while (seen < MAX_THREADS) {
 		memset(&u, 0, sizeof(u));
 		u.st.tid = tid;
@@ -297,11 +422,12 @@ static unsigned recv_chids(int self, int *chids, unsigned n, unsigned max)
 	return n;
 }
 
-int ipc_app_channels(pid_t *app_pid, int *chids, unsigned max)
+int ipc_app_channels(const char *out_dir, pid_t *app_pid, int *chids,
+                     unsigned max)
 {
 	unsigned n = 0;
 
-	find_procs();
+	find_procs(out_dir);
 	*app_pid = procs[0].pid;
 	if (procs[0].pid == 0) {
 		log_msg("step d: MMI3GApplication is not running");
@@ -366,9 +492,7 @@ int ipc_probe(const char *out_dir)
 	FILE *f;
 	int i, k;
 
-	find_procs();
-	for (i = 0; i < NPROCS; i++)
-		log_msg("step p: %s: pid %d", procs[i].want, (int)procs[i].pid);
+	find_procs(out_dir);
 
 	snprintf(path, sizeof(path), "%s/hello5_ipc.txt", out_dir);
 	f = fopen(path, "w");

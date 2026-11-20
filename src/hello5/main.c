@@ -1180,7 +1180,7 @@ static int duck_attach(struct hbdsi *c)
  * ConnectRequest straight to MMI3GApplication, the way its own child
  * processes do (docs/hbdsi.md section 4). Three things are needed and
  * none of them comes from the broker:
- *   the server's pid         /proc
+ *   the server's pid         /proc, else sloginfo / pidin arg (ipcprobe.c)
  *   the channel to send to   the channels MMI3GNavigation is connected to
  *                            and the ones MMI3GApplication receives on
  *                            (ipcprobe.c)
@@ -1201,7 +1201,7 @@ static int duck_internal(struct hbdsi *c)
 	char path[256];
 	int n, i, rc;
 
-	n = ipc_app_channels(&app, chids, DUCK_MAX_CHIDS);
+	n = ipc_app_channels(out_dir, &app, chids, DUCK_MAX_CHIDS);
 	if (n <= 0) {
 		log_msg("step d: no channel of MMI3GApplication to send to");
 		return -1;
@@ -1482,7 +1482,8 @@ static unsigned step_max_ms(const struct step *s)
 	if (s->play == play_probe)
 		return ipc_probe_max_ms() + STEP_DONE_MS;
 	if (s->play == play_duck)
-		return s->intro_s * 1000 + STEP_DONE_MS + svc_scan_max_ms() +
+		return s->intro_s * 1000 + STEP_DONE_MS + ipc_find_max_ms() +
+		       svc_scan_max_ms() +
 		       DUCK_MAX_TRIES * DUCK_CONNECT_MS + 2 * DUCK_HOLD_MS +
 		       (DUCK_PINGS + DUCK_CONTROL) * PULSE_PERIOD_MS + STEP_SLACK_MS;
 	return s->intro_s * 1000 + STEP_DONE_MS + 2000 +
