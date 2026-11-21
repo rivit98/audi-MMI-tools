@@ -99,7 +99,6 @@ it) behaves like gcc. What it adds, and why:
 
 | Flag / step | Why |
 |---|---|
-| Debian sid `gcc-16-sh4-linux-gnu` | GCC 12.2 drops the second test of `a == 0 && b == 0` at `-O1`+ ([gcc-sh4-treg-bug.md](gcc-sh4-treg-bug.md)). `build/.canary` fails the build if a later GCC 16.x brings it back. |
 | `-m4a -matomic-model=hard-llcs -Wa,--isa=sh4a` | SH-4A LL/SC atomics. GCC's sh4 default (gUSA) **loses updates** on QNX, whose kernel doesn't restart gUSA sequences: 9–64 % lost on the car, LL/SC 0 %. The loader accepts the `sh4a` ELF flag. |
 | `-U_FILE_OFFSET_BITS -U_TIME_BITS` | GCC 14+ on Debian predefines 64-bit `off_t`/`time_t`, which turns `open()` into the missing `open64()`. |
 | `-fno-builtin-sin*/cos*` | GCC fuses `sinf`+`cosf` into `sincosf`, which QNX's libm lacks. |
@@ -160,7 +159,7 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
 Dockerfile, Makefile    mmi-sdk image; host entry point
 sdk/                    wrapper, qnx-elf-fix.py, mkstubs.py, build-sysroot.sh,
                         reconstructed headers (include/), C++ overlay + shim,
-                        canary.c, fonts/ + mkfont.py
+                        fonts/ + mkfont.py
 src/common/             shared code, linked per group (below)
 src/<app>/              one app's own logic + README.md
 tests/                  host unit tests (check.h)

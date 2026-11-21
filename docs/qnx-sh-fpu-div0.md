@@ -58,9 +58,9 @@ precision for the surrounding float code.
 ## Example: linear fog in libGLES_CM
 
 `hello4`'s probe `fog` dies with `SIGFPE code=3 fltno=9 ip=78232656
-mapaddr=00032656` without the fix below, the same under GCC 12 and GCC 16, so
-it is not a compiler problem. `mapaddr` is the offset inside the mapped library,
-and `libGLES_CM.so.6`'s text segment starts at vaddr 0, so offset `0x32656`
+mapaddr=00032656` without the fix below; it is not a compiler problem.
+`mapaddr` is the offset inside the mapped library, and `libGLES_CM.so.6`'s
+text segment starts at vaddr 0, so offset `0x32656`
 disassembles directly:
 
 ```

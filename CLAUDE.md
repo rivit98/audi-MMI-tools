@@ -54,7 +54,6 @@ gradle, adb or gcc.
   `-matomic-model`: gUSA loses updates. QNX `std::mutex` needs the SDK's init/destroy fix
   (sync objects reused at the same address).
 - `sdk/qnx-elf-fix.py` runs after every link and **deletes** a binary that has TLS or IFUNC.
-  `build/.canary` stops the build if the GCC 12 `a==0&&b==0` miscompile comes back.
 - 64-bit types are 4-byte aligned (QNX 6.3.2 ABI).
 - SD writes are slow (~12 ms per fsync'ed log line). Keep `log_msg` out of per-frame paths:
   use a RAM ring + low-priority writer thread (`audi_stream_receiver/perf.cpp`).
