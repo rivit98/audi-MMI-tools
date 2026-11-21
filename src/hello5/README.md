@@ -1,179 +1,50 @@
 # hello5
 
-Sound from our app. It plays a ping train it generates itself (`pulse.c`:
-a 0.5 s ping every 2 s, written to `/tmp`) on io-media's
-`mixer:DSPOUT_TDM1_20_SAD`, the one output heard in the car. Each step
-shows on screen what to do, counts down, then shows which ping is
-playing:
+Sound from an app. Plays a generated ping train (`pulse.c`: 0.5 s ping every
+2 s) on io-media's `mixer:DSPOUT_TDM1_20_SAD`, one step at a time, each with
+an on-screen question for the listener.
 
-| step | asks |
-|---|---|
-| `m` | With the radio on: does the radio keep playing between the pings (mixed) or not (replaced)? |
-| `n` | Through hello5's own io-media client (`iom.c`, no `testapp-file`): are pings 4–6, at its own volume 0, silent? Do three queued files keep the 2 s beat? Every io-media event is logged with its time. |
-| `t` | After switching to music with MEDIA, does our output still play, and does the music keep playing between the pings? |
-| `v` | Do the pings follow the car's volume knob? Clicks are counted on screen. Last, so a volume left low can't spoil another step. |
-| `d` | Over a lowered radio: hello5 asks audio management for the nav voice channel, as the navigation does (does the radio get quieter?), plays 6 pings on io-audio `navi` while it is open (heard over it?), gives it back (radio back?), then plays 3 control pings with no channel (silent?). |
-| `p` | No sound: which channels MMI3GApplication, MMI3GNavigation and the servicebroker are connected to and receive on (`ipcprobe.c`). The evidence for how the navigation reaches audio management. |
-| `g` | The output survey: group N = N chimes (`beep.wav`) on each mixer output or io-audio device. |
+- **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `mntv`; the card runs `pd`)
+- **Output:** `var/hello5.log` (`RESULT` lines), `hello5_<step>.log`, step `p`/`d` dumps
+  (`hello5_ipc.txt`, `hello5_pidin.txt`, `hello5_broker.txt`, `hello5_services.txt`, …)
 
-Steps `m`, `v`, `t` and `g` play through the unit's `testapp-file`.
+## Verifies
 
-Step `d` talks to MMI3GApplication over HBDSI ([docs/hbdsi.md](../../docs/hbdsi.md),
-`common/hbdsi.c`) and sends `RequestAudioFocus(eSRC_NAVTTS,
-eSNK_SPEAKERS)`, then writes its pings to io-audio `navi` and sends
-`ReleaseAudioFocus`. It always releases before it exits. Every HBDSI step
-and every message the server sends back goes to `hello5.log`.
+- `m`: does our sound mix with the radio or replace it?
+- `n`: hello5's own io-media client (`iom.c`): own volume, queued files, event timing.
+- `t`: does it play over Bluetooth music?
+- `v`: does it follow the car's volume knob?
+- `g`: which mixer outputs / io-audio devices are audible (N chimes on output N).
+- `p`: which channels MMI3GApplication, MMI3GNavigation and the servicebroker
+  connect to and receive on (`ipcprobe.c`).
+- `d`: sound over a lowered radio: ask audio management for the nav voice
+  channel over HBDSI, as the navigation does, and play on io-audio `navi`.
 
-It tries the servicebroker first and saves the broker's interface list to
-`var/hello5_broker.txt`. **The broker answers status 2, unknown
-interface, for `SGAudioManagement` 1.0 and 1.1 [confirmed]:**
-MMI3GApplication registers only `PHydraGoogleServer` with it, and serves
-audio management to its own child processes instead
-([docs/hbdsi.md](../../docs/hbdsi.md) §4).
-
-So step `d` then goes that way itself, which needs three things the
-broker would have given it:
-
-| what | where it comes from |
-|---|---|
-| the server's pid | `/proc`, else the unit's `sloginfo` (`pid N: application MMI3GApplication started`), else `pidin arg` (`ipcprobe.c`, `pidscan.c`) |
-| the channel to send to | the channels MMI3GNavigation holds a connection to, then the ones MMI3GApplication's threads receive on (`ipcprobe.c`) |
-| the service's server id | `0x00020027`, the component id of AudioManagementDevCtrl in the binary's bootstrap table, plus anything shaped like a component id found next to the role name in MMI3GApplication's own memory (`svcscan.c`, report in `var/hello5_services.txt`) |
-
-Each candidate gets one ConnectRequest, best first, at most six in all.
-The server answers all of them the same way, so what counts as success is
-that it **connects back** to our channels; the log says for each attempt
-whether it did. The client id is 0 to start with and is taken from the
-first message the server sends back
-([docs/hbdsi.md](../../docs/hbdsi.md) §6). Run it with `hello5 <sd> d`.
-**Status: built, not yet run on the car.**
-
-Step `p` reads, without sending anything, every connection (`coid` ->
-nd, pid, chid, scoid, as `pidin fd` shows them) and every thread's state
-(RECEIVE on which chid, SEND/REPLY to which pid/chid) of MMI3GApplication,
-MMI3GNavigation and the servicebroker. The listing goes to
-`var/hello5_ipc.txt`, the unit's own `pidin -p <pid>` (threads, `fd`,
-`arg`) to `var/hello5_pidin.txt`, each pidin call stopped after 15 s. The
-`step p:` lines in `hello5.log` name the connections between the three
-processes and the chids their threads receive on.
-
-**Looking the pids up through `/proc` alone found none of the three
-processes on the car, although all three were running [confirmed: step p
-gave pid 0 for each while the slog shows MMI3GApplication's and
-MMI3GNavigation's start lines].** Which stage fails is not known yet. So the
-lookup now logs, once per run (`procs:` lines): the uid and euid, whether
-hello5 can read its own name through `/proc`, and for the `/proc` walk how
-many entries, pids and names it read and how many `open` and `devctl`
-calls failed, with the first errno of each. Pids `/proc` does not give come
-from `sloginfo`, then `pidin arg`; their output is kept in
-`var/hello5_sloginfo.txt` and `var/hello5_pidin_arg.txt`, and each pid's
-source is logged. Connections (`ConnectServerInfo`) need no `/proc`; thread
-states, the receive chids and step `d`'s memory scan do. **Status: built,
-not yet run on the car.**
-
-Steps `p` and `d` are the default run (apps.conf), `p` first so its
-listing is on the card even if `d` upsets the MMI.
-
-- **Run:** `hello5 <sd_path> [steps] [outputs]`. The default steps are
-  `mntv`; the card runs `pd`. `outputs` is step `g`'s list (default `m2,m1,m6,m4,m7`).
-- **Output** (in `var/` on the card): `hello5.log` (`RESULT` lines; step `n`'s timed events),
-  `hello5_<step>.log` (`testapp-file`'s output).
-- **Status:** all four steps are answered (below): our sound replaces the
-  radio and the music while it plays, and follows the car's volume knob.
-  hello5's own volume does nothing, and io-media's code says why: the
-  `mixer:` output's `set_volume` calls a DSP mixer method that is an empty
-  stub (`docs/platform-notes.md` §9, "Why the graph volume does nothing").
-  An app that wants to be quieter than the car volume has to scale its own
-  samples. The output survey comes from step `g`. More detail is in
-  [docs/platform-notes.md](../../docs/platform-notes.md) §9.
-- **Screen:** MEDIA brings the MMI's Media screen up over hello5, as with
-  hello7's MENU. hello5 shows its displayable again every second
-  (`screen_set_reshow`, `common/screen.c`), and its screen comes back over
-  the Media screen. Nothing is left to answer, so hello5 is not in the
-  default run.
-
-The knob/button log that used to be part of hello5 is now
-[hello7](../hello7/).
-
-## On the car
-
-Results come from the listener's notes and the sound of phone videos
-(the 880 Hz band per ping, 1–5 kHz and below 300 Hz between pings), checked
-against hello5's log, ch8 and the system log.
+## Results
 
 **Works**
-- **`mixer:DSPOUT_TDM1_20_SAD?delay=130` through io-media is heard
-  clearly on the speakers, with the radio on or Bluetooth music playing.**
-  It is played by the unit's `testapp-file` and by hello5's own io-media
-  client (`iom.c`). Pings come exactly 2.00 s apart, the first ~0.3 s
-  after `testapp-file` starts.
-- **It replaces the radio and media audio while it plays, it doesn't mix.**
-  - Radio: everything between the pings drops 15–25 dB to the
-    recording's floor for the whole train. It stops at the start of the
-    file and comes back 0.2–0.3 s after the file ends.
-  - Bluetooth music (`t`, after MEDIA): the music plays underneath and is
-    muted for the whole train. It was first audible the moment
-    `testapp-file` ended. So `TDM1_20_SAD` attaches while the MME plays.
-- **Its level follows the car's volume knob.** Pings got ~21 dB quieter
-  after a run of detents down and ~12 dB louder after detents up. With no
-  knob turned, every ping is as loud as the others (within ~2 dB). No
-  dB-per-detent figure: this car's volume knob is slightly faulty and
-  sends both directions within single turns (ch8 and the MMI's
-  `Encoder Key=0x11` log agree). ch8 byte 5 carries up to 15 detents per
-  message on a fast turn, so the screen asks for one click at a time.
-- **hello5's own io-media client plays sound:** STATUS "playing" 24 ms
-  after `play`, the first TIME event (position 0) at +480 ms, first sound
-  ~0.3–0.4 s after `play`.
-- **Queueing works, with a gap:** three queued files play, and io-media
-  sends **one** `FINISHED` for the whole queue, not one per file. (A
-  client that waits for one per file and calls play again replays the last
-  file until its time cap.)
-- **`testapp-file`:** `TIME` events every ~250 ms, `INPUT_EOF` at 5.1 s of
-  a 12 s file, `FINISHED … 0 left to do`. A step takes 12.3–20.7 s for a
-  12–20 s train.
-- **These mixer outputs attach and play every clip to `INPUT_EOF`:**
-  `TDM1_20_SAD`, `TDM1_51`, `TDM1_20`, `TDM2_20`, `TDM2_20_SAD`,
-  `TDM3_20` and `TDM3_20_SAD`. A 2.5 s clip takes 2.46–2.57 s.
-- **QSA (`libasound`):** the six io-audio devices (tones1, navi, SDS, BT-Tr,
-  NAD, ent3) open, take 44.1 kHz mono S16, and consume each clip in real
-  time.
-  - `prepare` returns `EBUSY` while the previous clip still plays.
-  - Each device N shows up as `hb_fpga: Play buffer underrun strmN` when it
-    runs dry.
+- `TDM1_20_SAD` is heard clearly, with the radio or Bluetooth music on.
+- Its level follows the car's volume knob.
+- hello5's own io-media client plays; queued files play.
+- The screen comes back over the MMI's Media screen (`screen_set_reshow`).
 
 **Doesn't work**
-- **Mixing with the radio or music:** `TDM1_20_SAD` mutes both (above).
-- **The graph's volume:** `iom_set_volume` 0 or 30 (devctl `0x80080F22`)
-  returns ok and doesn't change the level: pings at volume 0 are as loud
-  as the rest (±0.5 dB). io-media's `mixer_set_volume` ends in an empty
-  stub; the mixer URL's `volume_ctrl` is about encoder sharing, not volume
-  (`docs/platform-notes.md` §9).
-- **Gapless queueing:** each queued file adds ~350 ms of silence (queued
-  pings come 2.33–2.39 s apart, not 2.0): `INPUT_EOF` → attach next →
-  play leaves a gap.
-- **Nothing played through QSA is heard,** on any of the six devices.
-- **These mixer outputs play but are silent:** `TDM2_20`, `TDM2_20_SAD`,
-  `TDM3_20` and `TDM3_20_SAD`.
-- **`TDM1_51` and `TDM1_20` (without the SAD header) mute the car's audio**
-  while they play, and their own sound isn't heard.
-- **`TDM1_51_SAD` won't attach while the radio plays:** `Mixer entry for
-  DSPOUT_TDM1_51_SAD: Already in use`, `iom_errno=0x10001`.
-- **`testapp-file`'s exit code is useless:** it is always 1, success
-  included.
+- No mixing: `TDM1_20_SAD` mutes the radio and music while it plays.
+- The graph volume does nothing (io-media's mixer volume is an empty stub):
+  scale the samples to be quieter.
+- Queued files add ~350 ms of silence each, and io-media sends one `FINISHED` per queue.
+- QSA (`libasound`): every device takes the data, nothing is heard.
+- Other mixer outputs are silent or mute the car's audio; `TDM1_51_SAD` won't attach while the radio plays.
+- The servicebroker doesn't know `SGAudioManagement` (status 2).
+- Looking up the three processes' pids through `/proc` found none of them.
+- `testapp-file`'s exit code is always 1, success included.
 
 **Not explained**
-- In `t` and `v` the **first** ping can come ~12 dB under the others; in
-  `m` and `n` it doesn't. Maybe the amplifier fades in when it takes over
-  from a media source [inferred].
-- Once, in a 24 s queued train, the radio's bass (below ~300 Hz) faded
-  back in under the pings from ~10 s on, while everything above ~500 Hz
-  stayed silent. It didn't happen again.
-- The Bluetooth player sometimes paused around a train: once the phone
-  reported `MEDIA_STATE_PAUSED` itself (AVRCP, no `DCMD_MEDIA_PAUSE` from
-  the MMI) within a second of the train's start, once the MMI sent
-  `DCMD_MEDIA_PAUSE` before a train. Cause unknown; the phone was also in
-  use.
-- A 29-byte ch8 message with bytes 14–15 `02 02`, then byte 15 `03` and
-  `00`, came with a loud click and the radio stopping, and ended a run:
-  most likely the car switching off [inferred]
-  ([docs/platform-notes.md](../../docs/platform-notes.md) §8).
+- In `t` and `v` the first ping can come ~12 dB under the rest (amplifier fade-in? [inferred]).
+
+**Not yet confirmed on the car**
+- Steps `p` and `d` with the widened pid lookup (`sloginfo`, `pidin arg`,
+  `procdiag`) and the direct ConnectRequest to MMI3GApplication.
+
+Details: [docs/platform-notes.md §9](../../docs/platform-notes.md) (audio),
+[docs/hbdsi.md](../../docs/hbdsi.md) (step `d`), knob/button decoding moved to [hello7](../hello7/).

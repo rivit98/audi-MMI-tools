@@ -1,182 +1,52 @@
 # android_auto
 
-An Android Auto head unit, proof of connectivity: a stock Android phone
-with the Android Auto app, plugged into the car's USB port, connects to
-the MMI and streams its projected screen (works on the car). Nothing is shown: the
-phone's H.264 video is counted and dropped, and the MMI screen is a status
-page. (The phone relay ([docs/android-auto.md](../../docs/android-auto.md) §4.3) is the path that shows Android
-Auto on the MMI.) Why there is no picture, and what the full
-receiver needs: [docs/android-auto.md](../../docs/android-auto.md).
+Android Auto head unit, proof of connectivity: a stock phone with Android
+Auto, plugged into the car's USB port, connects and streams its projected
+screen. Nothing is shown: the H.264 video is counted and dropped, and the
+MMI shows a status page. The path that does show Android Auto is the phone
+relay ([docs/android-auto.md §4.3](../../docs/android-auto.md)).
 
-```
-phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  log
-```
-
-- **Run:** `android_auto <sd_path> [audio=0|1] [fps=N]`.
-  Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
-  - `audio=0`: advertise no audio channels (default: media 48 kHz stereo,
-    guidance and system 16 kHz mono; the PCM is counted and dropped, so the
-    phone's sound is silent while connected)
-  - mbedTLS errors always go to the log (trace level 1)
-  - `fps=N`: ack pacing, video frames acked at most N per second (default
-    25; 0 = every frame acked at once). Below.
-- **Output** (in `var/` on the card): `android_auto.log` (USB, every protocol step, a `stats:` and
-  a `pace:` line every 10 s, a `cpu:` line every 10 s); USB slog snapshots in `var/`. To look at the video,
-  use the desk build (`make aa-host`, below), which saves it. The previous
-  run's files are kept as `*.prev.*`.
+- **Run:** `android_auto <sd_path> [audio=0|1] [fps=N]` — runs until the SD
+  card is pulled or SIGTERM/INT/HUP. `fps=N` holds video acks to N per
+  second (default 25; 0 = ack at once).
+- **Output:** `var/android_auto.log` (every protocol step; `stats:`, `pace:`, `cpu:` every 10 s), USB slog snapshots.
 - **Build:**
 
   ```sh
-  make sd SD_APPS=android_auto   # the app + aa/headunit.crt, .key on the card
-  make test                      # test_android_auto: the protocol against a fake phone
-  make aa-host                   # desk test: this PC is the head unit for the phone
+  make sd SD_APPS=android_auto   # app + aa/headunit.crt, .key on the card
+  make test                      # session against a fake phone + protobuf check
+  make aa-host                   # desk test: the PC is the head unit (saves + plays the video)
   ```
 
-  The first build downloads mbedTLS and the head unit certificate into
-  `third_party/` (below).
+  The first build fetches mbedTLS 3.6.7 and aasdk's head unit certificate
+  into `third_party/` (pinned SHA-256s).
 
 ## How it works
 
-**USB** ([common/aoa_host.cpp](../common/aoa_host.cpp)): the AOA host of
-audi_stream_receiver (every io-usb lesson in
-[docs/usb-stack.md](../../docs/usb-stack.md)) as a byte pipe. It sends the
-strings Android Auto expects from a head unit (manufacturer `Android`,
-model `Android Auto`); the phone then starts Android Auto itself, no app to
-install. A bulk OUT block that is a multiple of the packet size goes out as
-two transfers ([common/usb_chunk.h](../common/usb_chunk.h)), so a phone
-read never waits for a zero-length packet.
+- **USB:** the AOA host from audi_stream_receiver ([common/aoa_host.cpp](../common/aoa_host.cpp)),
+  announcing itself as `Android` / `Android Auto`, so the phone starts Android Auto itself.
+- **Frames** ([frame.h](frame.h)) and **session** ([session.cpp](session.cpp)):
+  version 1.1 → TLS 1.2 → service discovery → channels (input, sensors,
+  800×480 H.264 video, audio sinks) → video focus → acks and pings.
+  Protobufs written by hand ([common/pb.h](../common/pb.h)) after aasdk's `.proto` files.
+- **TLS** ([tls.cpp](tls.cpp)): mbedTLS client with aasdk's certificate.
+  CTR-DRBG is seeded straight from `/dev/urandom` + cycle-counter jitter
+  (the unit has no `/dev/random`; `mbedtls_entropy_func` fails with
+  `-0x003c`). [utctime-offset.patch](../common/mbedtls/utctime-offset.patch)
+  accepts the certificate's `-0700` dates.
 
-**Frames** ([frame.h](frame.h)): `channel | flags | size | [total] |
-payload`. A message longer than 16 KB is split into FIRST / MIDDLE / LAST
-frames, each encrypted on its own; channels interleave.
+## Results
 
-**Session** ([session.cpp](session.cpp)), in order:
+**Works**
+- Connects on the car (Redmi Note 8 Pro): all 7 channels open, TLS in ~370 ms,
+  800×480 Baseline L3.1 at ~30 fps (plays on a PC).
+- CPU: app 15–26 %.
 
-| Step | Head unit | Phone |
-|---|---|---|
-| 1 | VERSION_REQUEST 1.1 | VERSION_RESPONSE (its version, status 0) |
-| 2 | TLS 1.2 ClientHello in ENCAPSULATED_SSL, ... | ServerHello, ..., asks for the client certificate |
-| 3 | AUTH_COMPLETE (status 0); encrypted from here | SERVICE_DISCOVERY_REQUEST (its name) |
-| 4 | SERVICE_DISCOVERY_RESPONSE: the services below | CHANNEL_OPEN_REQUEST per service -> OK |
-| 5 | SETUP -> CONFIG ready, 1 unacked; VIDEO_FOCUS projected | START (session id), codec config, frames |
-| 6 | an ACK per media message (video: paced); PING every second | PINGs, focus requests, sensor requests |
+**Doesn't work / open**
+- The video can't be shown: the DM642 shows nothing from an 800-wide coded picture.
+- Ack pacing at 25 fps makes the phone queue frames (4–7 fps, growing lag): use `fps=0`.
+- The first ~20 s are slow (phone side).
+- Maps needs the phone's own GPS (no location sensor offered).
+- Touch / knob input and audio output not done.
 
-**Ack pacing** (session.cpp, `video_frame_in`): Android Auto offers only 30
-or 60 fps, and the DM642 path wants a steady 25 (io-media plays exactly the
-stream's rate, docs/phone-mirroring.md §7.10). With 1 frame unacked the
-phone sends the next frame only after the ack, so the session holds each
-video frame's ack until one frame period (40 ms at 25 fps) after the last
-one. A frame later than that is acked at once; acks are never saved up, so
-a pause brings no burst. The session thread wakes for a held ack
-(`ms_to_next`). The `pace:` line tells what the phone does with it, over
-the last 10 s:
-
-| Field | Meaning |
-|---|---|
-| `N of M acks held, avg, max` | frames whose ack waited, and how long: ~0 held = the phone is slower than the cap anyway |
-| `frame age +X ms (max)` | our arrival time minus the phone's frame timestamp, relative to the smallest seen. Flat = the phone drops or slows its encoder; growing = it queues frames and the picture falls behind |
-
-Services advertised (channel: what):
-
-| Ch | Service | Content |
-|---|---|---|
-| 1 | input | touch screen 800x480; keys HOME, BACK, D-pad, SEARCH, media, rotary |
-| 2 | sensors | driving status (always unrestricted = parked), night mode (always day) |
-| 3 | video sink | H.264 Baseline, 800x480, 30 fps, 140 dpi (acks paced to 25) |
-| 4, 5, 6 | audio sinks | media 48 kHz stereo, guidance and system 16 kHz mono (with `audio=1`) |
-
-Audio, navigation and video focus requests are always granted. Message ids
-and field numbers follow aasdk's `aap_protobuf/*.proto` (cited next to each
-message in session.cpp); the protobufs are written and read by hand
-([common/pb.h](../common/pb.h)), no generator.
-
-**TLS** ([tls.cpp](tls.cpp), [common/mbedtls/mbedtls_config.h](../common/mbedtls/mbedtls_config.h)):
-mbedTLS 3.6 as a TLS 1.2 client in memory. The head unit authenticates with
-aasdk's head unit certificate (issued by "Google Automotive Link" to JVC
-Kenwood, valid to 2045); the phone's certificate is not checked. Two things
-the unit needed:
-
-- **No /dev/random.** Random bytes come from /dev/urandom (pseudo) mixed
-  with the jitter of the CPU cycle counter around kernel calls, and seed
-  CTR-DRBG directly: mbedTLS's entropy pool (`mbedtls_entropy_func`) fails
-  on the unit (`-0x003c`), so it is not used. On
-  SH, `ClockCycles()` keeps the count in its upper 32 bits.
-- **The certificate's dates.** They are `UTCTime` with a `-0700` offset,
-  which mbedTLS refuses; [common/mbedtls/utctime-offset.patch](../common/mbedtls/utctime-offset.patch)
-  lets the parser skip the offset (the dates are never checked).
-
-**Threads:** io-usb's callback thread queues bulk IN bytes; the session
-thread runs the protocol (TLS, acks); the USB manager thread
-handles devices; main draws the status page once a second and on every
-change, and gives the screen to the rear camera like audi_stream_receiver.
-
-## Third-party pieces
-
-Fetched by `make` into `third_party/` (gitignored), checked against pinned
-SHA-256s:
-
-| What | From | Licence |
-|---|---|---|
-| mbedTLS 3.6.7 | Mbed-TLS release tarball, patched (above) | Apache-2.0 |
-| `headunit.crt`, `headunit.key` | opencardev/aasdk `cert/`, pinned commit | public, see docs/android-auto.md §7 |
-
-On the card the certificate lives in `aa/`; the app refuses to start the
-USB side without it.
-
-## Desk test
-
-`make aa-host` runs [host/main.cpp](host/main.cpp) in the `mmi-aa-host`
-image: the same session code over libusb, so a phone can be tried at the
-PC before the car. Stop adb first. It switches the phone to Android Auto,
-runs one session, writes `build/aa-host/android_auto.h264`, `media.pcm`,
-`guidance.pcm`, `system.pcm` (s16le) and `android_auto.log`, and with
-`--play` (the default `AA_HOST_ARGS`) shows the video in an ffplay window.
-Ctrl-C ends it with a bye-bye.
-
-## State
-
-Built; the protocol passes the host test against a fake phone (mbedTLS
-server, fragmented video, focus, sensors, key binding, pings, bye-bye).
-`make test` runs that session a second time against Google's protobuf
-([tests/check_aa_proto.py](../../tests/check_aa_proto.py)): the phone's
-messages are encoded by protobuf from aasdk's `.proto` files, and every
-message the head unit sends must decode as its type with all required
-fields, no unknown field or enum value, and the same bytes when re-encoded.
-
-**On the car it connects** (Redmi Note 8 Pro, MIUI): every status-page step
-green, the phone shows "Android Auto is active". The phone accepts aasdk's
-certificate and protocol 1.1 (it answers 1.7); TLS 1.2
-(ECDHE-RSA-AES128-GCM) is up in ~370 ms; all 7 channels open; the video is
-800x480 Baseline L3.1 at ~30 fps, ~0.5-1 Mbit/s, and plays on a PC. The
-unit has no entropy source mbedTLS accepts (`mbedtls_entropy_func`: -0x003c), so the
-DRBG is seeded by the own jitter source. CPU: the app 15-26 %, the unit
-45-50 % while saving the video.
-
-- The first ~20 s are slow: 4-9 fps and ping round trips of 2-4.5 s, then
-  30 fps and 15 ms. The MMI's out queue stays empty, so the wait is on the
-  phone side (projection and Maps starting) [inferred, no logcat].
-- Maps on the car screen asks to change the phone's location settings and
-  searches for GPS: the head unit offers no location sensor, so the phone's
-  own GPS has to be on and allowed.
-- No audio arrived (nothing was played).
-
-**Ack pacing at 25 fps makes it worse.** With `fps=25` the slow start never
-ended: ~50 s of video at 3.6-6.8 fps, far under the cap, while the ping
-round trip grew from ~0.85 s to ~8.4 s and the `frame age` from +2.4 s to
-+8 s. So the phone **queues** frames, it doesn't drop them. Held acks
-waited up to 730-860 ms, far beyond one 40 ms period: the frames came in
-bursts of up to ~20, past `max_unacked` 1, and their acks went out 40 ms
-apart. Without pacing (`fps=0`) the same phone recovers to 30 fps after
-~20 s. Pacing seems to keep the phone in its backlog [inferred, one run
-each]. Its reason, a steady 25 fps for the DM642, is gone with the crop
-result below.
-
-Open points:
-
-- showing the video: the DM642 shows nothing from an 800-wide coded
-  picture, even with the SPS cropped to 720 (docs/android-auto.md §4.1).
-  The phone app's Android Auto mode runs this same session on the phone
-  (JNI, `Config::margin_w`/`margin_h`, `Session::touch`) and relays a
-  720-wide picture instead (docs/android-auto.md §4.3)
-- ack pacing: default back to `fps=0`
-- touch / knob input, audio out
+Details: [docs/android-auto.md](../../docs/android-auto.md).

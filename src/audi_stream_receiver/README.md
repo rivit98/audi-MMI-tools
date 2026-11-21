@@ -1,469 +1,103 @@
 # audi_stream_receiver
 
-The phone's screen on the MMI, over USB. An Android phone app
-(`android/`, the Audi streaming APK) captures its screen and sends it over Android Open Accessory (AOA): as
-[hardware H.264](#hardware-h264) by default, or as JPEG pictures, a few a
-second. This app receives it, decodes JPEG on the CPU and shows it full screen.
+The phone's screen on the MMI over USB. The Android app (`android/`, "Audi
+streaming") captures its screen and sends it over Android Open Accessory
+(AOA): as hardware H.264 (default) decoded by the DM642, or as JPEG pictures
+decoded on the CPU. The phone app also has an Android Auto mode
+([docs/android-auto.md §4.3](../../docs/android-auto.md)); the MMI side is the same.
 
 ```
-phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen + audi_stream_receiver.log
+phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen + log
 ```
 
-- **Run:** `audi_stream_receiver <sd_path>`. It runs until the SD card is pulled or
-  it gets SIGTERM/INT/HUP, so it is always the last app of a run.
-- **Output:** `audi_stream_receiver.log` in `var/` on the card (every USBDI result, state
-  change, frame and picture; a `cpu:` line every 10 s with the app's own
-  and the unit's CPU load, per thread, ` - HIGH` at 50 % own load). A failed handshake,
-  a removal or an io-media error also saves the system log to
-  `var/usb_slog_<time>.txt` (up to 6 per run), and while pictures or frames come
-  it is saved every 60 s into a new `var/usb_slog_periodic_<time>.txt`: when the
-  unit hangs or reboots the app's log just stops, and the last but one snapshot
-  was complete before it happened (a snapshot is `sloginfo` in the background,
-  ~150 KB to the card). `<time>` is `YYYYMMDD-HHMMSS-mmm` from the MMI's clock,
-  which starts at 1970-01-01 00:00 on every cold boot: the time since boot, so
-  names sort within one boot. The previous run's log is kept as
-  `audi_stream_receiver.prev.log`.
+- **Run:** `audi_stream_receiver <sd_path>` — runs until the SD card is
+  pulled or SIGTERM/INT/HUP, so it is always the last app of a run.
+- **Output** (`var/`): `audi_stream_receiver.log` (previous run kept as `.prev.log`),
+  `usb_slog_<time>.txt` at a failed handshake / removal / io-media error (up to 6),
+  `usb_slog_periodic_<time>.txt` every 60 s while streaming. `<time>` is time since boot.
 - **Build:**
 
   ```sh
-  make sd SD_APPS=audi_stream_receiver   # MMI side only (the default run has it last)
-  make test                 # unit tests: protocol, pictures, JPEG, UTF-8, wrap, drawing
-  make apk                  # android/out/audi_streaming.apk (= make -C android)
-  make apk-test             # Kotlin unit tests
-  make apk-install          # adb install -r, adb runs in the container
-  make aoa-host             # desk test: the PC plays the MMI, shows the stream in an 800x480
-                            # window; the newest picture lands in build/aoa-host/latest.jpg,
-                            # an H.264 stream in stream.h264
-  make plot RUN_DIR="<copied var/ folder>"   # the logs as plots, see Logs: plots
+  make sd SD_APPS=audi_stream_receiver
+  make test          # protocol, pictures, JPEG, live stream, camera tracker
+  make apk           # android/out/audi_streaming.apk; make apk-test, make apk-install
+  make aoa-host      # desk test: the PC plays the MMI (stop host adb first)
   ```
 
-  The phone app builds in its own image (`mmi-android`), the desk test in
-  `mmi-aoa-host`. For `apk-install` and `aoa-host`, stop a host adb server
-  first (`adb kill-server`): only one program can own the phone's USB
-  interface. The APK is signed with a fixed key in `android/keystore/`, so
-  reinstalls keep working after `make clean`.
-
-What the unit's USB stack does, and what that forces on a client:
-[docs/usb-stack.md](../../docs/usb-stack.md).
-
-## How it works
-
-**USB.** `audi_stream_receiver` connects to io-usb (`-lusbdi`) with a
-wildcard filter and does the
-[Android Open Accessory](https://source.android.com/docs/core/interaction/accessories/aoa)
-handshake with any new device (vendor requests 51/52/53). An Android phone
-re-enumerates as `18d1:2d00`/`2d01` with a bulk IN/OUT interface (`ff/ff`),
-no root or USB debugging needed. Android starts the phone app because its
-`accessory_filter.xml` matches manufacturer `mmi3g` / model
-`audi_stream_receiver`.
-
-**Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
-`type u8 | len u16 LE | payload`, max 2048 B. `HELLO`/`HELLO_REPLY` say who
-is at each end. The MMI sends `VIDEO_CAPS` with them: a landscape box
-(800×480, the whole screen), a portrait box (400×480, the left half),
-512 KB max per picture, and the formats it takes (bit 0 JPEG, bit 2 H.264;
-bit 1 was PNG, retired, not to be reused). A phone streams only to an MMI that sent it. A picture is
-`VIDEO_START` (id, w, h, format, size, the phone's downscale + encode ms)
-plus `VIDEO_DATA` chunks (id + ≤2046 B); the MMI answers `VIDEO_ACKS` (how
-many more pictures are shown / bad / dropped). The phone counts what it has
-in flight down by their sum, in no particular order: it keeps no ids. If
-nothing comes back for 3 s with pictures in flight, it starts counting from
-zero. `VIDEO_STOP` (or the link going down) brings back the status screen. `0x0A` (a status bar over a landscape
-picture) is retired, not to be reused. `STREAM_SETTINGS` (`0x0E`, ASCII `key=value ...`)
-carries the phone app's settings for the MMI's log only. The phone sends it when
-streaming starts on a link and whenever a setting changes, and logs the same line
-itself (`settings sent:`):
-
-```
-rx STREAM_SETTINGS len=181: up=81234567 format=H264 sending=H264 max_fps=25 bit_rate_kbit=4000 sharp=1 capture_mode=WEAVE hide_nav_bar=1 keep_screen_on=0 frame_kb=128 jpeg_q=90 android=30
-```
-
-`up` is ms since the phone booted (`SystemClock.elapsedRealtime`), to line the
-phone's log up with this one. `format` is the user's choice and `sending` what
-actually goes out (`JPEG` after a `REFUSED`). `frame_kb` is the current
-H264_CONFIG frame size, which the phone raises after a big frame. An older MMI
-logs it as `rx unknown frame type 0x0e` and ignores it. `0x02`/`0x03`/`0x08`
-are retired (below).
-
-**Pictures, phone side** (`CaptureService`, a MediaProjection foreground
-service). The phone mirrors its screen into a virtual display at **k
-times** the picture that fits the box (`VideoFit.factor`: the largest
-k ≤ 4 that fits the screen; a 1080×2340 phone captures 1600×736 for
-800×368, 880×1920 for 220×480), resized when the phone turns. When fewer
-than two pictures are in flight and 1/*Max fps* (slider 1–15, default 5)
-has passed, it takes the newest image, averages each k×k block into one
-pixel (`Downscale.box`), compresses it as JPEG q90 and sends it. A static screen sends
-nothing; after a replug the new link gets the last picture again. The k×
-capture is there because Android's own one-step bilinear scale skips most
-of a thin text stroke past 2:1 (blurred text, see [Results](#results-on-the-car)).
-The activity is not recreated when the phone turns (`configChanges` in the
-manifest), and it only ever clears the link it set itself: when it was
-recreated, the old activity's late `onClosed` cleared the new shared link,
-and the capture service waited for an MMI that was connected all along.
-
-**Pictures, MMI side.** It reassembles the picture (`vasm.h`), decodes it
-on the main thread (`video.cpp`, stb_image), draws it and acks it. A picture
-stays in flight until its ack. With two in flight the next
-picture is already waiting when the current one is shown; only the newest
-waiting one is kept, so a slow MMI lowers the rate instead of queueing.
-
-**The JPEG cap** (`jpeg_pacer.h`). Unpaced, a moving screen kept the main
-thread 91–100 % busy for minutes, at 4.5–5.8 fps (moving content) to
-7.4–8.3 fps (static): the HMI and navigation starved (`hbhogs: 92%`, an
-`MMI3GNavigation` run fault, `dev-ipc: RX watchdog elapsed`) and the unit
-later rebooted [confirmed]. A picture costs decode ~66 ms + render ~23 ms +
-copy and flip 25 ms (still) to ~160 ms (all changed). So the MMI takes at
-most `kMaxJpegFps` = 5 pictures a second (200 ms from take to take), and
-after a picture that took T ms of main-thread time (decode + render + copy +
-flip) it rests at least T ms: the main thread stays at ~50 % or less however
-big the pictures get. The cap lives on the MMI, in the acks: the phone sends
-the next picture only with fewer than two in flight, so the shown picture's
-ack is held until the next may be taken, and the phone waits instead of
-sending pictures that would only be thrown away. Nothing changed on the
-phone, so old and new APKs both work with it. A picture that comes anyway
-waits undecoded (and is dropped, acked `Dropped`, if a newer one replaces
-it). T counts up to 1 s, far from the phone's 3 s ack timeout. Built, not yet
-confirmed on the car.
-
-The picture keeps the phone's shape, never rotated or stretched:
-
-- **Landscape** (w ≥ h): centred on the whole screen (800×368 for a 19.5:9
-  phone), alone: the state and video stats are in the log.
-- **Portrait**: full height on the left (220×480), the status panel in the
-  remaining ~580 px.
-
-CPU writes into the VFB run at ~9 MB/s, so a full copy costs ~160 ms. So
-`screen.c` keeps a RAM copy of each VFB surface and writes only the
-changed stretch of each row (a full copy every 30 s and for a new
-surface).
-
-**Robustness.** io-usb callbacks only queue events; a manager thread does
-the work. Unplugging, a transfer error, or a device that isn't Android
-(USB stick, iPod) never ends the app: it goes back to *Waiting for phone*.
-A link that breaks while the phone stays plugged in is reopened on the
-same device, up to 5 tries. `usbd_connect` is retried every 2 s if io-usb
-isn't there. It stops only on SD removal or SIGTERM/INT/HUP (no
-watchdog), then gives the screen back.
-
-## Logs: perf and CPU
-
-Every log line is fsynced to the card, so the threads that move pictures
-only put records into a RAM ring (`perf.cpp`), and a low-priority thread
-writes:
-
-- `perf: window` every 10 s of streaming and `perf: stream` when it stops:
-  pictures shown, fps, dropped, bad; avg/max ms of `rx` (USB), `wait`,
-  `decode`, `render`, `copy` (into the VFB), `flip` and `latency`
-  (`VIDEO_START` in to on screen); the JPEG count, KB, MMI decode
-  and phone time; VFB KB per picture, main loop busy %, process CPU %; and
-  the cap: `cap 5 fps: N delayed avg/max, N acks held avg/max` (pictures
-  that waited undecoded for the cap, and shown pictures whose ack it held,
-  with how long in ms).
-- Warnings, each at most once per 10 s with a count of the ones held back:
-  `perf: HIGH main load: main loop N% busy over 10.0 s of JPEG` (≥ 80 %), and
-  `perf: JPEG cap hit for the whole window: the phone sends faster than 5 fps`
-  (every picture of a window of 1+ fps waited for the cap).
-
-At the first picture of a stream: `video: JPEG fallback, cap 5 fps, duty <= 50%`.
-The first three pictures of a stream are also logged one by one. With a
-1 ms clock tick (`perf: clock resolution`), single µs values are good to
-±1 ms; averages are fine.
-
-`src/common/cpumon.c` (always on) reads once a second the app's own CPU
-time, each thread's, and the kernel idle thread's (procnto pid 1), and
-every 10 s logs
-
-```
-cpu: 10.0 s: self 27% (max 41%), unit 55% (max 90%), others 28% | main 18%, usbd 6%, usb 2%, perf 1% | mem free 141 MB, heap 3.2 MB
-```
-
-`others` is the rest of the unit (navigation, media, HMI). `usbd` is
-io-usb's callbacks (USB receive), `usb` the manager thread; threads under
-0.5 % are left out. `mem free` is the unit's free RAM (QNX reports it as the
-size of `/proc` [unverified on this unit]). `heap` is this app's malloc'ed
-bytes in use (`mallinfo`). A window with own load ≥ 50 % ends in ` - HIGH`.
-The screen footer shows the last second.
-
-**slog markers** (`src/common/slogmark.h`). slog stamps its lines with the
-wall clock, which is 1970 after a cold boot. So the app writes its own lines
-into the system log, each with this log's time:
-
-```
-Jan 01 00:08:20    6 30000     0 audi_stream_receiver: t=123456 ms cpu: self 9%, unit 41%, free 141 MB
-```
-
-There is one with every `cpu:` window (10 s), and one at start and exit, at H.264
-stream start and end, at an io-media error, at a `REFUSED` and at JPEG start and
-stop. In a `usb_slog_*.txt` snapshot, the lines between two markers happened
-between those two log times. The unit's libc has no `slogf()`, so the record
-goes to `/dev/slog` by `write()` in openqnx's layout. The cost is one write to
-slogger's RAM buffer, no card I/O. Built, not yet confirmed on the car.
-
-## Logs: plots
-
-`make plot RUN_DIR="<run>"` (`tools/plot_stream_perf.py`, in the `mmi-plot`
-image) reads every `audi_stream_receiver*.log` of a copied `var/` folder (the
-current and the `.prev` run), writes
-`<log name>.png` next to it and prints a summary per log: time per mode, avg /
-max fps, how much of the time the main loop was ≥ 80 % busy, errors. The
-panels share one time axis, seconds since the app started:
-
-| Panel | From |
-|---|---|
-| CPU: self, unit, others, the main thread; main loop busy (dots) | `cpu:` lines; `perf: window` busy; shaded = a ` - HIGH` window |
-| Memory: the unit's free RAM (our heap range in the title) | `cpu:` lines |
-| H.264 per second: frames, skips, io-media reads, waited, evicted | `h264:` windows |
-| H.264 lag: median, min–max band | `h264:` windows |
-| H.264 data: kbit/s of the frames as sent (largest frame in the title) | `h264:` windows |
-| JPEG per second: shown, dropped, held back by the cap | `perf: window` lines |
-
-Vertical lines across all panels mark stream start / end, config, io-media
-error, REFUSED, rear camera up / off, USB link up / down, `HIGH main load`,
-`WARNING` lines and the phone's `STREAM_SETTINGS`. Logs from before a field existed still plot; that series is
-just missing. `make plot-test` checks the parsing.
+  The APK and the SD card must come from the same build.
 
 ## Using it
 
-1. Install the APK on the phone. Insert the SD card. The MMI says
-   *Waiting for phone*.
-2. Plug the phone into the car's USB port. The status bar goes amber
-   (*switching*), then blue. The phone asks to open Audi streaming for this
-   accessory: accept, and the bar turns green, *Connected*.
-3. On the phone, tap **Stream screen** and allow the screen capture. The
-   phone's screen appears on the MMI: landscape on the whole screen,
-   portrait on the left half with the status panel beside it.
-   *Format* on the phone picks H.264 (the
-   default) or JPEG.
-4. Use the phone as usual. Back, Home, other apps, turning the phone,
-   unplugging and replugging all keep the stream going. Stop it in the
-   app or from its notification. Pull the SD card to end the MMI side.
-5. Or slide the app to its **Android Auto** page: the phone becomes the
-   head unit for Android Auto on itself, and the MMI shows Android Auto
-   (needs Android Auto's developer head unit server;
-   [docs/android-auto.md](../../docs/android-auto.md) §4.3). Slide back to
-   Screen for mirroring. The MMI side is the same for both.
+1. Install the APK, insert the SD card: the MMI says *Waiting for phone*.
+2. Plug the phone in and accept "open Audi streaming": the bar turns green, *Connected*.
+3. Tap **Stream screen** and allow the capture. *Format* picks H.264 (default) or JPEG.
+4. Rotating, Back/Home, unplug/replug keep the stream going. Stop it in the
+   app; pull the SD card to end the MMI side.
 
-## Hardware H.264
+## How it works
 
-Besides JPEG pictures decoded on the CPU, the app takes an **H.264
-stream** and has the unit's DM642 decode it: no CPU decoding, ~25 fps,
-0.4–0.65 s added by io-media ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §7.10).
-On the phone: *Format* **H.264**, the default (Android 10+). The phone encodes its
-screen in hardware at 720×432 (the MMI's 720×576 limit, the screen's 5:3
-shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
-25 fps and fills the rest with skip frames.
+- **USB:** io-usb with a wildcard filter, AOA handshake with any new device;
+  the phone's `accessory_filter.xml` matches `mmi3g` / `audi_stream_receiver`.
+  Non-Android devices, unplugging and transfer errors never end the app
+  ([docs/usb-stack.md](../../docs/usb-stack.md)).
+- **Protocol** (`proto.h` = `android/.../Proto.kt`): `type u8 | len u16 LE | payload`,
+  max 2048 B. `HELLO`, `VIDEO_CAPS` (boxes, formats, limits), `VIDEO_START` +
+  `VIDEO_DATA`, batched `VIDEO_ACKS`, `VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`
+  (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only).
+  **Retired, never reuse:** `0x02` TEXT, `0x03` ACK, `0x08` VIDEO_ACK, `0x0A` status bar,
+  `VIDEO_CAPS` format bit 1 (PNG).
+- **JPEG:** the phone captures at k× and box-averages k:1 (sharp text), JPEG
+  q90. The MMI decodes on the main thread (stb_image), copies only changed
+  row spans into the VFB, and caps itself at 5 pictures a second and ≤ 50 %
+  main-thread duty by holding acks (`jpeg_pacer.h`).
+- **H.264** (`hwvideo.cpp`, `src/common/hw_stream.h`): 720×432 Baseline from
+  the phone's MediaCodec → CS-MP4 stream served by our own resource manager
+  at `/dev/audi_stream/live.mp4` → io-media → VCAP 0 input 1. 25 fps stream
+  clock with skip-frame gap fill; a clock cap (> 500 ms ahead) and an io-media
+  catch-up (> 12 frames behind) drop frames and resume from an IDR. Frames
+  are capped at 128 KB. Up to 3 io-media errors per 60 s restart the stream,
+  then `REFUSED` (JPEG fallback). Details:
+  [docs/phone-mirroring.md §7.10–7.13](../../docs/phone-mirroring.md).
+- **Rear camera:** `common/camera.cpp` follows the camera from dev-videoctrl's
+  slog lines; while it is up the app writes nothing to VP1 and shows
+  nothing, and retakes the screen 1 s after it ends
+  ([docs/rear-camera.md §9](../../docs/rear-camera.md)).
+- **Logging:** hot threads only write to a RAM ring (`perf.cpp`); a
+  low-priority thread writes the log. `slogmark.h` writes markers with the
+  log's time into the system log.
 
-- **Protocol** (`proto.h`): `VIDEO_CAPS` sets bit 2 (H.264) and appends the
-  limits (720×576, 25 fps, frames up to 128 KB). The phone sends
-  `H264_CONFIG` (0x0B: fps, the largest frame, SPS, PPS, VCAP 0's field
-  mode), then its frames
-  as `VIDEO_START` / `VIDEO_DATA` with format 3 (Annex-B, one frame each).
-  `VIDEO_ACKS` counts them as they enter the stream, every 5 frames or
-  200 ms (`ack_batch.h`), well under the phone's 12 in flight. The MMI answers `H264_STATUS` (0x0C): `PLAYING`, `SYNC`
-  (send an IDR), `REFUSED` (fall back to pictures, H.264 tried again after
-  a back-off), `CONFIG` (send the config again).
-- **`hwvideo.cpp`** checks the config (Baseline, level ≤ 3.0, ≤ 720×576,
-  `live::check_decodable`), then runs `src/common/hw_stream.h` on its own
-  thread: the CS-MP4 header from the phone's SPS/PPS, frames padded to the
-  config's size (in 4 KB steps), a resource manager at
-  `/dev/audi_stream/live.mp4`, the io-media graph once the first IDR is
-  in, the picture 1 s later. Gaps are filled with skip frames. A stream
-  more than 500 ms ahead of its frame clock (a phone faster than 25 fps, a
-  burst after a stall) drops frames until it is on time, then goes on from
-  an IDR (`live_stream.h`, clock cap): the lag can't grow. When
-  io-media reads more than 12 frames behind the newest one (it reads
-  slower than 25 fps: frames too big), frames are dropped until it is back,
-  then the stream goes on from an IDR (`live_stream.h`, catch-up): a short
-  freeze instead of an io-media error. A new
-  config restarts the stream; the same config again changes nothing. The
-  stream ends on `VIDEO_STOP`, a JPEG picture, unplugging, or when
-  its declared frames run out (the 4 GB limit: ~1.6 h at 28 KB frames,
-  ~45 min at 64 KB; then it starts again and asks for an IDR). The last
-  8 MB of frames are kept for io-media (16-128 frames).
-- **The rear camera shares VCAP 0** (docs/rear-camera.md §9): an app that
-  sets VP1, or disables it, while the camera is up hides the camera from
-  the driver. `common/camera.cpp` follows the camera from dev-videoctrl's
-  slog lines. While it is up the app writes nothing to VP1 and shows nothing,
-  and the stream runs on unseen. A second after it ends the picture comes
-  back (the CPU-drawn screen too), and if the camera starts just then it gets
-  its path back. Otherwise `/dev/videoctrl` is touched only when the user
-  starts or stops streaming. A restart (new config, stream full) keeps the picture and
-  VCAP as they are and swaps only the io-media graph and the server.
-  **When io-media reports an error** (it fell behind past the ring, or the
-  HMI took the video for its media or the camera), the stream ends without
-  touching `/dev/videoctrl` and starts again from the same config at once
-  (~1-2 s black); the phone's frames go on into it from the next IDR. Up to
-  3 errors per 60 s restart it (`config_gate.h`, `ErrorRestarts`; a new
-  config starts the count again). One more within those 60 s and the phone is told
-  `REFUSED`; the phone tries H.264 again later (5 s, doubling up to 60 s).
-  Restarted after an io-media error, not yet confirmed on the car. If no
-  new stream follows a restart within 5 s, the CPU-drawn screen comes back.
-- **io-media reads every padded byte, and too many are more than it reads in
-  time** [confirmed: 11 of 11 `ERROR event: Input/output error` in one
-  27-minute session, the `h264:` windows and `at the error:` dumps]. With
-  256 KB frames (6.7 MB/s) its reads keep up for ~20 s, then fall behind by
-  ~1 frame a second (`waited` drops to 0, `reader B frames behind` grows).
-  Once past the 8 MB ring (31 frames) a read gets filler, and io-media fails
-  ~45 s after the config. 144 KB frames drift ~0.4 frame a second and failed
-  after 210 s; 128 KB frames (3.4 MB/s) kept up for 70–90 s without drift.
-  A bigger ring only delays the error, and the picture is as late as the
-  reader is behind. So the MMI announces 128 KB as its largest frame, and
-  the catch-up drops frames before the ring runs out [built, not yet
-  confirmed on the car].
-- **The phone side** (`android/`, `CaptureService.kt`, `HwEncoder.kt`):
-  MediaCodec, Baseline 3.0, CBR at the *H.264 rate* drop-down (2.5, 4
-  (default) or 6 Mbit/s; 8 Mbit/s made IDRs of up to ~170 KB, over the
-  MMI's 128 KB). With *Sharp H.264* (default on) the screen
-  is captured at k× and box-filtered k:1 on the GPU into the encoder
-  (`GlScaler.kt`), as the pictures are; off = the direct capture path,
-  which blurs text (docs/phone-mirroring.md §7.13). An IDR only at the start and
-  when the MMI asks (`I_FRAME_INTERVAL` 10 s); frames are never dropped
-  on their own (the ones after would be garbage): a frame bigger than the
-  config's `frame_bytes` (64 KB at first) raises it (a new config, the MMI
-  restarts its stream, ~1-2 s black; the size stays for the rest of the
-  streaming session, also when the encoder restarts), and a queue of over 25 unacked
-  frames is thrown away up to the next IDR. If the encoder puts other
-  SPS/PPS before its IDRs than in its codec config, those become the
-  config. The phone app's status line shows rate, frame sizes and drops.
-- **Desk test** (`make aoa-host`): the PC plays the MMI, checks every frame
-  as the MMI would, shows the stream in an 800x480 window laid out like the
-  MMI's screen and saves it to `build/aoa-host/stream.h264` (`ffplay` it). The
-  timestamped log tells a freeze ("no frames for") from a stop ("stream ended:
-  VIDEO_STOP"). Acks go out at once, so this shows when the phone stops sending,
-  not the MMI's timing. A toolbar under the window (keys 1-9) plays the MMI's
-  faults to the phone (`tools/aoa_sim.py`): *Refuse* (`REFUSED`, as after too
-  many io-media errors), *Sync*, *Config* (`CONFIG_WANTED`), *Hold acks* (3 s),
-  *Stall USB* (3 s), *Drop link* (port reset), and the switches *Slow acks*
-  (5 a second), *io-media* (a read model at ~6.4 MB/s of padded frames: 256 KB
-  frames fall behind into an io-media error as on the car, then the stream
-  restarts as on the MMI; 128 KB ones keep up)
-  and *Catch-up* (the MMI's drop until io-media is back). Its status line shows
-  held acks and how far the modelled io-media reads behind.
-- **Latency:** stream a stopwatch app and take one photo of the phone
-  and the MMI together: the difference is the delay
-  (docs/phone-mirroring.md §7.12).
-- **The screen:** while the stream runs, the main loop closes the
-  CPU-drawn screen (the video displayable replaces it) and opens it again
-  afterwards.
-- **Log:** `h264:` lines: the config, the stream's start and end with its
-  totals (`ahead of the clock`: frames the cap dropped, how often, the
-  furthest ahead), refused frames (the first 5), `over 500 ms ahead of the
-  frame clock` each time the cap starts, and every 10 s frames in, skips,
-  io-media's reads and the lag. In detail:
-  - At the start: `h264: ring N frames = X.X s (S-byte frames)`, the frames
-    kept for io-media (8 MB: 62 frames = 2.5 s at 128 KB frames).
-  - The 10 s window, all counts for the window only: `... io-media R reads,
-    W waited (max M ms), lead MIN/LAST/MAX frames; lag min/median/max ms (N
-    TIME, K not kept), position P s; evicted E, far F, eof O, unblocked U;
-    reader B frames behind, ring N frames; data D kbit/s, frames avg A / max X
-    KB, I IDR`. `max M` is the longest wait in the window; `K not kept` is the
-    TIME events whose frame had already left the ring (they have no lag, so
-    they are not in min/median/max); `data` is the frames as the phone sent
-    them, before padding: the real bit rate, the average and largest frame, and
-    the IDRs. `lead` is how far past the newest frame a read
-    asked (`last`: the window's last read); `evicted` reads of a frame no
-    longer kept, answered with filler (per frame a read touches); `far` reads
-    > 10 s ahead, answered at once with filler; `eof` reads answered with 0
-    bytes; `unblocked` reads io-media gave up on; `reader B frames behind`:
-    the newest frame minus the furthest byte io-media was answered, at log
-    time.
-  - `stream ended (...)` adds totals `C catching up (T times, max B frames
-    behind)` (frames dropped while io-media caught up) and `E evicted, F far,
-    O eof; ring N frames = X.X s`.
-  - `h264: io-media reads over 12 frames behind the newest ...: dropping
-    frames until it is back, then an IDR`: a catch-up started.
-  - On an io-media `ERROR` event, before the stream goes: `h264: at the error:`
-    (frames in, the reader's byte, reads waiting, evicted, ring, the cpumon
-    load of the last second), the last 32 reads (`h264:   <ms>: #seq
-    offset+bytes, frames a..b, lead L, n bytes after w ms` or `still waiting`,
-    plus `far: filler` / `filler: e evicted, a not pushed`), the last 16
-    io-media events (`h264:   <ms>: TIME 12.3 s of 3600.0 s`, `STATUS state 4
-    speed 1000`, `ERROR iom_errno=0x...`), and a slog snapshot (`usb: slog
-    snapshot N (io-media error)`).
-  - Warnings, each at most once per 10 s with a count of the ones held back:
-    `h264: WARNING io-media waited for none of R reads` (a window with no
-    waited read after one with some), `h264: WARNING io-media read a frame no
-    longer kept` (the first evicted read of a stream), `h264: WARNING lag
-    median N ms, over 1000 ms`.
-  - `h264: tx H264_STATUS REFUSED (reason: ...)`: `malformed H264_CONFIG`,
-    `config not decodable`, `stream setup failed`, `the graph would not play`,
-    `io-media error` (after `h264: N io-media errors in 60 s: giving up`).
-  - `h264: starting the stream again after the io-media error (N of 3 allowed
-    in 60 s)`: the restart after an io-media error.
-- **Tests:** on the build host, `make test` (header, padding, push / fill
-  / read, skips decoded by ffmpeg) and `make apk-test` (the phone's
-  protocol and H.264 helpers); the same MMI code with a clip instead of
-  the phone runs in hello9 (`src/hello9/README.md`). This is a C++ app
-  (`docs/cpp-apps.md`).
+## Log lines
 
-## Retired frame types: `0x02`, `0x03`, `0x08`
+| Line | What |
+|---|---|
+| `rx HELLO ... build <v>` | the phone app's version: check it first |
+| `rx STREAM_SETTINGS` | the phone's settings (format, fps, bit rate, frame size, …) |
+| `cpu:` (10 s) | app and unit CPU, per thread, free RAM, heap; ` - HIGH` at ≥ 50 % own load |
+| `perf: window` (10 s) / `perf: stream` | JPEG: fps, dropped, bad, rx/decode/render/copy/flip/latency ms, cap holds |
+| `h264: config:` | the stream's frame cap and size |
+| `h264: 10.0 s:` | frames in, skips, io-media reads/waits/lead, `lag min/median/max`, reader behind, data rate |
+| `h264: stream ended` | totals: refused, bad, ahead of the clock, catch-up, evicted |
+| `h264: at the error:` | on an io-media ERROR: last 32 reads, last 16 events, slog snapshot |
+| `h264: tx H264_STATUS REFUSED (reason)` | why H.264 was refused |
+| `camera:` / `videoctrl` | rear camera on/off, VCAP changes |
 
-The phone app could once send typed text: `TEXT` (`0x02`, `seq u16` +
-UTF-8), answered by `ACK` (`0x03`). It was removed on both sides
-(`Proto.kt`, `proto.h`, `tools/aoa_host.py`, the MMI's message list):
-the link is for the phone's screen. The numbers are **retired, not
-free**: an old phone app that still sends `TEXT` gets `rx unknown frame
-type 0x02` in the log and nothing else. Don't reuse them.
+`lag` is MMI-side only (io-media's queue); the phone's capture, encoder and USB are not in it.
 
-`VIDEO_ACK` (`0x08`: `id u16`, `status u8`, `decode_ms u16`) acknowledged one
-picture per message. `VIDEO_ACKS` (`0x0D`) replaced it, without the decode time, which
-only the phone's status line showed (the MMI's own screen and log still have it).
-The APK and the SD card must be from the same build: an older phone app waits 3 s
-per window for acks that it does not understand, so it crawls.
+## Results
 
-## Results on the car
+**Works**
+- AOA end to end (Redmi Note 8 Pro); reconnects on its own.
+- JPEG: 2–4 fps (set by the phone), latency 80–160 ms, rotation works, 0 bad.
+- H.264: 720×432, sharp text, 22–25 fps, lag ~500 ms (~1.1 s on a session's
+  first stream), MMI CPU ~30 % (receiver 6–9 %).
+- Rear camera takes the screen and the stream comes back after it.
 
-Phone: Redmi Note 8 Pro.
+**Doesn't work / known**
+- Landscape only for H.264 (portrait shows a "turn the phone" card).
+- The stream stops when the phone locks (Android revokes the capture);
+  *Keep screen on* avoids the timeout lock.
+- Rotation or frame-size growth restarts the graph, often several times.
+- 256 KB frames made io-media fall behind and fail ~45 s in: hence the 128 KB cap.
 
-**USB / AOA.** The path works end to end: AOA switch (`GET_PROTOCOL`
-version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
-`0x01`, `HELLO` / `HELLO_REPLY`.
-
-- On the first connection the phone needs two AOA `START`s before it
-  comes back as an accessory.
-- An accessory session that nobody opens on the phone drops after ~18 s;
-  the app reconnects by itself.
-- In some boots EP0 requests to the same phone failed with
-  `DEV_NOANSWER` (docs/usb-stack.md).
-
-**JPEG pictures.** Work, turning the phone included (landscape
-800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped.
-
-| | full VFB copy | changed-span copy |
-|---|---|---|
-| copy into the VFB | ~160 ms (1.5 MB) | 18–19 ms (~30 KB) |
-| present (render + copy + flip) | ~200 ms whatever the size | render 23 + copy 18–19 + flip 3 ms |
-| rate | ~2 fps | 2–4 fps per 10 s window (avg ~3), set by the phone |
-
-- Decode: landscape 800×368 JPEG 55–65 ms; portrait 220×480
-  JPEG ~22 ms. A landscape picture costs the MMI ~100 ms in total, so it
-  could do ~10 fps; the phone (*Max fps*, a static screen, its capture and
-  compress) sets the rate. Gaps between pictures 92–668 ms.
-- Latency (`VIDEO_START` in to on screen): 80–160 ms average, max 285 ms.
-- Main loop 18–56 % busy, process CPU ~27 %. The unit's CPU goes from
-  ~25 % to 40–60 % while streaming.
-- **Blurred text, cause:** the MMI copies the picture 1:1 (ARGB, no
-  scaling), so blur comes from the phone. Capturing at the picture's own
-  size makes Android scale the 2340×1080 screen down 2.9:1 (landscape) /
-  4.9:1 (portrait) in one bilinear step, which skips most of a thin
-  stroke's pixels; JPEG q60 added ringing. Hence the k× capture + k×k box
-  average and JPEG q90.
-- The stream stops when the phone locks: Android revokes the screen
-  capture and the phone sends `VIDEO_STOP`. *Keep screen on while
-  streaming* stops the screen timeout from locking the phone (the screen
-  may dim); the power button still locks it.
-- **Phone log:** the app keeps its own log, up to 2 MiB:
-  `adb pull /sdcard/Android/data/mmi3g.audistreaming/files/audi_streaming.log`
-  (older lines in `.log.1`). It has screen and lock events, focus changes,
-  how each projection ended, why Android ended earlier processes, and a
-  status line every 5 s. A status line with `encoded` growing but no
-  `display frames` means a frozen picture; gaps between lines mean the CPU
-  slept.
-
-**H.264.** Works well on the MMI: 720×432 Baseline, text sharp, landscape
-only (a portrait phone shows a "turn the phone to landscape" card), 22–25 fps on a moving screen (a still screen sends fewer
-real frames, and skip frames fill up to 25). Lag is ~500 ms, ~1.1 s on the
-first stream of a session. MMI CPU ~30 % (receiver 6–9 %, up to 15 % with big
-frames, against ~45 % for JPEG). Every rotation or frame-size growth restarts
-the graph, usually several times in a row, with an occasional harmless
-`player: ERROR`: docs/phone-mirroring.md §7.13.
+**Built, not yet confirmed on the car**
+- JPEG cap, slog markers, restart after an io-media error, io-media catch-up.

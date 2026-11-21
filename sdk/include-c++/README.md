@@ -14,7 +14,7 @@ As with any g++, `.c` files are compiled as C++. To mix in C files, put
 `-x c` before **each** one: g++'s driver applies it to the next file only.
 The Makefile's `CXX_APPS` rule does this.
 
-**Status:** `src/hello8` (18 checks) passes on the build host with
+**Status:** `src/hello8` (19 checks) passes on the build host with
 glibc's libstdc++ (`make test`) and **on the car**
 ([`src/hello8/README.md`](../../src/hello8/README.md)). Its `atomics
 stress` confirmed the gUSA problem described below: gUSA `fetch_add` loses

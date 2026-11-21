@@ -25,8 +25,8 @@ hold **MENU + rotary knob + top-right soft key**. Details:
 
 ## Apps
 
-Each app lives in `src/<app>/` with a README (what it does, how to run it,
-what it showed on the car). Shared code is in [src/common/](src/common/).
+Each app lives in `src/<app>/` with a README (what it verifies, what works
+and what doesn't). Shared code is in [src/common/](src/common/).
 
 | App | What it is | On the car |
 |---|---|---|
@@ -35,7 +35,7 @@ what it showed on the car). Shared code is in [src/common/](src/common/).
 | [hello2](src/hello2/README.md) | OpenGL ES bring-up, full EGL/GL diagnostics | works |
 | [hello3](src/hello3/README.md) | GPU canvas, fill-rate benchmark | works |
 | [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark | works up to 12 lit tori; 16 froze the unit |
-| [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) | works on one output; step `d` not yet run |
+| [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) | works on one output; step `d` pending |
 | [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode | done (5 of 10 clips play) |
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
@@ -82,7 +82,6 @@ What is built but not yet confirmed is listed in each app's README and in
 | [gpu-results.md](docs/gpu-results.md) | GL measurements, budgets, the freezes |
 | [cpp-apps.md](docs/cpp-apps.md) · [sdk/include-c++](sdk/include-c++/README.md) | C++ rules · how the C++ runtime is put together |
 | [qnx-sh-fpu-div0.md](docs/qnx-sh-fpu-div0.md) | why a divide by zero is a fatal SIGFPE |
-| [gcc-sh4-treg-bug.md](docs/gcc-sh4-treg-bug.md) | the GCC 12 miscompile and the build canary |
 | [usb-stack.md](docs/usb-stack.md) | io-usb / libusbdi behaviour, AOA |
 | [phone-mirroring.md](docs/phone-mirroring.md) | video decoder, display path, streaming options and results |
 | [android-auto.md](docs/android-auto.md) | what an Android Auto receiver would need |

@@ -811,8 +811,7 @@ clip files]:**
 ### 7.10 Live H.264 streaming through io-media
 
 hello9's tests, played through its own io-media client on VCAP 0 input 1
-only. Details per test: [src/hello9/README.md](../src/hello9/README.md),
-"On the car".
+only. The test list: [src/hello9/README.md](../src/hello9/README.md).
 
 | test | result |
 |---|---|
@@ -897,7 +896,7 @@ The receiver's use of this code plays the phone's stream on the car
 freezes on exactly the last frame before each pause and goes on with nothing
 skipped, including POC type 2 with several non-reference skips in a row, and
 in `slow` skips make a 15 fps sender up to 25 with a steady lag. Clumped
-arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
+arrival (`burst`) doesn't show.
 
 - **`src/common`, C++ (Makefile group `LIVE`):**
   - `h264`: Annex-B → NAL units and frames; SPS / PPS / slice header

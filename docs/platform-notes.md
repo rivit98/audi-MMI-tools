@@ -15,11 +15,6 @@ Disassembly was done with IDA/objdump on the firmware libraries in
 
 - Debian sid `gcc-16-sh4-linux-gnu` (16.2.0) driven as a QNX 6.3 SH4
   compiler by `sdk/shle-nto-gcc` produces binaries the MMI loads and runs.
-- **`-O2` is correct under GCC 16.** GCC 12.2 miscompiles `a == 0 && b == 0`:
-  `lmprobe`'s on-car canary reads `MISCOMPILED` under GCC 12 and `correct`
-  under GCC 16, on the same unit. See [`gcc-sh4-treg-bug.md`](gcc-sh4-treg-bug.md).
-- The build-time canary (`sdk/canary.c`) stays, because the SDK image is
-  `FROM debian:sid-slim` — a rolling base whose GCC 16.x can change under us.
 - **Code is built for SH-4A with LL/SC atomics** (`-m4a
   -matomic-model=hard-llcs`). GCC's sh4 default, gUSA atomic sequences,
   loses updates under QNX, whose kernel doesn't restart them (hello8
@@ -349,8 +344,8 @@ management switches that source on.
 
 ### How `TDM1_20_SAD` behaves next to the car's own audio
 
-Measured from recordings of 880 Hz ping trains (a 0.5 s ping every 2 s), with
-details in [`src/hello5/README.md`](../src/hello5/README.md):
+Measured from recordings of hello5's 880 Hz ping trains (a 0.5 s ping every 2 s,
+[`src/hello5/README.md`](../src/hello5/README.md)):
 
 - **It replaces the radio, it doesn't mix.** For the whole of the file,
   everything between the pings is at the recording's noise floor (15–25 dB
