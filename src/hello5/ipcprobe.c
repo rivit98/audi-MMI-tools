@@ -29,7 +29,7 @@
 #define PIDIN_TIMEOUT 15        /* s, per pidin call */
 #define PIDIN_CALLS   3         /* per process: threads, fd, arg */
 #define TOOL_TIMEOUT  10        /* s, sloginfo / pidin arg for the pids */
-#define TOOL_CALLS    2
+#define TOOL_CALLS    3        /* + the /proc diagnosis */
 
 struct pinfo {
 	const char *want;       /* basename looked for */
@@ -119,7 +119,7 @@ static int pid_alive(pid_t pid)
 
 /* The /proc walk: every pid's name, counting each way it can fail, so a
  * walk that finds nothing says why. */
-static void walk_proc(void)
+static unsigned walk_proc(void)
 {
 	char name[NAME_MAX_LEN], samples[160];
 	unsigned entries = 0, pids = 0, named = 0, open_fail = 0, dev_fail = 0;
@@ -130,7 +130,7 @@ static void walk_proc(void)
 
 	if (d == NULL) {
 		log_msg("procs: opendir /proc: %s", strerror(errno));
-		return;
+		return 0;
 	}
 	samples[0] = '\0';
 	while ((e = readdir(d)) != NULL) {
@@ -172,6 +172,32 @@ static void walk_proc(void)
 	        dev_fail ? strerror(dev_err) : "-");
 	if (named > 0)
 		log_msg("procs: first names: %s", samples);
+	return named;
+}
+
+/* When /proc named nothing or missed one of procs[]: what the shell sees
+ * of it, so the reason is on the card rather than a guess. */
+static void proc_diag(const char *out_dir)
+{
+	char path[256], cmd[512];
+	usize len;
+	int i, st;
+
+	if (out_dir == NULL)
+		return;
+	snprintf(path, sizeof(path), "%s/hello5_procdiag.txt", out_dir);
+	unlink(path);
+	len = (usize)snprintf(cmd, sizeof(cmd),
+	                      "id; ls -ld /proc /proc/self /proc/1 /proc/%d; "
+	                      "ls -l /proc/%d; ls /proc | head -40",
+	                      (int)getpid(), (int)getpid());
+	for (i = 0; i < NPROCS && len + 64 < sizeof(cmd); i++)
+		if (procs[i].pid != 0)
+			len += (usize)snprintf(cmd + len, sizeof(cmd) - len,
+			                       "; ls -l /proc/%d", (int)procs[i].pid);
+	st = proc_shell(path, TOOL_TIMEOUT, cmd);
+	log_msg("procs: /proc diagnosis -> hello5_procdiag.txt: %s",
+	        proc_status_str(st));
 }
 
 /* The pids /proc did not give, from the text of a unit tool run into
@@ -213,6 +239,7 @@ static void find_procs(const char *out_dir)
 {
 	static int done;
 	char name[NAME_MAX_LEN];
+	unsigned named;
 	int i, stage, rc;
 
 	if (done)
@@ -222,9 +249,14 @@ static void find_procs(const char *out_dir)
 	log_msg("procs: uid %d euid %d; own name through /proc: %s%s",
 	        (int)getuid(), (int)geteuid(), rc == 0 ? name : strerror(rc),
 	        rc == 0 ? "" : stage == NAME_OPEN ? " (open)" : " (devctl)");
-	walk_proc();
+	named = walk_proc();
 	scan_tool(out_dir, "hello5_sloginfo.txt", "sloginfo");
 	scan_tool(out_dir, "hello5_pidin_arg.txt", "pidin arg");
+	for (i = 0; i < NPROCS; i++)
+		if (procs[i].pid == 0 || strcmp(procs[i].how, "/proc") != 0)
+			named = 0;
+	if (rc != 0 || named == 0)
+		proc_diag(out_dir);
 	for (i = 0; i < NPROCS; i++)
 		log_msg("procs: %s: pid %d (%s)", procs[i].want, (int)procs[i].pid,
 		        procs[i].pid != 0 ? procs[i].how : "not found");

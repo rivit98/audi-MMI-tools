@@ -1087,21 +1087,27 @@ static int play_native(const struct step *s, const char *log_file, struct play *
  *   1  ask for the channel, no sound (6 s): is the radio quieter?
  *   2  6 pings on navi while it is open: heard over the quieter radio?
  *   3  give the channel back (6 s): is the radio back to normal?
- *   4  control: 3 pings on navi with no channel: silent, as before?
+ *   4  other sources, each: ask (5 s, no sound), 3 pings, give back:
+ *      does any of them lower the radio when NAVTTS does not?
+ *   5  control: 3 pings on navi with no channel: silent, as before?
+ * With no connection at all, 5 still plays: is navi heard without one?
  * Every HBDSI step is logged, so a failure says where it stopped. The
  * broker's interface list goes to var/hello5_broker.txt. */
 
 #define DUCK_IFACE        "SGAudioManagement"
 #define DUCK_ROLE         "AudioManagementDevCtrl"      /* its component */
 #define DUCK_MAX_CHIDS    8             /* channels of the server we collect */
-#define DUCK_TRY_CHIDS    3             /* and how many we send to */
+#define DUCK_TRY_CHIDS    8             /* and how many we send to */
 #define DUCK_MAX_IDS      (SVC_MAX_IDS + 2)
-#define DUCK_MAX_TRIES    6             /* ConnectRequests in all */
+#define DUCK_MAX_TRIES    24            /* ConnectRequests in all */
 #define DUCK_CONNECT_MS   1000          /* for a ConnectRequest reply */
+#define DUCK_BACK_MS      600           /* for the server to connect back */
 #define DUCK_TIMEOUT_MS   2000          /* for a server's reply */
 #define DUCK_HOLD_MS      6000          /* phases 1 and 3 */
 #define DUCK_PINGS        6             /* phase 2 */
-#define DUCK_CONTROL      3             /* phase 4 */
+#define DUCK_CONTROL      3             /* phase 5 */
+#define DUCK_SRC_HOLD_MS  5000          /* phase 4, per source, no sound */
+#define DUCK_SRC_PINGS    3             /* phase 4, per source */
 #define DUCK_DEVICE       1             /* io-audio "navi" (dindex 1) */
 #define DUCK_CHUNK_MS     250           /* PCM written this much at a time */
 
@@ -1224,30 +1230,52 @@ static int duck_internal(struct hbdsi *c)
 	}
 	svc_ids_rank(ids, nids);
 
-	for (i = 0; i < n && i < DUCK_TRY_CHIDS; i++) {
-		for (k = 0; k < nids && tries < DUCK_MAX_TRIES; k++) {
-			if (i > 0 && k > 0)
-				break;  /* a second channel is tried with the best id only */
+	/* the best id on every channel first, then the next id: an answer on
+	 * the wrong channel costs a ConnectRequest timeout at most */
+	for (k = 0; k < nids && tries < DUCK_MAX_TRIES; k++) {
+		for (i = 0; i < n && i < DUCK_TRY_CHIDS && tries < DUCK_MAX_TRIES; i++) {
+			unsigned waited = 0;
+			int back = 0;
+
 			tries++;
 			hbdsi_target(c, (u32)app, (u32)chids[i], ids[k]);
 			rc = hbdsi_connect(c, DUCK_CONNECT_MS);
 			if (rc != EOK) {
 				log_msg("step d: chid %d, server id 0x%08x: ConnectRequest: %s",
 				        chids[i], (unsigned)ids[k], strerror(rc));
-			} else if (ipc_connected_to(app, getpid(), c->chid[0])) {
+				hbdsi_close(c);
+				hbdsi_init(c);
+				continue;
+			}
+			/* it may connect back after its reply: give it a moment.
+			 * Two signs, each enough: its connection to our channel, or
+			 * any message or pulse on our channels. */
+			for (;;) {
+				back = ipc_connected_to(app, getpid(), c->chid[0]) ||
+				       ipc_connected_to(app, getpid(), c->chid[1]);
+				if (back || c->rx_msgs[0] + c->rx_msgs[1] +
+				            c->rx_pulses[0] + c->rx_pulses[1] > 0 ||
+				    waited >= DUCK_BACK_MS)
+					break;
+				nap(50);
+				waited += 50;
+			}
+			log_msg("step d: chid %d, server id 0x%08x: answered (its chids "
+			        "%u/%u pid %u), after %u ms: connected back %s, rx %u+%u "
+			        "messages %u+%u pulses", chids[i], (unsigned)ids[k],
+			        (unsigned)c->srv.chid[0], (unsigned)c->srv.chid[1],
+			        (unsigned)c->srv.pid, waited, back ? "YES" : "no",
+			        c->rx_msgs[0], c->rx_msgs[1], c->rx_pulses[0],
+			        c->rx_pulses[1]);
+			if (back || c->rx_msgs[0] + c->rx_msgs[1] > 0) {
 				log_msg("RESULT step d: %s answered on chid %d with server id "
-				        "0x%08x and connected back", DUCK_ROLE, chids[i],
-				        (unsigned)ids[k]);
+				        "0x%08x and %s", DUCK_ROLE, chids[i], (unsigned)ids[k],
+				        back ? "connected back" : "sent a message (no "
+				        "connection seen)");
 				snprintf(duck_note, sizeof(duck_note),
 				         "chid %d, server id 0x%08x", chids[i],
 				         (unsigned)ids[k]);
 				return 0;
-			} else {
-				log_msg("step d: chid %d, server id 0x%08x: answered (its chids "
-				        "%u/%u pid %u) but did not connect back: that id is not "
-				        "a service of it", chids[i], (unsigned)ids[k],
-				        (unsigned)c->srv.chid[0], (unsigned)c->srv.chid[1],
-				        (unsigned)c->srv.pid);
 			}
 			hbdsi_close(c);
 			hbdsi_init(c);
@@ -1266,10 +1294,10 @@ static void duck_log_attach(const struct hbdsi_attach_reply *r)
 	        (unsigned)r->client_id[1]);
 }
 
-/* RequestAudioFocus / ReleaseAudioFocus(eSRC_NAVTTS, eSNK_SPEAKERS). */
-static int duck_focus(struct hbdsi *c, int on)
+/* RequestAudioFocus / ReleaseAudioFocus(src, eSNK_SPEAKERS). */
+static int duck_focus_src(struct hbdsi *c, i32 src, int on)
 {
-	const i32 args[2] = { SGAM_SRC_NAVTTS, SGAM_SNK_SPEAKERS };
+	const i32 args[2] = { src, SGAM_SNK_SPEAKERS };
 	u32 id = on ? SGAM_REQ_AUDIO_FOCUS : SGAM_REQ_RELEASE_FOCUS;
 	unsigned t0 = log_ms();
 	int rc = hbdsi_request(c, id, args, 2, DUCK_TIMEOUT_MS);
@@ -1279,6 +1307,26 @@ static int duck_focus(struct hbdsi *c, int on)
 	        (int)args[1], (unsigned)id, strerror(rc), log_ms() - t0);
 	return rc;
 }
+
+static int duck_focus(struct hbdsi *c, int on)
+{
+	return duck_focus_src(c, SGAM_SRC_NAVTTS, on);
+}
+
+/* Phase 4: the other sources worth a try (docs/hbdsi.md section 3), each
+ * on its own screen so a video with sound tells them apart. 48 is what
+ * MMI3GNavigation's own client sends; MMI3GApplication's table has no
+ * entry for it, so it is expected to be refused. */
+static const struct {
+	i32 src;
+	const char *name;
+} duck_sources[] = {
+	{ 58, "SDSTTS (voice control speech)" },
+	{ 59, "APS (parking beeps)" },
+	{ 76, "SYSANN_BEEP (system beep)" },
+	{ 48, "48 (what the navigation sends)" },
+};
+#define DUCK_NSOURCES ((unsigned)(sizeof(duck_sources) / sizeof(duck_sources[0])))
 
 /* n pings on navi, written DUCK_CHUNK_MS at a time (the write paces itself
  * to the device), the screen counting them. 1 if asked to stop. */
@@ -1315,13 +1363,67 @@ static int duck_pings(snd_pcm_t *h, const i16 *pcm, unsigned n,
 	return 0;
 }
 
+/* Phase 5, also played when nothing connected: navi with no channel. */
+static int duck_control(snd_pcm_t *h, const i16 *pcm, int connected)
+{
+	if (h == NULL)
+		return 0;
+	return duck_pings(h, pcm, DUCK_CONTROL,
+	                  connected ?
+	                  "Control: 3 pings on the same device, with NO channel." :
+	                  "No connection to the MMI. 3 pings on the navigation "
+	                  "voice device anyway, with NO channel.",
+	                  "LISTEN: heard or SILENT? Radio at normal volume?");
+}
+
+/* Phase 4: each other source asked for, held, pinged, given back. 1 if
+ * asked to stop. */
+static int duck_other_sources(struct hbdsi *c, snd_pcm_t *h, const i16 *pcm)
+{
+	char text[160], big[32];
+	unsigned i;
+	int rc;
+
+	for (i = 0; i < DUCK_NSOURCES; i++) {
+		snprintf(big, sizeof(big), "source %u of %u", i + 1, DUCK_NSOURCES);
+		snprintf(text, sizeof(text), "Other source %u of %u: %s. Asked for "
+		         "it, no sound from hello5 yet.", i + 1, DUCK_NSOURCES,
+		         duck_sources[i].name);
+		log_msg("step d: source %u/%u: %d %s", i + 1, DUCK_NSOURCES,
+		        (int)duck_sources[i].src, duck_sources[i].name);
+		rc = duck_focus_src(c, duck_sources[i].src, 1);
+		if (rc != EOK) {
+			log_msg("step d: source %d: request not sent (%s), next",
+			        (int)duck_sources[i].src, strerror(rc));
+			continue;
+		}
+		if (duck_hold(text, "LISTEN: radio QUIETER, SILENT, or the same?",
+		              big, DUCK_SRC_HOLD_MS))
+			goto stop;
+		snprintf(text, sizeof(text), "Other source %u of %u: %s. 3 pings on "
+		         "the navigation voice device.", i + 1, DUCK_NSOURCES,
+		         duck_sources[i].name);
+		if (h != NULL && duck_pings(h, pcm, DUCK_SRC_PINGS, text,
+		                            "LISTEN: pings heard?"))
+			goto stop;
+		duck_focus_src(c, duck_sources[i].src, 0);
+		if (duck_hold("Given back.", "LISTEN: radio back to normal?",
+		              "given back", 2000))
+			return 1;
+	}
+	return 0;
+stop:
+	duck_focus_src(c, duck_sources[i].src, 0);
+	return 1;
+}
+
 static int play_duck(const struct step *s, const char *log_file, struct play *p)
 {
 	struct hbdsi c;
 	struct clip train;
 	snd_pcm_t *h = NULL;
 	i16 *pcm;
-	int rc, focus = 0;
+	int rc, focus = 0, connected = 0;
 
 	(void)log_file;
 	duck_step = s;
@@ -1340,6 +1442,10 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	train.rate = PULSE_RATE;
 	train.voices = 1;
 	train.bits = 16;
+	/* opened before asking: an open navi device says nothing to the MMI,
+	 * and the control pings need it even if nothing connects */
+	if (audio_open(0, DUCK_DEVICE, &train, &h) != 0)
+		log_msg("step d: navi would not open, the pings stay silent");
 
 	duck_screen(s->todo, NULL, "asking the MMI", 0);
 	if (duck_attach(&c) == 0) {
@@ -1348,8 +1454,7 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 		if (rc != EOK) {
 			log_msg("RESULT step d: ConnectRequest: %s", strerror(rc));
 			snprintf(duck_note, sizeof(duck_note), "connect: %s", strerror(rc));
-			p->refused = 1;
-			goto out;
+			goto control;
 		}
 	} else {
 		/* the broker does not know it: the way its own children go */
@@ -1362,23 +1467,20 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 			log_msg("RESULT step d: no connection to %s", DUCK_IFACE);
 			snprintf(duck_note, sizeof(duck_note), "%s: no connection",
 			         DUCK_IFACE);
-			p->refused = 1;
-			goto out;
+			goto control;
 		}
 	}
+	connected = 1;
 	log_msg("RESULT step d: connected to %s (server pid %u chid %u, server id "
 	        "<%u.%u>)", DUCK_IFACE, (unsigned)c.r.pid, (unsigned)c.r.chid,
 	        (unsigned)c.r.server_id[0], (unsigned)c.r.server_id[1]);
-	if (audio_open(0, DUCK_DEVICE, &train, &h) != 0)
-		log_msg("step d: navi would not open, the pings stay silent");
 
 	/* 1: the channel alone */
 	rc = duck_focus(&c, 1);
 	focus = rc == EOK;
 	if (!focus) {
 		log_msg("RESULT step d: RequestAudioFocus not sent: %s", strerror(rc));
-		p->refused = 1;
-		goto out;
+		goto control;
 	}
 	if (duck_hold("hello5 has asked for the NAVIGATION VOICE channel. No sound "
 	              "from hello5 yet.",
@@ -1398,12 +1500,17 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	              "LISTEN: is the radio back to its normal volume?",
 	              "channel closed", DUCK_HOLD_MS))
 		goto out;
-	/* 4: control, no channel */
-	if (h != NULL && duck_pings(h, pcm, DUCK_CONTROL,
-	                            "Control: 3 pings on the same device, with NO channel.",
-	                            "LISTEN: should be SILENT, radio at normal volume."))
+	/* 4: the other sources */
+	if (duck_other_sources(&c, h, pcm))
 		goto out;
-	p->eof = 1;
+control:
+	/* 5: control, no channel (also when nothing connected) */
+	if (duck_control(h, pcm, connected))
+		goto out;
+	if (connected)
+		p->eof = 1;
+	else
+		p->refused = 1;
 	log_msg("step d: rx: %u+%u messages, %u+%u pulses from the server",
 	        c.rx_msgs[0], c.rx_msgs[1], c.rx_pulses[0], c.rx_pulses[1]);
 out:
@@ -1457,7 +1564,8 @@ static const struct step step_list[] = {
 	  "voice channel, as the navigation does before it speaks, plays pings "
 	  "on it, then gives it back.",
 	  "LISTEN: does the radio get QUIETER (not silent) while the channel is "
-	  "open?", 10, DUCK_PINGS + DUCK_CONTROL, 0, play_duck },
+	  "open?", 10,
+	  DUCK_PINGS + DUCK_CONTROL + DUCK_NSOURCES * DUCK_SRC_PINGS, 0, play_duck },
 	{ 'p', "who talks to audio management",
 	  "Nothing to do, no sound. hello5 reads which processes the MMI's own "
 	  "programs are connected to.",
@@ -1484,8 +1592,12 @@ static unsigned step_max_ms(const struct step *s)
 	if (s->play == play_duck)
 		return s->intro_s * 1000 + STEP_DONE_MS + ipc_find_max_ms() +
 		       svc_scan_max_ms() +
-		       DUCK_MAX_TRIES * DUCK_CONNECT_MS + 2 * DUCK_HOLD_MS +
-		       (DUCK_PINGS + DUCK_CONTROL) * PULSE_PERIOD_MS + STEP_SLACK_MS;
+		       DUCK_MAX_TRIES * (DUCK_CONNECT_MS + DUCK_BACK_MS) +
+		       2 * DUCK_HOLD_MS +
+		       (DUCK_PINGS + DUCK_CONTROL) * PULSE_PERIOD_MS +
+		       DUCK_NSOURCES * (DUCK_SRC_HOLD_MS + 2000 + 2 * DUCK_TIMEOUT_MS +
+		                        DUCK_SRC_PINGS * PULSE_PERIOD_MS) +
+		       STEP_SLACK_MS;
 	return s->intro_s * 1000 + STEP_DONE_MS + 2000 +
 	       2 * ((s->pings + s->chain) * PULSE_PERIOD_MS + STEP_SLACK_MS);
 }

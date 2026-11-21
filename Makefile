@@ -175,8 +175,8 @@ TESTS   := hello5 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
-PRE_S   := 4
-POST_S  := 5
+PRE_S   := 3
+POST_S  := 3
 
 .PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan aa-sources
 all: $(addprefix build/,$(APPS) $(TOOLS))
