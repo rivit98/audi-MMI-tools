@@ -22,12 +22,9 @@
 // The previous run's log is kept as *.prev.*; the slog snapshots
 // carry the time in their names (log_stamp), so runs never overwrite them.
 //
-// usage: audi_stream_receiver <sd_path> [copy=changed|full]
-//   copy=changed  (default) write only the changed part of each row into
-//                 the VFB (screen_set_partial)
-//   copy=full     the whole screen every time (to compare)
+// usage: audi_stream_receiver <sd_path>
+// Only the changed part of each row goes into the VFB (screen_set_partial).
 #include <cstdio>
-#include <cstring>
 
 #include <unistd.h>
 
@@ -84,28 +81,24 @@ int main(int argc, char *argv[])
 {
 	char path[256];
 	unsigned last_version = ~0u, last_second = ~0u, last_present = 0;
-	bool partial = true;
 
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s <sd_path> [copy=changed|full]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <sd_path>\n", argv[0]);
 		return 2;
 	}
 	const char *sd_path = argv[1];
-	for (int i = 2; i < argc; i++)
-		if (std::strcmp(argv[i], "copy=full") == 0)
-			partial = false;
 	keep_previous_run(sd_path);
 	std::snprintf(path, sizeof(path), "%s/audi_stream_receiver.log", var_dir(sd_path));
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
-	log_msg("audi_stream_receiver start, pid=%d, copy=%s", getpid(), partial ? "changed" : "full");
+	log_msg("audi_stream_receiver start, pid=%d", getpid());
 	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
 	if (slogmark_init("audi_stream_receiver") == 0)
 		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	perf::init();
-	screen_set_partial(partial);
+	screen_set_partial(1);
 
 	camera::start();
 	// our first show would cover the rear camera

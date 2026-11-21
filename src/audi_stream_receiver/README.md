@@ -134,9 +134,8 @@ The picture keeps the phone's shape, never rotated or stretched:
 
 CPU writes into the VFB run at ~9 MB/s, so a full copy costs ~160 ms. So
 `screen.c` keeps a RAM copy of each VFB surface and writes only the
-changed stretch of each row (`copy=changed`, the default; a full copy
-every 30 s and for a new surface). `audi_stream_receiver <sd> copy=full`
-(arguments in `sd/apps.conf`) brings back the full copy, to compare.
+changed stretch of each row (a full copy every 30 s and for a new
+surface).
 
 **Robustness.** io-usb callbacks only queue events; a manager thread does
 the work. Unplugging, a transfer error, or a device that isn't Android
@@ -430,7 +429,7 @@ version 2, `START`), accessory `18d1:2d00` with endpoints IN `0x81` / OUT
 **JPEG pictures.** Work, turning the phone included (landscape
 800×368 to portrait 220×480 mid-stream, no errors), 0 bad, 0 dropped.
 
-| | full VFB copy | changed-span copy (`copy=changed`) |
+| | full VFB copy | changed-span copy |
 |---|---|---|
 | copy into the VFB | ~160 ms (1.5 MB) | 18–19 ms (~30 KB) |
 | present (render + copy + flip) | ~200 ms whatever the size | render 23 + copy 18–19 + flip 3 ms |
