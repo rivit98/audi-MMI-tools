@@ -7,6 +7,8 @@ every raw devctl status. Not in the default run (`make sd SD_APPS="lmprobe ..."`
 - **Run:** `lmprobe <sd_path> [seconds]` (default 5)
 - **Output:** `var/lmprobe.log`, `lmprobe_dshot.png`, `lmprobe_sshot.png`
 
+![The eight colour bars drawn straight into the VFB](img/colour-bars.jpg)
+
 ## Verifies
 
 - The `showScreen` sequence: unregister → register cid 40 flags 2 → `getVfb`

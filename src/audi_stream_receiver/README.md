@@ -85,6 +85,13 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
 ## Results
 
+| | |
+|---|---|
+| ![Phone screen mirrored over H.264](img/mirroring.jpg) | ![Stopwatch on the phone and the MMI: ~0.8 s apart](img/latency.jpg) |
+| Mirroring (Google Maps) | Latency check: stopwatch on phone vs MMI |
+| ![Mirroring at night while driving](img/night-drive.jpg) | ![Android Auto mode on the MMI while driving](img/android-auto.jpg) |
+| Full-screen mirroring while driving | Android Auto mode (phone screen off) |
+
 **Works**
 - AOA end to end (Redmi Note 8 Pro); reconnects on its own.
 - JPEG: 2–4 fps (set by the phone), latency 80–160 ms, rotation works, 0 bad.

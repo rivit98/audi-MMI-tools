@@ -6,6 +6,8 @@ back with `glReadPixels`, then 3D scenes and a triangle-rate stress test.
 - **Run:** `hello4 <sd_path> [seconds] [scenes=pclws] [tori=1,2,4,8,12] [step=<s>] [trace=0|1|2]`
 - **Output:** `var/hello4.log` (probe verdicts, fps, free RAM, triangle-rate table), screenshots
 
+![Cube, lit torus, fogged world and 8 lit tori](img/scenes.jpg)
+
 ## Verifies
 
 - Probes: clear, depth, culling, perspective, lighting, texture, fog, blend, stencil.

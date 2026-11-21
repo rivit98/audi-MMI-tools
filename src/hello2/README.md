@@ -6,6 +6,8 @@ full EGL/GL diagnostics, then captures its own frame three ways.
 - **Run:** `hello2 <sd_path> [seconds]`
 - **Output:** `var/hello2.log`, `hello2_glread.bmp`, `hello2_dshot.png`, `hello2_sshot.png`
 
+![hello2's GL animation on the MMI screen](img/animation.jpg)
+
 ## Verifies
 
 - Taking over the screen through the layer manager (displayable 40) and handing it back.

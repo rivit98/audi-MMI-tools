@@ -8,6 +8,8 @@ an on-screen question for the listener.
 - **Output:** `var/hello5.log` (`RESULT` lines), `hello5_<step>.log`, step `p`/`d` dumps
   (`hello5_ipc.txt`, `hello5_pidin.txt`, `hello5_broker.txt`, `hello5_services.txt`, …)
 
+![Step g: output survey, group 2 playing](img/chime-group.jpg)
+
 ## Verifies
 
 - `m`: does our sound mix with the radio or replace it?

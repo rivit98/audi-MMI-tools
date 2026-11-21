@@ -8,6 +8,8 @@ gives the same answer.
 - **Run:** `hello6 <sd_path> [phases]` (`s` sysinfo, `c` CPU, `g` GPU, `v` video; default `v`)
 - **Output:** `var/hello6.log` (`RESULT` lines), `var/hello6/` (sysinfo, player logs, slog)
 
+![MPEG-2 720×576 clip decoded by the DSP, on screen via VCAP 0 input 1](img/mpeg2-on-screen.jpg)
+
 ## Verifies
 
 - Can the DSP decode video and can it reach the screen?

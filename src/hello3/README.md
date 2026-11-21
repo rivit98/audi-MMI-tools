@@ -7,6 +7,8 @@ full-screen blended layers).
 - **Run:** `hello3 <sd_path> [scene_seconds]` (default 10)
 - **Output:** `var/hello3.log` (fps, fill-rate table), screenshots of scenes 1–2
 
+![Pixels and plasma scenes](img/scenes.jpg)
+
 ## Verifies
 
 - Texture-matrix animation and blending with no per-frame uploads.
