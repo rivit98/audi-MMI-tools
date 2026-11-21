@@ -12,12 +12,11 @@ receiver needs: [docs/android-auto.md](../../docs/android-auto.md).
 phone (Android Auto)  --USB, AOA bulk-->  aoa_host  -->  session  -->  log
 ```
 
-- **Run:** `android_auto <sd_path> [audio=0|1] [version=M.m] [fps=N]`.
+- **Run:** `android_auto <sd_path> [audio=0|1] [fps=N]`.
   Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
   - `audio=0`: advertise no audio channels (default: media 48 kHz stereo,
     guidance and system 16 kHz mono; the PCM is counted and dropped, so the
     phone's sound is silent while connected)
-  - `version=`: protocol version asked for (default 1.1)
   - mbedTLS errors always go to the log (trace level 1)
   - `fps=N`: ack pacing, video frames acked at most N per second (default
     25; 0 = every frame acked at once). Below.
@@ -100,7 +99,7 @@ the unit needed:
 - **No /dev/random.** Random bytes come from /dev/urandom (pseudo) mixed
   with the jitter of the CPU cycle counter around kernel calls, and seed
   CTR-DRBG directly: mbedTLS's entropy pool (`mbedtls_entropy_func`) fails
-  on the unit, so it is only probed and logged (`tls: entropy pool:`). On
+  on the unit (`-0x003c`), so it is not used. On
   SH, `ClockCycles()` keeps the count in its upper 32 bits.
 - **The certificate's dates.** They are `UTCTime` with a `-0700` offset,
   which mbedTLS refuses; [common/mbedtls/utctime-offset.patch](../common/mbedtls/utctime-offset.patch)
@@ -149,7 +148,7 @@ green, the phone shows "Android Auto is active". The phone accepts aasdk's
 certificate and protocol 1.1 (it answers 1.7); TLS 1.2
 (ECDHE-RSA-AES128-GCM) is up in ~370 ms; all 7 channels open; the video is
 800x480 Baseline L3.1 at ~30 fps, ~0.5-1 Mbit/s, and plays on a PC. The
-unit has no entropy source mbedTLS accepts (`entropy pool: -0x003c`), so the
+unit has no entropy source mbedTLS accepts (`mbedtls_entropy_func`: -0x003c), so the
 DRBG is seeded by the own jitter source. CPU: the app 15-26 %, the unit
 45-50 % while saving the video.
 

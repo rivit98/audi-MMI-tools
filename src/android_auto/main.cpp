@@ -19,12 +19,11 @@
 // Runs until the SD card is pulled or it gets SIGTERM/INT/HUP.
 // Writes <sd>/var/android_auto.log (the previous run's: android_auto.prev.log).
 //
-// usage: android_auto <sd_path> [audio=0|1] [version=M.m] [fps=N]
+// usage: android_auto <sd_path> [audio=0|1] [fps=N]
 //   audio=0     advertise no audio channels (default 1: media, guidance,
 //               system; their PCM is counted and dropped)
 //   fps=N       ack video frames at most N per second (default 25; 0 = at
 //               once): the phone sends the next frame only after the ack
-//   version=    AAP version we ask for (default 1.1)
 #include "types.h"
 #include <cstdarg>
 #include <cstdio>
@@ -410,7 +409,7 @@ const Step kSteps[] = {
 	{"Accessory mode", "Unlock the phone and accept any Android Auto prompt on it",
 	 "Unplug and replug the phone"},
 	{"Protocol version", "Waiting for the phone's VERSION_RESPONSE",
-	 "The phone refused the version: try version=1.6 in apps.conf"},
+	 "The phone refused protocol 1.1 (see the log)"},
 	{"TLS handshake", "Encrypting the link (a few seconds on this CPU)",
 	 "TLS failed: the phone may refuse the certificate (see the log)"},
 	{"Service discovery", "Waiting for the phone to ask for our services",
@@ -586,13 +585,9 @@ bool parse_args(int argc, char *argv[], Options &o)
 {
 	for (int i = 2; i < argc; i++) {
 		const char *a = argv[i];
-		unsigned m, n;
 		if (std::strncmp(a, "audio=", 6) == 0)
 			o.cfg.audio = a[6] != '0';
-		else if (std::sscanf(a, "version=%u.%u", &m, &n) == 2) {
-			o.cfg.version_major = (u16)m;
-			o.cfg.version_minor = (u16)n;
-		} else if (std::strncmp(a, "fps=", 4) == 0 && std::atoi(a + 4) >= 0 && std::atoi(a + 4) <= 60)
+		else if (std::strncmp(a, "fps=", 4) == 0 && std::atoi(a + 4) >= 0 && std::atoi(a + 4) <= 60)
 			o.cfg.video_fps = (unsigned)std::atoi(a + 4);
 		else
 			return false;
@@ -608,7 +603,7 @@ int main(int argc, char *argv[])
 	Options opt;
 
 	if (argc < 2 || !parse_args(argc, argv, opt)) {
-		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [version=M.m] [fps=N]\n",
+		std::fprintf(stderr, "usage: %s <sd_path> [audio=0|1] [fps=N]\n",
 		             argv[0]);
 		return 2;
 	}

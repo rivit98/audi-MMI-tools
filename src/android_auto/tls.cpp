@@ -34,9 +34,6 @@ namespace {
 
 constexpr usize kReadChunk = 16384;
 
-// /dev/urandom's last answer: bytes read, or -errno (-1 = not tried yet)
-int urandom_got = -1;
-
 u64 cycles()
 {
 #ifdef __QNX__
@@ -77,12 +74,9 @@ int entropy_source(void *, unsigned char *out, usize len, usize *olen)
 	usize got = 0;
 	for (const char *dev : {"/dev/urandom", "/dev/random"}) {
 		int fd = open(dev, O_RDONLY | O_NONBLOCK);
-		if (fd < 0) {
-			urandom_got = -errno;
+		if (fd < 0)
 			continue;
-		}
 		isize r = read(fd, out, len);
-		urandom_got = r < 0 ? -errno : (int)r;
 		close(fd);
 		if (r > 0)
 			got = (usize)r;
@@ -103,8 +97,8 @@ int entropy_source(void *, unsigned char *out, usize len, usize *olen)
 }
 
 // CTR-DRBG's seed straight from entropy_source, without mbedTLS's entropy
-// pool: on the unit mbedtls_entropy_func failed (CTR-DRBG "entropy source
-// failed") while the same code passes on a PC and under qemu-sh4.
+// pool: on the unit mbedtls_entropy_func fails (-0x003c, CTR-DRBG "entropy
+// source failed") while the same code passes on a PC and under qemu-sh4.
 static int seed_source(void *, unsigned char *out, usize len)
 {
 	while (len > 0) {
@@ -124,7 +118,6 @@ static int seed_source(void *, unsigned char *out, usize len)
 struct Tls::Impl {
 	mbedtls_ssl_context      ssl;
 	mbedtls_ssl_config       conf;
-	mbedtls_entropy_context  entropy;
 	mbedtls_ctr_drbg_context drbg;
 	mbedtls_x509_crt         cert;
 	mbedtls_pk_context       key;
@@ -138,7 +131,6 @@ struct Tls::Impl {
 	{
 		mbedtls_ssl_init(&ssl);
 		mbedtls_ssl_config_init(&conf);
-		mbedtls_entropy_init(&entropy);
 		mbedtls_ctr_drbg_init(&drbg);
 		mbedtls_x509_crt_init(&cert);
 		mbedtls_pk_init(&key);
@@ -148,7 +140,6 @@ struct Tls::Impl {
 		mbedtls_ssl_free(&ssl);
 		mbedtls_ssl_config_free(&conf);
 		mbedtls_ctr_drbg_free(&drbg);
-		mbedtls_entropy_free(&entropy);
 		mbedtls_x509_crt_free(&cert);
 		mbedtls_pk_free(&key);
 	}
@@ -206,22 +197,7 @@ void Tls::set_error(const char *what, int rc)
 bool Tls::init(const std::string &cert_pem, const std::string &key_pem, std::string *err)
 {
 	static const char kPers[] = "mmi3g android_auto";
-	// Diagnostic only: what mbedTLS's entropy pool says on this system. The
-	// seed below doesn't use it.
-	int rc = mbedtls_entropy_add_source(&d_->entropy, entropy_source, nullptr, 32,
-	                                    MBEDTLS_ENTROPY_SOURCE_STRONG);
-	if (rc == 0) {
-		unsigned char probe[32];
-		rc = mbedtls_entropy_func(&d_->entropy, probe, sizeof(probe));
-		mbedtls_platform_zeroize(probe, sizeof(probe));
-	}
-	{
-		char buf[120] = "ok";
-		if (rc != 0)
-			mbedtls_strerror(rc, buf, sizeof(buf));
-		log_msg("tls: entropy pool: -0x%04x %s; /dev/urandom: %d", (unsigned)-rc, buf, urandom_got);
-	}
-	rc = mbedtls_ctr_drbg_seed(&d_->drbg, seed_source, nullptr,
+	int rc = mbedtls_ctr_drbg_seed(&d_->drbg, seed_source, nullptr,
 	                           reinterpret_cast<const unsigned char *>(kPers), sizeof(kPers) - 1);
 	if (rc != 0) {
 		set_error("random generator", rc);
