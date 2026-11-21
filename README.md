@@ -40,8 +40,7 @@ and what doesn't). Shared code is in [src/common/](src/common/).
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP | works |
-| [hello10](src/hello10/README.md) | 800-wide H.264 with its SPS cropped to 720, through the DSP | black: 800-wide coded pictures don't show, retired |
-| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) | works; Android Auto mode not yet run |
+| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) | works, Android Auto mode included |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown | connects; video not shown |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens | tool |
 
@@ -90,4 +89,3 @@ What is built but not yet confirmed is listed in each app's README and in
 | [vehicle-data.md](docs/vehicle-data.md) | what the unit reads from the car's buses |
 | [map-and-cluster.md](docs/map-and-cluster.md) | how the navigation map is drawn; how the cluster display is fed (DDP2, KOMO) |
 | [power-onoff.md](docs/power-onoff.md) | who reboots / powers off the unit |
-| [bridge.md](docs/bridge.md) | laptop shell over USB (parked) |

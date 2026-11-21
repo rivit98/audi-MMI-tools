@@ -1,9 +1,9 @@
-# Phone screen mirroring on the MMI 3G+: options and feasibility
+# Phone screen mirroring on the MMI 3G+
 
-How to show an Android phone's screen (Redmi Note 8 Pro, 1080×2340) on this
-unit's 800×480 display. This doc assumes `audi_stream_receiver` works, i.e. we have a
-working Android Open Accessory (AOA) bulk link between the phone and our own
-SH4 app. The phone is used in **landscape only**.
+How an Android phone's screen (Redmi Note 8 Pro, 1080×2340) reaches this
+unit's 800×480 display: over an Android Open Accessory (AOA) bulk link to
+`audi_stream_receiver`, as JPEG pictures or as hardware-decoded H.264. The
+H.264 path is landscape only.
 
 Every claim is labelled:
 
@@ -19,41 +19,30 @@ not covered here.
 
 ## 1. Summary
 
-| # | Option | Feasibility | Effort | Main risk |
-|---|---|---|---|---|
-| 0 | JPEG pictures over AOA, CPU-decoded (`audi_stream_receiver` + the Android app; src/audi_stream_receiver/README.md) | **Works on the car**: 2–4 fps with the MMI ~30 % busy (~10 fps ceiling) | done | Text blurs if the phone downscales in one bilinear step; fixed by k× capture + box average |
-| 1 | Raw pixels (dirty tiles + LZ4) over AOA, drawn with GL | **High** | ~1–2 weeks | Throughput: VFB writes from the CPU are slow (~10 MB/s); GL upload ~50 MB/s, one upload in flight |
-| 1b | Same, but DXT1 tiles uploaded as compressed textures | **High** | +3–5 days on top of 1 | Text quality (block artifacts) |
-| 2a | Hardware H.264 (DM642 DSP), stream fed to `io-media-nvidia` | **Works on the car**: a live stream from our own resource manager (§7.10) and the phone's H.264 over AOA (§7.13) | built | Every frame must fit one frame size S and the rate must stay steady; ~0.5 s latency from io-media |
-| 2b | Hardware H.264, talking to the DSP driver directly | **Low** | months | Private NVIDIA protocol (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) |
-| 3 | Software H.264 on the SH4 | **Rejected** | — | ~5–10 fps at best [unverified estimate] |
-| 4 | scrcpy over adb (MMI acts as adb host) | **Medium** | ~2–3 weeks + 2a | Needs USB debugging always on. Video still needs 2a or 2b. |
-| 5 | Android Auto receiver | **Low–medium** | months | TLS, protobuf, head-unit cert, audio. Video still needs 2a or 2b. |
+Two paths are built and work on the car, both in `audi_stream_receiver`
+(src/audi_stream_receiver/README.md) and the phone app in `android/`:
 
-**Where things stand:**
+| Path | How | On the car |
+|---|---|---|
+| **H.264 (default)** | The phone encodes 720×432 Baseline; the MMI serves it to `io-media-nvidia` as a live constant-sample-size MP4 (CS-MP4) through its own resource manager; the DM642 DSP decodes it onto VCAP 0 input 1 | ~25 fps, sharp text, lag ~0.5 s, MMI CPU ~30 % (§7.10–7.13) |
+| **JPEG (fallback)** | The phone sends JPEG pictures (k× capture + box average for sharp text); the MMI decodes on the CPU | 2–4 fps, MMI ~30 % busy, ~10 fps ceiling |
 
-- **Option 0** is a deliberately simple stopgap built into
-  `audi_stream_receiver`. It sends the phone's screen as JPEG
-  pictures, one in flight, with portrait shown pillarboxed on the left
-  (which departs from the landscape-only assumption above). It also
-  measures real AOA receive and per-picture costs on the car (`video:`
-  lines in `audi_stream_receiver.log`).
-- **Option 2a** is the path that is built. What it rests on:
-  - The DSP decodes H.264 Baseline (720×480, 720×336) and the picture
-    reaches the screen through VCAP 0 input 1 (§7.4, §7.5).
-  - io-media refuses anything wider than 720 or taller than 576 on purpose
-    (§7.8).
-  - None of the streamable inputs start: fragmented MP4, H.264 in MPEG-PS,
-    growing files (§7.5, §7.10).
-  - A plain MP4 with a constant sample size (CS-MP4) has a tiny header that
-    can be written before the frames exist (§7.8). With a 32-bit `mdat`
-    header (io-media's own demuxer can't read the 64-bit one, §7.9) it plays
-    from a file and as a live stream served through blocking reads, at
-    25 fps with a steady 0.4–0.65 s lag and ~10 % CPU. Pauses in the stream
-    are waited out (§7.10) and filled with skip frames (§7.11).
-  - The phone's own H.264 played on the car through `audi_stream_receiver`
-    (§7.13).
-- **Option 1** is not built. Options 4 and 5 build on 2a.
+The phone app's Android Auto mode uses the H.264 path: the phone runs the
+Android Auto session itself and sends the MMI a 720×432 stream
+([android-auto.md](android-auto.md) §4.3).
+
+What the H.264 path rests on:
+
+- The DSP decodes H.264 Baseline up to 720×576, and the picture reaches the
+  screen through VCAP 0 input 1 (§7.4, §7.5).
+- io-media refuses anything wider than 720 or taller than 576 (§7.8); an
+  800-wide picture can't be shown at all (§7.14).
+- None of the streamable inputs start: fragmented MP4, H.264 in MPEG-PS,
+  growing files (§7.5, §7.10).
+- A CS-MP4 has a tiny header that can be written before the frames exist
+  (§7.8). With a 32-bit `mdat` header (§7.9) it plays as a live stream
+  served through blocking reads, at 25 fps with a steady lag and ~10 % CPU.
+  Pauses are filled with skip frames (§7.11).
 
 ---
 
@@ -89,7 +78,7 @@ not covered here.
   25 fps above 480 lines (`FUN_080d1760`, §7.8). 800×480 H.264 does not
   play on the car (§7.5). Cropping the SPS to 720 does not help: an
   800-wide coded picture that says 720×480 passes io-media but stays black
-  on screen (hello10, [android-auto.md](android-auto.md) §4.1) [confirmed].
+  on screen ([android-auto.md](android-auto.md) §4.1) [confirmed].
   The real ceiling is the DSP: a decoder created for at most 720×576 that
   writes straight into the frames of a fixed 720×480 (or 720×576) BT.656
   video signal, with no scaler anywhere (§7.14).
@@ -223,20 +212,20 @@ These let us test the decoder without writing any io-media client code.
 
 `io-usb -d ehci -d ohci`: the host controller supports high speed
 **[confirmed]**. Bulk throughput through `libusbdi` on this CPU is
-**[unverified]**; my guess is 5–20 MB/s. Every compressed-video option needs
-less than 1 MB/s, so only options 1 and 1b depend on this number.
+**[unverified]**; my guess is 5–20 MB/s. H.264 and JPEG need well under
+1 MB/s, so this doesn't limit them.
 
 ---
 
-## 3. Phone side (shared by options 1, 1b and 2a)
+## 3. Phone side
 
 | Piece | How | Feasibility |
 |---|---|---|
 | Capture | MediaProjection → VirtualDisplay. One consent dialog per session, no root. Needs a foreground service. | High: standard API since Android 5 |
-| Raw frames (1, 1b) | VirtualDisplay → `ImageReader` (RGBA_8888) → tile diff → RGB565 + LZ4, or DXT1 | High. The phone CPU handles 800×480 easily. |
-| H.264 (2a) | VirtualDisplay → `MediaCodec` encoder surface, Baseline Level 3. Built and working on the car (§7.12, §7.13). | Confirmed on this phone |
-| Transport | Existing AOA bulk link (`audi_stream_receiver` protocol, with new frame types) | Confirmed working |
-| Input | **AOA v2 HID**: the accessory registers a HID device with the phone over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57 `SEND_HID_EVENT`). This is what scrcpy's OTG mode uses. The knob from `/dev/ipc/ch8` maps to keyboard D-pad, Enter and Back, or to a mouse. No adb, no root. | High. The MMI side reuses the existing `usbd_setup_vendor` path. |
+| JPEG | VirtualDisplay → `ImageReader` at k× → k:1 box average → JPEG q90 | Confirmed on the car |
+| H.264 | VirtualDisplay → `MediaCodec` encoder surface, Baseline Level 3. Built and working on the car (§7.12, §7.13). | Confirmed on this phone |
+| Transport | AOA bulk link, `audi_stream_receiver`'s protocol | Confirmed working |
+| Input (not built) | **AOA v2 HID**: the accessory registers a HID device with the phone over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57 `SEND_HID_EVENT`). This is what scrcpy's OTG mode uses. The knob from `/dev/ipc/ch8` maps to keyboard D-pad, Enter and Back, or to a mouse. No adb, no root. | High. The MMI side reuses the existing `usbd_setup_vendor` path. |
 
 ### Landscape only
 
@@ -263,121 +252,15 @@ screen's shape) with the letterbox inside it (§7.12).
 
 ---
 
-## 4. Options in detail
+## 4. Options not taken
 
-### Option 1: dirty tiles + LZ4, drawn with GL
-
-**Design.**
-- **Phone:** capture → split into 32×32 tiles → hash each tile → send only the
-  changed ones as RGB565, LZ4-compressed, with a tile index.
-- **MMI:**
-  1. decompress the tiles into a cached CPU-side copy of the frame
-  2. `glTexSubImage2D` the changed rows into a 1024×512 RGB565 texture
-  3. `glDrawTexiOES` the 800×369 region
-  4. `eglSwapBuffers`
-
-  The CPU never writes the VFB directly (see §2.4).
-
-| | |
+| Option | Why not |
 |---|---|
-| Confirmed | AOA link, EGL/GL bring-up (hello2–4), `glTexSubImage2D` / `glDrawTex*OES` exported, 60 Hz vsync, knob input, GL upload ~50 MB/s with one upload in flight (§2.4), LZ4 UI-frame decompress 8.8 ms |
-| Unverified | USB bulk MB/s |
-| Pros | Sharpest image. Lowest latency (one frame of encoding). Almost no new unknowns. The phone app is plain Kotlin. |
-| Cons | Busy content (scrolling, video, map panning) sends whole frames: 800×369×2 = 590 KB before LZ4. At 10 MB/s of upload or USB that's about 15 fps. |
-| Effort | MMI: ~1 week (GL path from hello3, protocol from audi_stream_receiver). Phone: ~1 week (MediaProjection, tiles, LZ4 via `lz4-java`, HID). |
-
-### Option 1b: DXT1 tiles
-
-Same pipeline. The phone encodes changed tiles to DXT1 (4 bits per pixel,
-fixed: about 150 KB per full letterboxed frame) using stb_dxt through the
-NDK, or a GLES 3.1 compute shader. The MMI uploads with
-`glCompressedTexSubImage2D` and does no pixel work at all.
-
-| | |
-|---|---|
-| Confirmed | S3TC/DXT1 extensions and the compressed-upload entry points |
-| Unverified | Whether the NV18 driver accepts sub-image updates of DXT textures at 4×4-aligned offsets (GL requires it to; drivers vary). Upload speed. |
-| Pros | Bandwidth fixed at a quarter of RGB565. Zero CPU decode work. Can be mixed per tile: DXT1 for "photo" tiles, LZ4 RGB565 for text tiles. |
-| Cons | DXT1 block artifacts on small text. Phone-side encoder needs the NDK or a compute shader. |
-| Effort | +3–5 days on top of option 1 |
-
-### Option 2a: hardware H.264 through io-media
-
-**Design.** The phone sends Baseline Level 3 H.264 over AOA. The MMI app:
-
-1. runs a QNX resource manager at e.g. `/dev/mirror/live.mp4` that serves
-   the incoming stream as a **constant-sample-size MP4** (§7.8): a fixed
-   `moov` declaring hours of frames, then frame k at `mdat + k·S`, each
-   padded to S bytes with a filler NAL. Reads block until frame k has
-   arrived. (Fragmented MP4, MPEG-PS and growing files don't work, §7.5,
-   §7.8, §7.10.)
-2. tells io-media to play `file:///dev/mirror/live.mp4` (the same calls
-   `testapp-cmdline` makes: attach input, attach output, play).
-3. registers and shows a **video displayable with flags 0x101** (VCAP 0)
-   through `lmgr.c`, then enables VCAP 0 input 1 through `/dev/videoctrl`
-   (VP 1: SET_SOURCE 1, ENABLE 1, UPDATE), as hello6 does (§7.4).
-
-| | |
-|---|---|
-| Confirmed | The DSP H.264 BP decoder exists. io-media's profile/level checks. The DSP → VCAP 0 input 1 → layer path, on screen, with files played by `testapp-file` outside the HMI: MPEG-2 720×576 (§7.4), MPEG-4 640×480, **H.264 BP 720×480 and 720×336 in plain MP4** (§7.5). The `LMGR_VIDEO` / VCAP flag bits in layermanagerV2. The test clients. `file://` input. **Not playing:** 800×480 H.264, fragmented MP4, H.264 in MPEG-PS, growing files (io-media error `0x80002` at once). |
-| Explained by RE (§7.8, §7.9) | 800 wide: io-media's own check refuses width > 720 or height > 576. CS-MP4 needs a 32-bit `mdat` header: io-media's `CDemuxMp4` can't read the 64-bit one. |
-| Confirmed on the car (§7.10, §7.13) | CS-MP4 with filler-padded frames and a `moov` over-declaring 10 min plays. A live stream from our own resource manager plays for 30 s with reads that block ~90 ms each; io-media reads sequentially in 64 KB and only ~2.7 frames ahead. Lag ~0.5 s, steady. Pauses of 2 s and 5 s are waited out (no unblock); after one the picture skips the ~9 queued frames and goes on at 1×. ~10 % unit CPU. A growing file on the card does not work (EIO). The phone's own encoder output, streamed over AOA, plays (720×432, lag 600–650 ms). |
-| Unverified | Where the ~9-frame queue lives and whether S or the frame rate changes it. Sessions longer than a few minutes, and the 4 GB limit (~1.6 h at 28 KB × 25 fps). Coexistence with MMI3GMedia, which owns io-media and the global video lock, and with the rear camera on VCAP 0 input 0. |
-| Pros | Bandwidth set by S, whatever the content. 25 fps. The SH4 is mostly idle. Smooth for video and map panning. |
-| Cons | Latency ~0.5 s from io-media plus the phone's encoder and USB: fine for viewing, sluggish for interaction. Fragile next to the HMI's own media playback. A DSP crash path exists ("dsp crash, remaining retries"). |
-| State | Built: resource manager, iom client and video displayable (hello9, `src/common`), the receiver's side (§7.11) and the phone's encoder (§7.12). |
-
-### Option 2b: direct DSP access
-
-Reimplement the nMSDK client: the `/dev/nvdsprm0` channel API, the
-`/dev/nvminirm0` resource manager, `NVshm-*` buffers, and the H.264
-bitstream-buffer API (`BufAPI(H264)`). This gives the lowest-latency hardware
-path, but it means reverse engineering a large C++ binary that talks a
-private protocol to a C64x DSP with no symbols. **Feasibility: low.** Only
-consider it if 2a's latency is unacceptable.
-
-### Option 3: software H.264 on the SH4: rejected
-
-There's no SIMD, the CPU is 792 MHz, and the GPU has no shaders for YUV→RGB.
-Register combiners could do the colour conversion, but the decode alone is
-estimated at 5–10 fps at 720×336 **[unverified estimate]**. Options 1 and 2a
-dominate it.
-
-### Option 4: scrcpy over adb
-
-**Design.**
-1. The MMI implements the adb host protocol (CNXN / AUTH / OPEN / WRTE /
-   OKAY) on the phone's adb interface (`ff/42/01`; `audi_stream_receiver` currently
-   skips it).
-2. It pushes the official `scrcpy-server` (Apache-2.0) and starts it with
-   `app_process`.
-3. It reads the H.264 stream (Baseline/Level 3 via the codec options,
-   `max-size 720`, `max-fps 25`, orientation locked) and injects input through
-   scrcpy's control socket.
-
-| | |
-|---|---|
-| Confirmed | Our USB stack handles arbitrary interfaces. The adb interface is visible to us. |
-| Unverified | Everything on the MMI side. RSA-2048 signing for AUTH needs a small bignum or BearSSL; it runs once per connection, so SH4 speed is fine. |
-| Pros | No custom phone app and no consent dialog. Full touch-level input injection. Can create a separate virtual display, so the phone screen stays free. Audio capture on Android 11+. |
-| Cons | **USB debugging must stay enabled** (a security cost in a car). Replaces the AOA work. Video still needs 2a/2b, or a raw mode instead of H.264. |
-| Effort | 2–3 weeks for adb plus scrcpy, on top of 2a |
-
-### Option 5: Android Auto receiver
-
-**Design.** AOA with the strings "Android" / "Android Auto". The MMI is the
-TLS client (we'd need a head-unit certificate taken from a commercial unit,
-which is legally grey). Then protobuf channels for video, input (with
-**rotary-controller** support, which maps directly onto the MMI knob),
-sensors, and audio.
-
-| | |
-|---|---|
-| Confirmed | AOA works. **No TLS library on the unit** (searched ifs and efs), so BearSSL or mbedTLS gets compiled in; both are plain C. C++ stacks (aasdk/OpenAuto) can't be used: the unit's libstdc++ is GCC 3.3-era. |
-| Unverified | The AA video level at 800×480 may be signalled above 3, which io-media rejects; we'd patch `level_idc` in the SPS. AA's 800×480 is also wider than io-media's 720 limit. Media and guidance audio need a way out: QSA devices are never heard, but io-media's `mixer:DSPOUT_TDM1_20_SAD` is (hello5; platform-notes §9). |
-| Pros | The best end result: a car UI built for a knob, no portrait/landscape problem, no mirroring artifacts. |
-| Cons | Biggest effort. Video depends on 2a/2b, and 2a's latency hurts AA's interactivity. Certificate legality. |
-| Effort | Months |
+| Raw pixels (dirty tiles + LZ4, or DXT1 tiles) drawn with GL | GL upload ~50 MB/s with one upload in flight, so busy content (scrolling, maps) drops to ~15 fps; H.264 gives 25 fps at a fixed bandwidth with the SH4 mostly idle |
+| Talking to the DSP driver directly (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) | Reverse engineering a private NVIDIA protocol with no symbols; only worth it to cut io-media's ~0.5 s lag |
+| Software H.264 on the SH4 | No SIMD, 792 MHz: an estimated 5–10 fps at 720×336 **[unverified estimate]** |
+| scrcpy over adb (the MMI as adb host) | Needs USB debugging always on, and its video still needs the DSP path |
+| Android Auto receiver on the MMI | Works up to the video, which is 800 wide and can't be shown (android-auto.md §4.1); the phone relay (§1) replaces it |
 
 ---
 
@@ -615,7 +498,7 @@ The picture appears 1.5–4 s after capture is enabled.
 
 - **H.264 Baseline plays on screen**: 720×480 and the 720×336 letterbox
   size, with and without an audio track (clips 5 and 6: an audio track
-  makes no difference). That is the decode-and-display half of option 2a,
+  makes no difference). That is the decode-and-display half of the H.264 path,
   done with the unit's own player and no RE. `GetTrackInfo` reports the
   clips' silent audio as `0ch 0Hz`, so these tests say nothing about clip
   audio.
@@ -823,7 +706,7 @@ only. The test list: [src/hello9/README.md](../src/hello9/README.md).
 
 **What this settles [confirmed on the car]:**
 
-- **Option 2a works without touching io-media.** The container is CS-MP4
+- **Live H.264 works without touching io-media.** The container is CS-MP4
   as built by `media/csmp4.py`: `ftyp`, `moov`, then a 32-bit `mdat`
   (size 0 for the live stream, with `st_size` = the declared total); one
   constant `stsz` size; every frame padded to S bytes with a filler NAL;
@@ -849,7 +732,7 @@ only. The test list: [src/hello9/README.md](../src/hello9/README.md).
   clock runs on through a pause, so its TIME positions are no use for
   measuring after one.
 - **Cost:** the unit's CPU (the MMI's own slog `CPU:` line) is 20–23 %
-  during `live` against 12–13 % idle. Option 0 (JPEG) uses ~27 % at 3 fps.
+  during `live` against 12–13 % idle. The JPEG path uses ~27 % at 3 fps.
 - **Growing files are out:** io-media reads ahead of the writer and gets
   EIO. Only a resource manager can make reads wait.
 
@@ -1040,7 +923,7 @@ contents restarts the graph. Keeping them rare [confirmed]:
 drawing straight into the encoder at 720×432, Android scales the 2340×1080
 screen 3.25:1 in one bilinear step (2×2 taps per output pixel out of ~3×3
 covered: thin strokes are hit or missed). That is the same blur the
-pictures' k× capture fixes (option 0). Smaller parts: the letterbox (the
+JPEG pictures' k× capture fixes. Smaller parts: the letterbox (the
 screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
 frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
@@ -1194,7 +1077,7 @@ So **every hardware-decoded picture is at most 720 pixels wide on the
 wire**, and what the panel shows is those 720 columns stretched ×1.11.
 800×480 cannot be shown pixel for pixel by patching io-media alone.
 
-This also explains the cropped-SPS test (hello10): io-media read 720×480
+This also explains the cropped-SPS test (android-auto.md §4.1): io-media read 720×480
 from `avc1` and configured the DSP for it, then the decoder's SPS parser
 met a coded picture 50 macroblocks wide and raised errors 0xB (≥ 46
 wide) and 0x2F (wider than created). The error handler resets the decoder

@@ -360,9 +360,8 @@ same picture: they came when several large uploads were queued at once.
   triangle count in the low thousands. Every frame re-sends its client
   arrays (VBOs are untried, §4.3).
 - One large upload in flight at a time (§6).
-- The mirroring options in [`phone-mirroring.md`](phone-mirroring.md) need
-  neither: option 1 uploads one texture per frame and draws one quad, and
-  option 2a doesn't touch GL at all. hello4 has nothing more to tell the
+- Mirroring ([`phone-mirroring.md`](phone-mirroring.md)) needs neither:
+  the H.264 path doesn't touch GL at all. hello4 has nothing more to tell the
   mirroring work.
 - If the threshold ever matters, the cheap test is the 16-tori frame split
   into two halves with a `glFinish` between them: if that survives, the

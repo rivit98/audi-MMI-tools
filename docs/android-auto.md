@@ -1,6 +1,6 @@
 # Android Auto on the MMI 3G+ (P1001, rev 51)
 
-Expands option 5 of [phone-mirroring.md](phone-mirroring.md).
+Expands [phone-mirroring.md](phone-mirroring.md) §4 (Android Auto receiver).
 
 **Evidence labels.** *[repo]* = measured or read on this unit and recorded in
 this repo. *[recalled]* = protocol knowledge from the open-source projects
@@ -89,7 +89,7 @@ video channel. The head unit acks each frame (the acks pace the phone, up
 to `max_unacked` in flight), shows the picture full screen, and sends
 touch, knob and button events back on the input channel.
 
-**The same pipeline as hardware mirroring.** This is option 2a of
+**The same pipeline as hardware mirroring.** This is the H.264 path of
 [phone-mirroring.md](phone-mirroring.md): there the phone app encodes
 H.264 and audi_stream_receiver feeds the frames through LIVE (`hw_stream`,
 `csmp4`, `stream_server`, `player`, `vout`, the rear-camera handover) to
@@ -97,10 +97,10 @@ the DM642, which plays a live CS-MP4 stream on screen [repo]. LIVE does not
 care where the frames come from, so android_auto can hand AA's frames to
 the same `HwStream`. What differs is who controls the encoder:
 
-| | Mirroring (option 2a) | Android Auto |
+| | Mirroring (H.264) | Android Auto |
 |---|---|---|
 | Encoder settings | ours: 720x432, 25 fps, Baseline | the phone's, from the offered list only: **800x480 minimum** |
-| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`), and the DSP decoder and its video signal are 720 wide (phone-mirroring §7.14) [repo]; cropped to 720 in the SPS it stays black [repo, hello10] |
+| Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`), and the DSP decoder and its video signal are 720 wide (phone-mirroring §7.14) [repo]; cropped to 720 in the SPS it stays black [repo] |
 | Level | ≤ 3 | 800x480 at 30 fps is 45 000 MB/s, above level 3's 40 500; io-media only refuses `level_idc` > 39, so 3.1 passes the host (phone-mirroring §2.1) [repo] |
 | Frame rate | 25 | 30 or 60; 30 is allowed at 480 lines |
 | Pacing | batched `VIDEO_ACKS` | the protocol's media acks, held to 25 fps (ack pacing) |
@@ -108,16 +108,15 @@ the same `HwStream`. What differs is who controls the encoder:
 So the 720-wide limit is the one blocker, the same one an 800x480 clip hit
 in the mirroring tests.
 
-**Margin + SPS crop: does not work [repo, hello10].** The idea was to
+**Margin + SPS crop: does not work [repo].** The idea was to
 offer 800x480 with `width_margin = 80` (the phone keeps the car UI in the
 left 720 columns) and rewrite the SPS with `frame_cropping` of 80 px on the
 right, so the stream says 720x480 and passes io-media's check.
-`h264::crop_sps` does the rewrite: cropping and `level_idc` 3.0 (800x480 at
-25 fps is 37 500 macroblocks/s, within Level 3), the rest of the SPS bit for
-bit; ffmpeg decodes a cropped stream to exactly the original's top-left
-[repo, `make test`].
+The rewrite set the cropping and `level_idc` 3.0 (800x480 at 25 fps is
+37 500 macroblocks/s, within Level 3) and kept the rest of the SPS bit for
+bit; ffmpeg decoded the cropped stream to exactly the original's top-left.
 
-On the car, [hello10](../src/hello10/README.md) streamed an ffmpeg 800x480
+On the car, a test app streamed an ffmpeg 800x480
 Baseline clip with the cropped SPS through `HwStream` on VCAP 0 input 1:
 
 - io-media accepts it: the graph reports 720x480 (720x416 for the bottom
@@ -137,7 +136,7 @@ reach the screen through io-media. The options left:
 
 - **Phone relay** (section 4.3): the phone decodes Android Auto and sends
   the MMI a 720-wide stream. Built.
-- **DSP driven directly** (option 2b): bypasses io-media's check, but the
+- **DSP driven directly** (phone-mirroring §4): bypasses io-media's check, but the
   DSP's decoder and video signal stay 720 wide; months of work. What an
   800-wide picture would take (DSP image, io-media and VCAP patches):
   phone-mirroring §7.14.
@@ -166,7 +165,7 @@ Android Auto (phone)  --TCP 127.0.0.1:5277-->  AaService (same phone)
    --> AOA --> audi_stream_receiver --> DM642 (unchanged)
 ```
 
-**How it works [source / built, not yet run].** Android Auto 17.4 and newer
+**How it works [source; works on the car].** Android Auto 17.4 and newer
 start a projection to a third-party app only through its developer "head
 unit server": in Android Auto's settings, developer mode (tap Version),
 then menu, Start head unit server; it listens on 127.0.0.1:5277
@@ -212,15 +211,18 @@ NDK). Differences from the car app:
   sliding between them switches the mode, and only one streams to the MMI.
   The MMI side (audi_stream_receiver) is unchanged.
 
-**Open, to check on the phone and car:**
+**On the car [repo]:** the relay ran for 27 min at a steady 25 fps with the
+phone locked and its screen off; MMI-side lag 300-430 ms, MMI CPU ~55-60 %;
+the rear camera took the screen and gave it back. With 256 KB frame slots
+io-media fell behind and failed with EIO ~45 s after each config; the MMI
+now caps frames at 128 KB and catches io-media up (audi_stream_receiver's
+README) [built, not yet confirmed on the car].
+
+**Open:**
 
 - Whether the 0.9 scale keeps text readable on the MMI.
-- Latency: Android Auto's encoder, the phone's decoder and encoder, then the
-  MMI's ~0.5 s. Estimated 0.6-0.8 s in total [estimate].
-- Phone load: a decoder, the GPU and an encoder at once, plus Android Auto
-  itself. The Redmi Note 8 Pro mirrors at 25 fps with one encoder.
-- Whether the head unit server keeps running in the background, and
-  whether MIUI kills either app.
+- Latency end to end (Android Auto's encoder, the phone's decoder and
+  encoder, then the MMI's ~0.4 s).
 
 **Ideas for later:**
 
@@ -270,7 +272,7 @@ at first.
    services, knob input.
 
 Go/no-go after steps 2 and 3. If software decode is under ~15 fps and no
-live audio path exists, AA would be a poor experience and option 0/1
+live audio path exists, AA would be a poor experience and plain
 mirroring stays the better investment.
 
 ## 6. Existing implementations
