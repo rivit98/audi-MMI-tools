@@ -28,21 +28,21 @@ hold **MENU + rotary knob + top-right soft key**. Details:
 Each app lives in `src/<app>/` with a README (what it verifies, what works
 and what doesn't). Shared code is in [src/common/](src/common/).
 
-| App | What it is | On the car |
-|---|---|---|
-| [hello](src/hello/README.md) | toolchain smoke test: writes `hello.txt` | works |
-| [lmprobe](src/lmprobe/README.md) | layer manager without GL: colour bars straight into the VFB | works |
-| [hello2](src/hello2/README.md) | OpenGL ES bring-up, full EGL/GL diagnostics | works |
-| [hello3](src/hello3/README.md) | GPU canvas, fill-rate benchmark | works |
-| [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark | works up to 12 lit tori; 16 froze the unit |
-| [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) | works on one output; step `d` pending |
-| [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode | done (5 of 10 clips play) |
-| [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) | tool |
-| [hello8](src/hello8/README.md) | C++ runtime and standard library checks | 19/19 |
-| [hello9](src/hello9/README.md) | live H.264 stream through the DSP | works |
-| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) | works, Android Auto mode included |
-| [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown | connects; video not shown |
-| [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens | tool |
+| App | What it is |
+|---|---|
+| [hello](src/hello/README.md) | toolchain smoke test: writes `hello.txt` |
+| [lmprobe](src/lmprobe/README.md) | layer manager without GL: colour bars straight into the VFB |
+| [hello2](src/hello2/README.md) | OpenGL ES bring-up, full EGL/GL diagnostics |
+| [hello3](src/hello3/README.md) | GPU canvas, fill-rate benchmark |
+| [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark |
+| [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) |
+| [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode |
+| [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) |
+| [hello8](src/hello8/README.md) | C++ runtime and standard library checks |
+| [hello9](src/hello9/README.md) | live H.264 stream through the DSP |
+| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
+| [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
+| [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens |
 
 Which apps a card gets by default, their timeouts and arguments:
 [sd/apps.conf](sd/apps.conf).
