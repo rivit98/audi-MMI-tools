@@ -8,8 +8,7 @@
     uv run --script tools/plot_stream_perf.py <run dir> [--out <dir>]
 
 Reads every audi_stream_receiver*.log in the run directory (the current run
-and the .prev one; older runs' usb_tx_test*.log too) with its perf CSV
-(audi_stream_perf.csv / .prev.csv), and writes one PNG per log next to it
+and the .prev one; older runs' usb_tx_test*.log too) and writes one PNG per log next to it
 (<log name>.png, or into --out). Panels share one time axis, seconds since
 the app started (the log's [N ms]):
 
@@ -22,8 +21,6 @@ the app started (the log's [N ms]):
   H.264 data     kbit/s of the frames as sent (newer logs)
   JPEG rates     perf: windows, per second: shown, dropped, held back by
                  the cap (delayed + acks held; newer logs only)
-  JPEG picture   the CSV's shown pictures: decode / render / copy / flip ms
-                 stacked, and latency
 
 Events are vertical lines across all panels: stream start / end, config,
 io-media error, restart after it, REFUSED, rear camera up / off, USB link up / down, HIGH
@@ -35,7 +32,6 @@ just missing.
 from __future__ import annotations
 
 import argparse
-import csv
 import re
 import sys
 from dataclasses import dataclass, field
@@ -97,12 +93,10 @@ EVENT_STYLE = {
 @dataclass
 class Run:
     log: Path
-    csv: Path | None = None
     end_s: float = 0.0
     cpu: list[dict] = field(default_factory=list)
     h264: list[dict] = field(default_factory=list)
     jpeg: list[dict] = field(default_factory=list)
-    pics: list[dict] = field(default_factory=list)
     events: list[tuple[float, str, str]] = field(default_factory=list)
 
 
@@ -163,34 +157,6 @@ def parse_log(path: Path) -> Run:
     return run
 
 
-def parse_csv(path: Path) -> list[dict]:
-    """Shown pictures: t (s) and the stages in ms; older files lack the cap columns."""
-    pics = []
-    with path.open(newline="") as f:
-        for r in csv.DictReader(f):
-            try:
-                if int(r["status"]) != 0:
-                    continue
-                ms = lambda k: int(r.get(k) or 0) / 1000.0
-                pics.append({"t": int(r["t_ms"]) / 1000.0, "decode": ms("decode_us"),
-                             "render": ms("render_us"), "copy": ms("copy_us"),
-                             "flip": ms("flip_us"), "latency": ms("latency_us"),
-                             "cap": ms("cap_us"), "hold": ms("hold_us")})
-            except (KeyError, ValueError, TypeError):
-                continue                 # a line cut short by a pulled card
-    return pics
-
-
-def csv_for(log: Path) -> Path | None:
-    """audi_stream_receiver.prev.log -> audi_stream_perf.prev.csv (usb_tx_test -> usb_tx_perf)."""
-    name = log.name[: -len(".log")]
-    for app, perf in (("audi_stream_receiver", "audi_stream_perf"), ("usb_tx_test", "usb_tx_perf")):
-        if name.startswith(app):
-            p = log.with_name(perf + name[len(app):] + ".csv")
-            return p if p.exists() else None
-    return None
-
-
 def find_logs(run_dir: Path) -> list[Path]:
     logs = []
     for pat in ("audi_stream_receiver*.log", "usb_tx_test*.log"):
@@ -243,16 +209,6 @@ def summary(run: Run) -> list[str]:
     return out
 
 
-def segments(rows: list[dict], gap_s: float = 3.0) -> list[list[dict]]:
-    """Split per-picture rows where the stream paused, so areas don't bridge gaps."""
-    segs: list[list[dict]] = []
-    for r in rows:
-        if not segs or r["t"] - segs[-1][-1]["t"] > gap_s:
-            segs.append([])
-        segs[-1].append(r)
-    return segs
-
-
 def window_x(rows: list[dict]) -> list[float]:
     """A window line comes at its end; plot it at its middle."""
     return [r["t"] - r["span"] / 2 for r in rows]
@@ -271,8 +227,8 @@ def plot(run: Run, out: Path, title: str) -> None:
         panels += ["h264", "lag"]
     if any(r["kbit"] is not None for r in run.h264):
         panels += ["data"]
-    if run.jpeg or run.pics:
-        panels += ["jpeg", "pics"]
+    if run.jpeg:
+        panels += ["jpeg"]
     fig, axes = plt.subplots(len(panels), 1, sharex=True, figsize=(16, 2.6 * len(panels) + 1.2),
                              squeeze=False)
     axes = [a[0] for a in axes]
@@ -355,29 +311,6 @@ def plot(run: Run, out: Path, title: str) -> None:
             ax.set_ylim(bottom=0)
             ax.set_ylabel("per second", color=ink, fontsize=9)
             ax.set_title("JPEG (perf windows)", loc="left", fontsize=9, color=muted)
-        elif name == "pics":
-            keys = [("decode", 0), ("render", 1), ("copy", 2), ("flip", 3)]
-            for n, seg in enumerate(segments(run.pics)):
-                xs = [r["t"] for r in seg]
-                ax.stackplot(xs, *[[r[k] for r in seg] for k, _ in keys],
-                             colors=[SERIES[i] for _, i in keys], alpha=0.85, lw=0,
-                             labels=[k for k, _ in keys] if n == 0 else ())
-                ax.plot(xs, [r["latency"] for r in seg], color=ink, lw=0.8,
-                        label="latency" if n == 0 else None)
-            # a few stalls of seconds would flatten the rest: clip at the
-            # 98th percentile, and say so
-            tops = sorted(max(r["latency"], r["decode"] + r["render"] + r["copy"] + r["flip"])
-                          for r in run.pics)
-            top = tops[int(len(tops) * 0.98)] * 1.3 if tops else 0.0
-            clipped = bool(tops) and tops[-1] > top > 0
-            if clipped:
-                ax.set_ylim(0, top)
-            else:
-                ax.set_ylim(bottom=0)
-            ax.set_ylabel("ms per picture", color=ink, fontsize=9)
-            ax.set_title("JPEG pictures (CSV): main-thread stages stacked, latency line" +
-                         (f" (clipped at {top:.0f} ms, max {tops[-1]:.0f} ms)" if clipped else ""),
-                         loc="left", fontsize=9, color=muted)
         ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1.0), fontsize=8, frameon=False)
 
     seen = []
@@ -420,9 +353,6 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = a.out or a.run_dir
     for log in logs:
         run = parse_log(log)
-        run.csv = csv_for(log)
-        if run.csv:
-            run.pics = parse_csv(run.csv)
         png = out_dir / (log.name[: -len(".log")] + ".png")
         plot(run, png, a.title or a.run_dir.resolve().name)
         print("\n".join(summary(run)))

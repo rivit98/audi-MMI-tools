@@ -18,9 +18,8 @@
 //
 // Writes <sd>/audi_stream_receiver.log: states, every USBDI result, every message
 // but the picture data, a "perf:" summary every 10 s of streaming and a
-// "cpu:" line every 10 s (own and unit load, per thread; cpumon.h);
-// <sd>/audi_stream_perf.csv: one line of timings per picture (perf.h).
-// The previous run's log and csv are kept as *.prev.*; the slog snapshots
+// "cpu:" line every 10 s (own and unit load, per thread; cpumon.h).
+// The previous run's log is kept as *.prev.*; the slog snapshots
 // carry the time in their names (log_stamp), so runs never overwrite them.
 //
 // usage: audi_stream_receiver <sd_path> [copy=changed|full]
@@ -77,7 +76,6 @@ void keep_previous_run(const char *sd_path)
 	const char *var = var_dir(sd_path);
 
 	keep(var, "audi_stream_receiver.log", "audi_stream_receiver.prev.log");
-	keep(var, "audi_stream_perf.csv", "audi_stream_perf.prev.csv");
 }
 
 } // namespace
@@ -106,7 +104,7 @@ int main(int argc, char *argv[])
 		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
-	perf::init(var_dir(sd_path));
+	perf::init();
 	screen_set_partial(partial);
 
 	camera::start();

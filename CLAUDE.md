@@ -113,7 +113,7 @@ The user copies the card's `var/` folder and points at it. Typical files:
 | `usb_slog_<time>.txt` | slog snapshot taken at each USB removal (not at the end of the run); `<time>` = MMI clock, i.e. time since boot (1970-01-01) |
 | `usb_slog_periodic_<time>.txt` | slog snapshot every 60 s while streaming |
 | `<app>_slog.txt`, `summary.txt` | only if the app ended normally under run.sh |
-| `*.h264`, `*_perf.csv` | saved video (check with ffprobe/ffmpeg), perf records |
+| `*.h264` | saved video (check with ffprobe/ffmpeg) |
 
 How to read a run:
 

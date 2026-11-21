@@ -21,8 +21,8 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   was complete before it happened (a snapshot is `sloginfo` in the background,
   ~150 KB to the card). `<time>` is `YYYYMMDD-HHMMSS-mmm` from the MMI's clock,
   which starts at 1970-01-01 00:00 on every cold boot: the time since boot, so
-  names sort within one boot. The previous run's log and csv are kept as
-  `audi_stream_receiver.prev.log` and `audi_stream_perf.prev.csv`.
+  names sort within one boot. The previous run's log is kept as
+  `audi_stream_receiver.prev.log`.
 - **Build:**
 
   ```sh
@@ -160,10 +160,6 @@ writes:
   the cap: `cap 5 fps: N delayed avg/max, N acks held avg/max` (pictures
   that waited undecoded for the cap, and shown pictures whose ack it held,
   with how long in ms).
-- `audi_stream_perf.csv`, one line per picture with the same fields in µs
-  (`t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms,cap_us,hold_us`),
-  128 lines per fsync. New columns go at the end; `cap_us` and `hold_us` are
-  the two cap waits above.
 - Warnings, each at most once per 10 s with a count of the ones held back:
   `perf: HIGH main load: main loop N% busy over 10.0 s of JPEG` (≥ 80 %), and
   `perf: JPEG cap hit for the whole window: the phone sends faster than 5 fps`
@@ -208,7 +204,7 @@ slogger's RAM buffer, no card I/O. Built, not yet confirmed on the car.
 
 `make plot RUN_DIR="<run>"` (`tools/plot_stream_perf.py`, in the `mmi-plot`
 image) reads every `audi_stream_receiver*.log` of a copied `var/` folder (the
-current and the `.prev` run) with its `audi_stream_perf*.csv`, writes
+current and the `.prev` run), writes
 `<log name>.png` next to it and prints a summary per log: time per mode, avg /
 max fps, how much of the time the main loop was ≥ 80 % busy, errors. The
 panels share one time axis, seconds since the app started:
@@ -221,7 +217,6 @@ panels share one time axis, seconds since the app started:
 | H.264 lag: median, min–max band | `h264:` windows |
 | H.264 data: kbit/s of the frames as sent (largest frame in the title) | `h264:` windows |
 | JPEG per second: shown, dropped, held back by the cap | `perf: window` lines |
-| JPEG per picture: decode / render / copy / flip stacked, latency | the CSV (clipped at the 98th percentile, said in the title) |
 
 Vertical lines across all panels mark stream start / end, config, io-media
 error, REFUSED, rear camera up / off, USB link up / down, `HIGH main load`,

@@ -4,7 +4,6 @@
 #include "types.h"
 
 #include <atomic>
-#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -31,13 +30,7 @@ namespace perf {
 namespace {
 
 constexpr unsigned kRing = 512;
-constexpr unsigned kCsvLineMax = 200;
 constexpr unsigned kWarnEveryMs = 10000;
-
-// new columns go at the end: tools/plot_stream_perf.py reads older files too
-constexpr const char *kCsvHeader =
-	"t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,"
-	"copy_us,flip_us,vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms,cap_us,hold_us\n";
 
 // --- shared (mu) --------------------------------------------------------
 std::mutex mu;
@@ -51,11 +44,6 @@ std::atomic<bool> started{false};
 std::thread       writer_thread;
 
 // --- writer thread only -------------------------------------------------
-FILE    *csv;
-char     csv_buf[kBatch * kCsvLineMax];
-unsigned csv_len, csv_lines, csv_at;
-bool     csv_dead;
-
 // avg/max of one stage
 struct Stat {
 	unsigned long long sum = 0;
@@ -203,38 +191,6 @@ void warn_window(const Agg &w, unsigned now)
 		        "%u fps (%u more not logged)", JpegPacer::kMaxJpegFps, held);
 }
 
-void csv_write(unsigned now)
-{
-	if (csv_len == 0)
-		return;
-	if (csv != nullptr && !csv_dead) {
-		if (fwrite(csv_buf, 1, csv_len, csv) != csv_len || fflush(csv) != 0 ||
-		    fsync(fileno(csv)) != 0) {
-			csv_dead = true;           // card gone: stop trying
-			log_msg("perf: audi_stream_perf.csv write failed: %s", strerror(errno));
-		}
-	}
-	csv_len = 0;
-	csv_lines = 0;
-	csv_at = now;
-}
-
-void csv_add(const Pic &p)
-{
-	if (csv_len + kCsvLineMax > sizeof(csv_buf))
-		csv_write(log_ms());
-	int n = std::snprintf(csv_buf + csv_len, kCsvLineMax,
-	                      "%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u\n",
-	                      p.t_ms, p.id, (int)p.status, p.w, p.h, p.bytes, p.rx_us,
-	                      p.wait_us, p.decode_us, p.render_us, p.copy_us, p.flip_us,
-	                      p.vfb_bytes, p.vfb_rows, (int)p.vfb_full, p.latency_us,
-	                      p.phone_ms, p.cap_us, p.hold_us);
-	if (n > 0 && (unsigned)n < kCsvLineMax) {
-		csv_len += (unsigned)n;
-		csv_lines++;
-	}
-}
-
 void lower_priority()
 {
 	struct sched_param sp;
@@ -288,7 +244,6 @@ void writer()
 		for (unsigned i = 0; i < n; i++) {
 			win.add(batch[i]);
 			total.add(batch[i]);
-			csv_add(batch[i]);
 		}
 		if (in_stream && (do_flush || now - win.start_ms >= kWindowMs)) {
 			if (win.shown + win.dropped + win.bad > 0) {
@@ -301,8 +256,6 @@ void writer()
 			total.log("stream", now);
 			in_stream = false;
 		}
-		if (do_flush || csv_lines >= kBatch || (csv_lines > 0 && now - csv_at >= kBatchMs))
-			csv_write(now);
 		if (stop)
 			return;
 	}
@@ -310,22 +263,12 @@ void writer()
 
 } // namespace
 
-void init(const char *out_dir)
+void init()
 {
 	struct timespec res;
-	char path[256];
 
 	if (clock_getres(CLOCK_MONOTONIC, &res) == 0)
 		log_msg("perf: clock resolution %ld us", res.tv_nsec / 1000 + res.tv_sec * 1000000);
-	std::snprintf(path, sizeof(path), "%s/audi_stream_perf.csv", out_dir);
-	csv = fopen(path, "w");
-	if (csv == nullptr) {
-		log_msg("perf: cannot open %s: %s (summaries only)", path, strerror(errno));
-	} else {
-		fputs(kCsvHeader, csv);
-		fflush(csv);
-	}
-	csv_at = log_ms();
 
 	try {
 		writer_thread = std::thread(writer);
@@ -346,9 +289,6 @@ void shutdown()
 	}
 	cond.notify();
 	writer_thread.join();
-	if (csv != nullptr)
-		fclose(csv);
-	csv = nullptr;
 }
 
 void add(const Pic &p)

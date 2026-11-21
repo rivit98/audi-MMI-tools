@@ -69,23 +69,10 @@ def test_new_format(tmp_path):
     assert (tmp_path / "new.png").stat().st_size > 10000
 
 
-def test_csv_pairs_and_plot(tmp_path):
+def test_find_logs_and_plot(tmp_path):
     (tmp_path / "audi_stream_receiver.prev.log").write_text(OLD)
     (tmp_path / "audi_stream_receiver_out.log").write_text(OLD)
-    csv = tmp_path / "audi_stream_perf.prev.csv"
-    csv.write_text(
-        "t_ms,id,status,w,h,bytes,rx_us,wait_us,decode_us,render_us,copy_us,flip_us,"
-        "vfb_bytes,vfb_rows,vfb_full,latency_us,phone_ms\n"
-        "333679,1,2,800,390,52299,4000,0,0,0,0,0,0,0,0,0,48\n"
-        "333800,2,0,800,390,52201,5000,1000,66000,23000,25000,3000,1,1,0,120000,11\n"
-        "334000,3,0,800,390,52201,5000,1000,66000,23000,25000,3000,1,1,0,120000,11\n"
-        "3340")                                 # cut short by a pulled card
     logs = p.find_logs(tmp_path)
     assert [x.name for x in logs] == ["audi_stream_receiver.prev.log"]
-    assert p.csv_for(logs[0]) == csv
-    pics = p.parse_csv(csv)
-    assert len(pics) == 2
-    assert pics[0]["decode"] == 66.0
-    assert pics[0]["cap"] == 0.0
     assert p.main([str(tmp_path)]) == 0
     assert (tmp_path / "audi_stream_receiver.prev.png").stat().st_size > 10000
