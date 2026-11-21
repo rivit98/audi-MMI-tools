@@ -317,18 +317,11 @@ static void test_h264(void)
 	CHECK_EQ(c->sps[0], 0x67);
 	CHECK_EQ(c->pps_len, 2);
 	CHECK_EQ(c->pps[1], 0xce);
-	CHECK_EQ(c->vcap_mode, kVcapWeave);                // an older phone app
 	memcpy(p, cfg, sizeof(cfg));
-	p[sizeof(cfg)] = kVcapOddOnly;
+	p[sizeof(cfg)] = 3;                                 // an older phone app's vcap_mode: ignored
 	c = parse_h264_config(p, sizeof(cfg) + 1);
 	CHECK(c.has_value());
-	CHECK_EQ(c->vcap_mode, kVcapOddOnly);
-	for (u8 m : {0, 1, kVcapOddOnly + 1}) {        // retired (unchanged, BOB), unknown
-		p[sizeof(cfg)] = m;
-		c = parse_h264_config(p, sizeof(cfg) + 1);
-		CHECK(c.has_value());
-		CHECK_EQ(c->vcap_mode, kVcapWeave);
-	}
+	CHECK_EQ(c->pps_len, 2);
 	CHECK(!parse_h264_config(cfg, sizeof(cfg) - 1));   // PPS cut
 	CHECK(!parse_h264_config(cfg, 10));                // short
 	memcpy(p, cfg, sizeof(cfg));

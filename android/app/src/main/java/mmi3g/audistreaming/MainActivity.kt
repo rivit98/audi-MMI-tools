@@ -16,9 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.Choreographer
 import android.view.View
-import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.Button
 import android.widget.CompoundButton
@@ -42,12 +40,9 @@ import android.widget.TextView
  * published in [Streaming.link]. "Format" picks H.264 (default) or JPEG
  * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
  * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
- * comparison) and "Capture mode" (the MMI's field mode, sent in H264_CONFIG)
- * apply to H.264 only, also remembered. "Max fps", "H.264 rate", "Capture
- * mode" and "Keep screen on" are on both pages ([StreamOptions]): the
- * Android Auto mode streams with the same settings. "Latency clock" shows a big running
- * clock (seconds.milliseconds, redrawn every display frame) that the MMI
- * mirrors: one photo of both screens gives the delay. "Keep screen on" (remembered) has CaptureService hold the
+ * comparison) apply to H.264 only, also remembered. "Max fps", "H.264 rate"
+ * and "Keep screen on" are on both pages ([StreamOptions]): the
+ * Android Auto mode streams with the same settings. "Keep screen on" (remembered) has CaptureService hold the
  * screen on while it streams, so a timeout can't lock the phone and end the
  * stream. Every option has an info button that explains it (setUpInfo). Back only moves the app to the background,
  * so the link (and the streaming) stays up while another app is used.
@@ -80,21 +75,11 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     private lateinit var detailView: TextView
     private lateinit var streamButton: Button
     private lateinit var videoView: TextView
-    private lateinit var clockView: TextView
     private lateinit var pager: SwipePager
     private lateinit var tabs: List<TextView>
     private lateinit var aaStatus: TextView
     private lateinit var aaToggle: Button
     private var mode = MODE_SCREEN
-    private var clockOn = false
-    private val clockFrame = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            if (!clockOn) return
-            val ms = System.currentTimeMillis() % 100_000
-            clockView.text = "%02d.%03d".format(ms / 1000, ms % 1000)
-            Choreographer.getInstance().postFrameCallback(this)
-        }
-    }
     private val ui = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
         override fun run() {
@@ -143,8 +128,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         streamButton = findViewById(R.id.stream)
         videoView = findViewById(R.id.video_status)
         streamButton.setOnClickListener { toggleStreaming() }
-        clockView = findViewById(R.id.clock)
-        findViewById<CompoundButton>(R.id.clock_switch).setOnCheckedChangeListener { _, on -> setClock(on) }
         Streaming.format = Format.entries.firstOrNull {
             it.name == getPreferences(MODE_PRIVATE).getString(PREF_FORMAT, null)
         } ?: Format.H264
@@ -212,7 +195,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     override fun onPause() {
         AppLog.i("activity paused")
         ui.removeCallbacks(refresh)
-        Choreographer.getInstance().removeFrameCallback(clockFrame)
         super.onPause()
     }
 
@@ -225,23 +207,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         AppLog.i("activity window focus: $hasFocus")
-    }
-
-    override fun onPostResume() {
-        super.onPostResume()
-        if (clockOn) Choreographer.getInstance().postFrameCallback(clockFrame)
-    }
-
-    private fun setClock(on: Boolean) {
-        clockOn = on
-        clockView.visibility = if (on) View.VISIBLE else View.GONE
-        if (on) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            Choreographer.getInstance().postFrameCallback(clockFrame)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            Choreographer.getInstance().removeFrameCallback(clockFrame)
-        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -492,7 +457,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
             Triple(R.id.info_format, R.string.info_format_title, R.string.info_format),
             Triple(R.id.info_sharp, R.string.info_sharp_title, R.string.info_sharp),
-            Triple(R.id.info_clock, R.string.info_clock_title, R.string.info_clock),
             Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
             Triple(R.id.info_aa, R.string.info_aa_title, R.string.info_aa),
             Triple(R.id.info_aa_video_size, R.string.info_aa_video_size_title, R.string.info_aa_video_size),
@@ -501,7 +465,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private val OPTION_INFO = listOf(
             Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
             Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),
-            Triple(R.id.info_vcap_mode, R.string.info_vcap_mode_title, R.string.info_vcap_mode),
             Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
         )
     }

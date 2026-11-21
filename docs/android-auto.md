@@ -196,7 +196,7 @@ NDK). Differences from the car app:
 - **Frame rate and stream settings.** Android Auto sends up to 30 fps; the
   GPU's frame clock draws exactly "Max fps" a second into the encoder (at
   most 25, the MMI's stream rate) and drops the rest. No ack pacing
-  (`fps=0`): the acks go at once. "Max fps", "H.264 rate", "Capture mode"
+  (`fps=0`): the acks go at once. "Max fps", "H.264 rate"
   and "Keep screen on" are the mirroring's settings, shown on both pages. A
   new rate or bit rate gets a new encoder that the GPU draws into
   (`GlScaler.retarget`); the decoder keeps running, so Android Auto never

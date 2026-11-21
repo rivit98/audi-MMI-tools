@@ -57,27 +57,6 @@
             style="@style/InfoButton" />
     </LinearLayout>
 
-    <LinearLayout style="@style/OptionRow">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minEms="5"
-            android:text="@string/vcap_mode"
-            android:textSize="14sp" />
-
-        <Spinner
-            android:id="@+id/vcap_mode"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:entries="@array/vcap_modes" />
-
-        <ImageButton
-            android:id="@+id/info_vcap_mode"
-            style="@style/InfoButton" />
-    </LinearLayout>
-
     <LinearLayout
         style="@style/OptionRow"
         android:paddingStart="12dp">

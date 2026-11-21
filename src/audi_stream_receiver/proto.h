@@ -58,7 +58,7 @@
 // unit's DM642 decodes, io-media plays, nothing is drawn by the CPU.
 //
 //   H264_CONFIG 0x0B  phone  fps u8, frame_bytes u32, sps_len u16, sps,
-//                            pps_len u16, pps [, vcap_mode u8]. The encoder's SPS and PPS
+//                            pps_len u16, pps. The encoder's SPS and PPS
 //                            (NAL units, header byte first, no start code;
 //                            MediaCodec's csd-0 / csd-1 without it). fps is
 //                            the rate the stream is timed at (the phone
@@ -74,8 +74,9 @@
 //                            encoder is set up again (size, rotation). The
 //                            same config again changes nothing; a new one
 //                            restarts the stream (~1-2 s black).
-//                            vcap_mode (kVcap*): VCAP 0's field mode for
-//                            this stream. Absent or any other value = kVcapWeave.
+//                            Bytes after the PPS are ignored (an older phone
+//                            app sent vcap_mode u8 there: retired, VCAP 0
+//                            always weaves, docs/phone-mirroring.md 7.4).
 //   (VIDEO_START / VIDEO_DATA with format kFmtH264: one encoded frame,
 //   Annex-B (start codes), as MediaCodec hands it out; w/h the stream's
 //   size. Counted in VIDEO_ACKS on arrival - shown: in the stream, dropped:
@@ -125,11 +126,6 @@ constexpr u8 kH264Playing = 0;
 constexpr u8 kH264Sync = 1;
 constexpr u8 kH264Refused = 2;
 constexpr u8 kH264ConfigWanted = 3;
-
-// H264_CONFIG vcap_mode. 0 (leave as is) and 1 (BOB) were retired: BOB makes
-// text flicker, and leaving it is WEAVE anyway (docs/phone-mirroring.md 7.4).
-constexpr u8 kVcapWeave = 2;
-constexpr u8 kVcapOddOnly = 3;
 
 // How a picture ended: one of VIDEO_ACKS's counts.
 enum class PicStatus {
@@ -241,7 +237,6 @@ struct H264Config {
 	u32       frame_bytes;
 	const u8 *sps, *pps;
 	unsigned       sps_len, pps_len;
-	u8        vcap_mode;      // kVcap*; anything else reads as kVcapWeave
 };
 
 // Nothing if malformed (short, lengths past the end, an empty SPS / PPS, fps 0).
@@ -263,8 +258,6 @@ inline std::optional<H264Config> parse_h264_config(const u8 *p, unsigned n)
 	if (c.pps_len == 0 || at + c.pps_len > n)
 		return std::nullopt;
 	c.pps = p + at;
-	at += c.pps_len;
-	c.vcap_mode = at < n && p[at] == kVcapOddOnly ? kVcapOddOnly : kVcapWeave;
 	if (c.fps == 0)
 		return std::nullopt;
 	return c;

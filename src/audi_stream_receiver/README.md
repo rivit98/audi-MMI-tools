@@ -345,9 +345,9 @@ shape) at the *Max fps* slider's rate (up to 25); the MMI's stream runs at
   restarts as on the MMI; 128 KB ones keep up)
   and *Catch-up* (the MMI's drop until io-media is back). Its status line shows
   held acks and how far the modelled io-media reads behind.
-- **Latency:** the phone app's *Latency clock* switch shows a big
-  seconds.milliseconds clock. Stream with it on screen and take one photo
-  of the phone and the MMI together: the difference is the delay.
+- **Latency:** stream a stopwatch app and take one photo of the phone
+  and the MMI together: the difference is the delay
+  (docs/phone-mirroring.md §7.12).
 - **The screen:** while the stream runs, the main loop closes the
   CPU-drawn screen (the video displayable replaces it) and opens it again
   afterwards.

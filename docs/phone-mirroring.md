@@ -570,15 +570,14 @@ The HMI's own sequence for VP 1 (slog at boot) also sets an input viewport
 (x 6, width 708, height 480), input dimensions 720×480 and `WEAVE`
 deinterlacing before enabling. None of these are needed for a correct
 picture. Those devctls are available if a stream needs them (§7.3 table).
-The phone's *Capture mode* drop-down picks the deinterlacing for a stream
-(`H264_CONFIG`'s `vcap_mode`): `WEAVE` (the default, and the HMI's own value
-from boot and every camera session) or `ODD ONLY`. Both give sharp, still
+The receiver always sets `WEAVE` (the HMI's own value from boot and every
+camera session). `WEAVE` and `ODD ONLY` both give sharp, still
 text on the phone's progressive picture [confirmed]. `WEAVE` keeps all 480
 lines; both fields come from the same progressive frame, so there is no
 combing. `ODD ONLY` keeps one field and doubles each line, so half the
 vertical resolution [inferred]. `BOB` makes text flicker up and down
 [confirmed]: it line-doubles each field in turn, and the two fields sit one
-line apart. It is not offered.
+line apart. Neither `ODD ONLY` nor `BOB` is used.
 
 **Conclusions**
 
@@ -984,11 +983,10 @@ arrival (`burst`) doesn't show. Results: `src/hello9/README.md`.
 - **Desk:** `make aoa-host` speaks H.264 like the MMI (limits, config,
   the same frame checks and statuses) and writes
   `build/aoa-host/stream.h264`.
-- **Latency clock:** a switch in the phone app shows seconds.milliseconds,
-  redrawn every display frame. Stream with it on screen, photograph the
-  phone next to the MMI: phone clock − MMI clock = the whole delay
-  (capture, encoder, USB, MMI, io-media, DSP, display). Several photos;
-  the camera's own exposure blurs the last digit.
+- **Whole delay:** stream a stopwatch app showing milliseconds and
+  photograph the phone next to the MMI: phone clock − MMI clock = the whole
+  delay (capture, encoder, USB, MMI, io-media, DSP, display). Several
+  photos; the camera's own exposure blurs the last digit.
 - **Tuning (hello9):** `s56` / `s112` (frames padded 2× / 4×) and `f30`
   (stream at 30 fps) against `live`, from the `lag` in their RESULT lines.
   Lag the same with bigger frames = the queue is frames (bigger frames
@@ -1015,8 +1013,8 @@ well in use: 720×432 Baseline, POC type 0, sharp text.
   7.5-minute session (25 fps only for ~40 s); the clock cap never fires. This `lag` starts when a frame reaches
   the MMI: the phone's capture, encoder, queue (up to 12 frames in flight
   plus 25 queued, ~1.5 s at 25 fps) and USB are not in it, so lag that grows
-  over a long session would be on the phone side and needs the Latency clock
-  (§7.12) to see.
+  over a long session would be on the phone side and needs the whole-delay
+  photo (§7.12) to see.
 - **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
   160 KB, against ~45 % for JPEG).
 
@@ -1101,7 +1099,7 @@ game loses the same strip.
 
 **Open questions:**
 
-- Whether lag grows on the phone side over long sessions (Latency clock).
+- Whether lag grows on the phone side over long sessions (whole-delay photo).
 - Whether the video displayable can be shown 1:1 (720×432 centred, no
   VCAP resample) instead of scaled to 800×480.
 - Whether a 720×480 anamorphic stream (§7.14) looks better than 720×432.

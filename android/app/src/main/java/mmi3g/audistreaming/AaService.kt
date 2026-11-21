@@ -53,7 +53,7 @@ import java.util.concurrent.Executors
  *
  * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
  * is the frame clock's rate (what Android Auto sends above it is dropped),
- * then "H.264 rate", "Capture mode" and "Keep screen on". A new rate or bit
+ * then "H.264 rate" and "Keep screen on". A new rate or bit
  * rate, once settled, gets a new encoder that the scaler draws into
  * ([GlScaler.retarget]); the decoder goes on, so Android Auto never
  * notices, and only the MMI restarts its stream.

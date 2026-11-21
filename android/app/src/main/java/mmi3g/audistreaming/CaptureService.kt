@@ -278,7 +278,7 @@ class CaptureService : Service() {
         fun on(b: Boolean) = if (b) 1 else 0
         return "format=${Streaming.format} sending=${if (sendingH264) "H264" else "JPEG"} " +
             "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
-            "sharp=${on(Streaming.sharp)} capture_mode=${Streaming.vcapMode} " +
+            "sharp=${on(Streaming.sharp)} " +
             "hide_nav_bar=${on(Streaming.hideNavBar)} keep_screen_on=${on(Streaming.keepScreenOn)} " +
             "frame_kb=${mmi.frameBytes / 1024} jpeg_q=$QUALITY android=${Build.VERSION.SDK_INT}"
     }
@@ -371,8 +371,7 @@ class CaptureService : Service() {
 
         followScreen()
         followOrientation(encoder)
-        // the MMI's status (a new capture mode: the same encoder, the MMI
-        // restarts its stream), then the frames
+        // the MMI's status, then the frames
         if (!mmi.step(link)) {
             stopEncoder()
             Streaming.status = "the MMI refused H.264 (see its log): JPEG for now"
@@ -707,8 +706,6 @@ object Streaming {
     @Volatile var format = Format.H264
     /** H.264 bits a second, set by the activity (its drop-down). */
     @Volatile var bitRate = CaptureService.DEFAULT_BIT_RATE
-    /** The MMI's capture field mode for H.264, set by the activity (its drop-down). */
-    @Volatile var vcapMode = VcapMode.WEAVE
     /** H.264 box-filtered k:1 (sharp text) or k = 1 (Android's one scaling
      * step, for comparison), set by the activity. */
     @Volatile var sharp = true
@@ -724,14 +721,4 @@ enum class Format {
     /** The phone's hardware encoder, decoded by the MMI's DM642. */
     H264,
     JPEG,
-}
-
-/** The MMI's capture field mode, in the order of the drop-down
- * (res/values/strings.xml vcap_modes). [wire] goes in H264_CONFIG (proto.h
- * kVcap*). A saved choice that is no longer here reads as WEAVE. */
-enum class VcapMode(val wire: Int) {
-    /** Both fields together: the whole 480 lines. The HMI's own setting. */
-    WEAVE(2),
-    /** One field, each line twice: half the lines. */
-    ODD_ONLY(3),
 }

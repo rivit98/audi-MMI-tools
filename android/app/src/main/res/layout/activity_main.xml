@@ -58,22 +58,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- seconds.milliseconds, redrawn every display frame while on: a photo
-                 of the phone and the MMI side by side shows both clocks, and the
-                 difference is the delay -->
-            <TextView
-                android:id="@+id/clock"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#000000"
-                android:fontFamily="monospace"
-                android:gravity="center"
-                android:padding="8dp"
-                android:textColor="#FFEB3B"
-                android:textSize="64sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
-
             <LinearLayout
                 style="@style/OptionRow"
                 android:paddingStart="8dp">
@@ -136,20 +120,6 @@
 
                 <ImageButton
                     android:id="@+id/info_sharp"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/OptionRow">
-
-                <Switch
-                    android:id="@+id/clock_switch"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/latency_clock" />
-
-                <ImageButton
-                    android:id="@+id/info_clock"
                     style="@style/InfoButton" />
             </LinearLayout>
 

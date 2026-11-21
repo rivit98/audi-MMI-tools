@@ -18,7 +18,7 @@ import android.os.SystemClock
  * [refused] says when to try again, [RefusedBackoff]).
  * After an H264_CONFIG no frame goes until the MMI says PLAYING (it would
  * only be refused while the MMI sets its stream up), and then the stream
- * starts at an IDR. A new capture mode is a new config on the same encoder.
+ * starts at an IDR.
  */
 class MmiH264 {
     var enc: HwEncoder? = null
@@ -30,7 +30,6 @@ class MmiH264 {
     private val queue = ArrayDeque<ByteArray>()
     private var waitIdr = true
     private var configLink: AccessoryLink? = null     // the link the config went to
-    private var configVcapMode = VcapMode.WEAVE        // the capture mode it asked for
     /** The link that answered REFUSED, until H.264 is tried on it again. */
     var refusedLink: AccessoryLink? = null
         private set
@@ -83,7 +82,6 @@ class MmiH264 {
             AppLog.w("H.264: the MMI refused it: trying again in ${wait / 1000} s")
             return false
         }
-        if (configLink === link && configVcapMode != Streaming.vcapMode) sendConfig(link, "capture mode")
         if (link !== configLink && sps != null) sendConfig(link, "new connection")
         if (link.h264.configWanted.getAndSet(false)) sendConfig(link, "the MMI asked")
         if (link.h264.sync.getAndSet(false)) encoder.requestSync()
@@ -127,18 +125,16 @@ class MmiH264 {
         val s = sps ?: return
         val p = pps ?: return
         val caps = link.videoCaps ?: return
-        val mode = Streaming.vcapMode
         // PLAYING from before this config says nothing about it
         link.h264.playing = false
-        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p, mode.wire))
+        link.sendH264Config(Proto.h264Config(caps.h264Fps, frameBytes, s, p))
         configLink = link
-        configVcapMode = mode
         // the MMI (re)starts its stream at the next IDR, after PLAYING
         playingSeen = false
         queue.clear()
         waitIdr = true
         enc?.requestSync()
-        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B, capture mode $mode")
+        AppLog.i("H.264 config sent ($why): ${frameBytes / 1024} KB frames, SPS ${s.size} / PPS ${p.size} B")
     }
 
     /** The encoder's codec config (its callback). */

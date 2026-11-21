@@ -169,11 +169,9 @@ class ProtoTest {
 
     @Test
     fun h264ConfigMatchesTheCLayout() {
-        // proto.h H264_CONFIG: fps u8, frame_bytes u32, sps_len u16, sps, pps_len u16, pps, vcap_mode u8
-        val f = Proto.h264Config(25, 0x10000, byteArrayOf(0x67, 0x42), byteArrayOf(0x68), VcapMode.ODD_ONLY.wire)
-        assertArrayEquals(byteArrayOf(0x0B, 13, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68, 3), f)
-        // proto.h kVcap*
-        assertEquals(listOf(2, 3), listOf(VcapMode.WEAVE, VcapMode.ODD_ONLY).map { it.wire })
+        // proto.h H264_CONFIG: fps u8, frame_bytes u32, sps_len u16, sps, pps_len u16, pps
+        val f = Proto.h264Config(25, 0x10000, byteArrayOf(0x67, 0x42), byteArrayOf(0x68))
+        assertArrayEquals(byteArrayOf(0x0B, 12, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68), f)
         assertEquals(Proto.H264_SYNC, Proto.h264StatusOrNull(byteArrayOf(1)))
         assertNull(Proto.h264StatusOrNull(ByteArray(0)))
     }

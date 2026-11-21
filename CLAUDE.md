@@ -121,7 +121,7 @@ How to read a run:
   That isn't a crash. Crashes leave `*.core*` in `var/` and a `run fault` line in slog.
 - First check the phone APK version: the `rx HELLO ... build <version>` line. An old APK on the
   phone has invalidated phone-side results before.
-- audi_stream_receiver H.264: read the `h264: config:` lines (capture mode, frame cap), the
+- audi_stream_receiver H.264: read the `h264: config:` lines (frame cap), the
   `h264: 10.0 s:` windows (fps, skips, `lag min/median/max`), `stream ended` totals (refused,
   bad, ahead of the clock), and `camera:` / `videoctrl` lines. `lag` is MMI-side only: the
   phone's capture, encoder, queue and USB are not in it.

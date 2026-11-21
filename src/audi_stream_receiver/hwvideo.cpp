@@ -264,7 +264,7 @@ void setup(const std::vector<u8> &payload)
 	std::snprintf(g, sizeof(g), "audi_stream_%d_%u", (int)getpid(), ++graphs);
 	o.graph = g;
 	o.video_on_already = video_held;
-	o.vcap_mode = c.vcap_mode == proto::kVcapOddOnly ? vout::Mode::OddOnly : vout::Mode::Weave;
+	o.vcap_mode = vout::Mode::Weave;
 	picture_mode = o.vcap_mode;
 
 	h264::Sps sps;
@@ -275,10 +275,9 @@ void setup(const std::vector<u8> &payload)
 		err = "frame_bytes " + std::to_string(c.frame_bytes) + " over " +
 		      std::to_string(hwvideo::kMaxFrame);
 	log_msg("h264: config: %u fps, frames up to %u bytes (padded to %u), SPS %u / PPS %u "
-	        "bytes, %ux%u profile %u level %u POC type %u, capture mode %s%s%s",
+	        "bytes, %ux%u profile %u level %u POC type %u%s%s",
 	        c.fps, (unsigned)c.frame_bytes, (unsigned)o.cfg.sample_size, c.sps_len, c.pps_len,
 	        sps.width, sps.height, (unsigned)sps.profile, (unsigned)sps.level, sps.poc_type,
-	        vout::mode_name(o.vcap_mode),
 	        err.empty() ? "" : ": refused, ", err.c_str());
 	if (!err.empty()) {
 		forget_config();

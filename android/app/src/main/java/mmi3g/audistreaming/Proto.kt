@@ -25,7 +25,7 @@ package mmi3g.audistreaming
  *   Hardware H.264 (MMI apps with H.264; proto.h has the details):
  *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
  *   u8, h264MaxFrame u32, and sets format bit 2. H264_CONFIG 0x0B (phone:
- *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps, vcapMode u8;
+ *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps;
  *   NAL units without start codes) starts or restarts the stream; then each encoded
  *   frame (Annex-B) goes as a picture with format FMT_H264, counted in VIDEO_ACKS on arrival.
  *   H264_STATUS 0x0C (MMI: code u8): PLAYING, SYNC (send an IDR), REFUSED
@@ -90,16 +90,16 @@ object Proto {
     }
 
     /** H264_CONFIG: the stream's rate, the largest frame, SPS and PPS (NAL
-     * units, no start codes), VCAP 0's field mode (VcapMode.wire). */
-    fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray, vcapMode: Int): ByteArray {
-        val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size + 1)
+     * units, no start codes). An older app added VCAP 0's field mode after the
+     * PPS; the MMI ignores it and always weaves. */
+    fun h264Config(fps: Int, frameBytes: Int, sps: ByteArray, pps: ByteArray): ByteArray {
+        val p = ByteArray(1 + 4 + 2 + sps.size + 2 + pps.size)
         p[0] = fps.toByte()
         put32(p, 1, frameBytes)
         put16(p, 5, sps.size)
         sps.copyInto(p, 7)
         put16(p, 7 + sps.size, pps.size)
         pps.copyInto(p, 9 + sps.size)
-        p[9 + sps.size + pps.size] = vcapMode.toByte()
         return encode(H264_CONFIG, p)
     }
 
