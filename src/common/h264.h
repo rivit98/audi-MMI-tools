@@ -82,19 +82,6 @@ struct Pps {
 // "" or what is wrong / unsupported. nal: the whole NAL unit, header first.
 std::string parse_sps(const u8 *nal, usize n, Sps &out);
 
-// The SPS rewritten so the picture shown is the coded picture's top-left
-// width x height (frame_cropping: right and bottom), and its level_idc is
-// level (0: unchanged). Everything else, the VUI included, is kept bit for
-// bit. For a sender that can't encode the size the DM642 takes: Android
-// Auto's 800x480, with its UI in the left 720 columns, cropped to 720x480
-// (docs/android-auto.md 4.1). 4:2:0 frames only; width and height even.
-// "" or why not.
-std::string crop_sps(const u8 *nal, usize n, unsigned width, unsigned height,
-                     u8 level, std::vector<u8> &out);
-// The same for every SPS in an Annex-B buffer (an access unit); the other
-// NAL units are copied as they are. out: Annex-B, 4-byte start codes.
-std::string crop_sps_annexb(const u8 *p, usize n, unsigned width, unsigned height,
-                            u8 level, std::vector<u8> &out);
 std::string parse_pps(const u8 *nal, usize n, Pps &out);
 
 struct Slice {
