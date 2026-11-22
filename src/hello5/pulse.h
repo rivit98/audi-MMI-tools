@@ -25,7 +25,7 @@ u32 pulse_samples(unsigned n);
 void pulse_render(i16 *pcm, unsigned n);
 
 /* The canonical 44-byte PCM WAV header. */
-void wav_header(unsigned char *hdr, u32 rate, u16 voices,
+void wav_header(u8 *hdr, u32 rate, u16 voices,
                 u16 bits, u32 data_len);
 
 /* Write a train of n pings to path as a WAV file. 0, or -1. */

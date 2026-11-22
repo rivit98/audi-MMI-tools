@@ -3,22 +3,23 @@
  * (docs/platform-notes.md section 8), plus made-up unknown bits.
  */
 #include "check.h"
+#include "types.h"
 #include "keys.h"
 
 /* a 27-byte message with the constant bytes set and one byte changed */
-static void msg(unsigned char *m, int byte, int value)
+static void msg(u8 *m, int byte, int value)
 {
 	memset(m, 0, 27);
 	m[14] = 0x01;
 	m[15] = 0x02;
 	m[17] = 0x01;
 	if (byte >= 0)
-		m[byte] = (unsigned char)value;
+		m[byte] = (u8)value;
 }
 
 static void one(int byte, int value, int ctl, int amount, const char *text)
 {
-	unsigned char m[27];
+	u8 m[27];
 	struct key_hit h[KEY_MAX_HITS];
 	char buf[128];
 	int n;
@@ -34,7 +35,7 @@ static void one(int byte, int value, int ctl, int amount, const char *text)
 
 int main(void)
 {
-	unsigned char m[27];
+	u8 m[27];
 	struct key_hit h[KEY_MAX_HITS];
 	char buf[128];
 	int n;

@@ -7,9 +7,9 @@
 
 #include "cpustat.h"
 
-unsigned cpustat_pct(unsigned long long part, unsigned long long whole)
+unsigned cpustat_pct(u64 part, u64 whole)
 {
-	unsigned long long p;
+	u64 p;
 
 	if (whole == 0)
 		return 0;

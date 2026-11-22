@@ -415,7 +415,8 @@ addr: build/$(APP)
 	$(RUN) sh4-linux-gnu-addr2line -f -i -p -e build/$(APP) $(ADDR)
 
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
-# with the SDK image's native gcc + ASan/UBSan.
+# with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
+# our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
            build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
 # test_live also checks the live stream against a real clip: check_live.py
@@ -433,6 +434,7 @@ build/.aa-proto-image: tests/aa_proto/Dockerfile tests/aa_proto/requirements.txt
 	docker build -q -t $(AA_PROTO_IMAGE) tests/aa_proto
 	mkdir -p build && touch $@
 test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
+	$(RUN) bash tools/check_types.sh
 	rm -rf build/test_live.d && mkdir -p build/test_live.d
 	$(MEDIA_RUN) python3 -I tests/check_live.py prepare build/test_live.d
 	rm -rf build/test_aa_proto.d && mkdir -p build/test_aa_proto.d/hu

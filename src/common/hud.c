@@ -5,7 +5,7 @@
 #include "types.h"
 
 /* segments a..g = bits 0..6 */
-static const unsigned char seg_mask[10] = {
+static const u8 seg_mask[10] = {
 	0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f,
 };
 

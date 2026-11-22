@@ -4,6 +4,7 @@
 // -matomic-model=hard-llcs, so this file gets the default flags and checks
 // the default. On the build host it is the host's ordinary atomics.
 #include "checks.h"
+#include "types.h"
 
 #if defined(__SH__) && !defined(__SH_ATOMIC_MODEL_HARD_LLCS__)
 #error "the SDK's default atomics model should be hard-llcs (sdk/shle-nto-gcc)"
@@ -11,9 +12,9 @@
 
 namespace checks {
 
-unsigned long long llcs_add_until(unsigned *count, const bool *stop)
+u64 llcs_add_until(unsigned *count, const bool *stop)
 {
-	unsigned long long n = 0;
+	u64 n = 0;
 
 	while (!__atomic_load_n(stop, __ATOMIC_RELAXED)) {
 		__atomic_fetch_add(count, 1u, __ATOMIC_RELAXED);

@@ -14,13 +14,13 @@
 /* Write w x h RGBA8888 pixels as a 24-bit BMP (alpha ignored). Rows are
  * bottom-up, which is what glReadPixels delivers. Returns 0 or -1 (errno
  * set when it is known). */
-int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h);
+int img_write_bmp_rgba(const char *path, const u8 *rgba, int w, int h);
 
 /* Encode w x h pixels of 0xAARRGGBB words (stride in pixels, rows top-down,
  * alpha ignored) as an 8-bit RGB PNG into a malloc'd buffer. Returns 0, or
  * -1 if out of memory. */
 int img_png_encode_argb(const u32 *px, int stride, int w, int h,
-                        unsigned char **out, usize *len);
+                        u8 **out, usize *len);
 
 /* img_png_encode_argb() written to f. Returns 0 or -1 (errno set). */
 int img_png_write_argb(FILE *f, const u32 *px, int stride, int w, int h);

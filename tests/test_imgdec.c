@@ -15,7 +15,7 @@
 #pragma GCC diagnostic pop
 
 struct mem {
-	unsigned char buf[1 << 19];
+	u8 buf[1 << 19];
 	unsigned n;
 };
 
@@ -30,16 +30,16 @@ static void put(void *ctx, void *data, int size)
 }
 
 /* Quadrants: red, green / blue, white. */
-static const unsigned char quad[4][3] = {
+static const u8 quad[4][3] = {
 	{ 230, 20, 20 }, { 20, 230, 20 }, { 20, 20, 230 }, { 240, 240, 240 },
 };
 
 static struct mem jpg, png;
 
 /* comp 3 = RGB, 4 = RGBA (alpha 0x80: the decoder must drop it) */
-static unsigned char *quads(int w, int h, int comp)
+static u8 *quads(int w, int h, int comp)
 {
-	unsigned char *px = malloc((usize)w * h * comp);
+	u8 *px = malloc((usize)w * h * comp);
 	int x, y, q;
 
 	for (y = 0; y < h; y++)
@@ -54,7 +54,7 @@ static unsigned char *quads(int w, int h, int comp)
 
 static void encode(int w, int h)
 {
-	unsigned char *rgb = quads(w, h, 3);
+	u8 *rgb = quads(w, h, 3);
 
 	jpg.n = 0;
 	CHECK(stbi_write_jpg_to_func(put, &jpg, w, h, 3, rgb, 80));
@@ -63,7 +63,7 @@ static void encode(int w, int h)
 
 static void encode_png(int w, int h, int comp)
 {
-	unsigned char *px = quads(w, h, comp);
+	u8 *px = quads(w, h, comp);
 
 	png.n = 0;
 	CHECK(stbi_write_png_to_func(put, &png, w, h, comp, px, w * comp));
@@ -71,7 +71,7 @@ static void encode_png(int w, int h, int comp)
 	free(px);
 }
 
-static int near(u32 px, const unsigned char *rgb)
+static int near(u32 px, const u8 *rgb)
 {
 	int r = (int)(px >> 16 & 0xff), g = (int)(px >> 8 & 0xff), b = (int)(px & 0xff);
 
@@ -125,7 +125,7 @@ static void test_png_refused(void)
 
 static void test_refusals(void)
 {
-	static const unsigned char junk[] = "not a jpeg at all";
+	static const u8 junk[] = "not a jpeg at all";
 	u32 *px = (u32 *)1;
 	int w, h;
 

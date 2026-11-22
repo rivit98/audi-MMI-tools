@@ -31,14 +31,14 @@ const char *const kOutputs[] = {
 
 constexpr int kTimeNotifyMs = 250;
 
-u32 rd32(const unsigned char *p)
+u32 rd32(const u8 *p)
 {
 	u32 v;
 	std::memcpy(&v, p, 4);
 	return v;
 }
 
-u64 rd64(const unsigned char *p)
+u64 rd64(const u8 *p)
 {
 	u64 v;
 	std::memcpy(&v, p, 8);
@@ -162,7 +162,7 @@ std::string Player::describe(const PlayEvent &e)
 	return line;
 }
 
-void Player::event(u32 type, const unsigned char *p, u32 len,
+void Player::event(u32 type, const u8 *p, u32 len,
                    const std::function<void(unsigned, i64)> &on_time)
 {
 	const unsigned t = log_ms() - t_play_;
@@ -225,7 +225,7 @@ void Player::event(u32 type, const unsigned char *p, u32 len,
 
 void Player::poll(const std::function<void(unsigned, i64)> &on_time)
 {
-	unsigned char buf[512];
+	u8 buf[512];
 
 	if (g_ == nullptr || blind_)
 		return;

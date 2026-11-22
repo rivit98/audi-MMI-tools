@@ -62,7 +62,7 @@ private:
 
 // Entropy for the random generator; platform-specific (tls.cpp). The unit
 // has no /dev/random.
-int entropy_source(void *data, unsigned char *out, usize len, usize *olen);
+int entropy_source(void *data, u8 *out, usize len, usize *olen);
 
 } // namespace aa
 

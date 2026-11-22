@@ -53,7 +53,7 @@ public:
 private:
 	struct iom_state;
 	std::string fail(const char *what, int rc);
-	void event(u32 type, const unsigned char *p, u32 len,
+	void event(u32 type, const u8 *p, u32 len,
 	           const std::function<void(unsigned, i64)> &on_time);
 
 	void remember(u32 type, i64 a, i64 b);

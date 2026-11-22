@@ -147,7 +147,7 @@ std::mutex knob_mu;
 std::vector<unsigned> knob_times;        // log_ms() of every ch8 message
 std::vector<std::string> summary;
 
-void on_key(const unsigned char *, int, void *)
+void on_key(const u8 *, int, void *)
 {
 	std::lock_guard<std::mutex> lock(knob_mu);
 	knob_times.push_back(log_ms());
@@ -374,7 +374,7 @@ void log_notes(StreamServer &srv)
 		log_msg("  server: %s", n.c_str());
 }
 
-long long lead_max(const StreamStats &s)
+i64 lead_max(const StreamStats &s)
 {
 	return s.lead_frames_max == INT64_MIN ? 0 : (long long)s.lead_frames_max;
 }
@@ -529,7 +529,7 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 			StreamStats s = hw.server().stats();
 			live::Stats ls = hw.stream().stats();
 			u64 off = hw.stream().data_off();
-			long long served = s.served_end > off
+			i64 served = s.served_end > off
 			                       ? (long long)((s.served_end - off - 1) / hw.stream().sample_size())
 			                       : -1;
 			log_msg("  t=%5.1f s: pushed %u (+%u skips, %u gaps), served to frame %lld, %u reads "

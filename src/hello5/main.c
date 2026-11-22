@@ -179,7 +179,7 @@
 
 /* ---- a loaded PCM clip ---- */
 struct clip {
-	unsigned char *pcm;     /* interleaved sample data (malloc'd) */
+	u8 *pcm;     /* interleaved sample data (malloc'd) */
 	u32       len;     /* bytes in pcm */
 	u32       rate;    /* Hz */
 	u16       voices;  /* channels */
@@ -213,8 +213,8 @@ static const struct {
 
 /* ---- little-endian readers (the MMI is SH4 little-endian, as are WAVs) ---- */
 
-static u16 rd16(const unsigned char *p) { return (u16)(p[0] | (p[1] << 8)); }
-static u32 rd32(const unsigned char *p)
+static u16 rd16(const u8 *p) { return (u16)(p[0] | (p[1] << 8)); }
+static u32 rd32(const u8 *p)
 {
 	return (u32)p[0] | ((u32)p[1] << 8) |
 	       ((u32)p[2] << 16) | ((u32)p[3] << 24);
@@ -223,7 +223,7 @@ static u32 rd32(const unsigned char *p)
 /* Parse a canonical PCM .wav: walk chunks for "fmt " and "data". */
 static int clip_load(const char *path, struct clip *c)
 {
-	unsigned char *buf;
+	u8 *buf;
 	long size;
 	u32 off, fmt_off = 0, data_off = 0, data_len = 0;
 	u16 audio_fmt;
@@ -870,7 +870,7 @@ static int play_testapp(const struct step *s, const char *log_file, struct play 
                                    quieter, 0 is decisive */
 #define NATIVE_TIME_MS    500   /* TIME event period */
 
-static u64 rd64(const unsigned char *p)
+static u64 rd64(const u8 *p)
 {
 	return (u64)rd32(p) | (u64)rd32(p + 4) << 32;
 }
@@ -898,7 +898,7 @@ struct native {
 };
 
 static void native_event(struct native *n, u32 type,
-                         const unsigned char *p, u32 len, unsigned t)
+                         const u8 *p, u32 len, unsigned t)
 {
 	int rc;
 
@@ -964,7 +964,7 @@ static int native_play(const char *file, const char *chain_file,
 {
 	static unsigned graphs;
 	unsigned clip = (pings + chain) * PULSE_PERIOD_MS, t0, t = 0, ref;
-	unsigned char buf[256];
+	u8 buf[256];
 	struct native n;
 	char name[32];
 	int rc, len, off, vstep = 0, blind = 0;
@@ -1437,7 +1437,7 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 		return -1;
 	}
 	pulse_render(pcm, DUCK_PINGS);
-	train.pcm = (unsigned char *)pcm;
+	train.pcm = (u8 *)pcm;
 	train.len = pulse_samples(DUCK_PINGS) * sizeof(i16);
 	train.rate = PULSE_RATE;
 	train.voices = 1;
@@ -1662,7 +1662,7 @@ static void run_step(const struct step *s, int index, int count)
 
 /* quit.c calls this for every ch8 message, on its key thread: logged raw,
  * volume detents counted for step v (hello7 decodes everything). */
-static void on_key(const unsigned char *buf, int n, void *arg)
+static void on_key(const u8 *buf, int n, void *arg)
 {
 	char hex[32 * 3 + 1];
 	int i;

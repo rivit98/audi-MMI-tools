@@ -3,11 +3,12 @@
  * ends, what it records, signatures and duplicates.
  */
 #include "check.h"
+#include "types.h"
 #include "guide.h"
 #include "keys.h"
 
 /* a 27-byte ch8 message: constant bytes set, one byte changed, unit state noise */
-static void msg(unsigned char *m, int byte, int value)
+static void msg(u8 *m, int byte, int value)
 {
 	memset(m, 0, 27);
 	m[14] = 0x01;
@@ -15,13 +16,13 @@ static void msg(unsigned char *m, int byte, int value)
 	m[16] = 0x03;           /* unit state: never a control */
 	m[17] = 0x01;
 	if (byte >= 0)
-		m[byte] = (unsigned char)value;
+		m[byte] = (u8)value;
 }
 
 int main(void)
 {
 	static struct guide g;
-	unsigned char m[27];
+	u8 m[27];
 	char sig[128];
 
 	CHECK(guide_nprompts > 20 && guide_nprompts <= GUIDE_MAX);

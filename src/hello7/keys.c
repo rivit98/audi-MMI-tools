@@ -2,6 +2,7 @@
  * keys.c - see keys.h.
  */
 #include <stdio.h>
+#include "types.h"
 #include <string.h>
 
 #include "keys.h"
@@ -54,7 +55,7 @@ static int add(struct key_hit *out, int n, int max, int ctl, int amount,
 	return n + 1;
 }
 
-int key_decode(const unsigned char *buf, int n, struct key_hit *out, int max)
+int key_decode(const u8 *buf, int n, struct key_hit *out, int max)
 {
 	int left[MSG_BYTES], i, hits = 0;
 
@@ -80,7 +81,7 @@ int key_decode(const unsigned char *buf, int n, struct key_hit *out, int max)
 	return hits;
 }
 
-int key_bits(const unsigned char *buf, int n, int i)
+int key_bits(const u8 *buf, int n, int i)
 {
 	if (i < 0 || i >= n || i >= MSG_BYTES || is_state(i))
 		return 0;

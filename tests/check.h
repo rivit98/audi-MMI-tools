@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "types.h"
+
 static int check_failures, check_count;
 
 #define CHECK(cond) do { \
@@ -18,12 +20,12 @@ static int check_failures, check_count;
 } while (0)
 
 #define CHECK_EQ(a, b) do { \
-	long long a_ = (long long)(a), b_ = (long long)(b); \
+	i64 a_ = (i64)(a), b_ = (i64)(b); \
 	check_count++; \
 	if (a_ != b_) { \
 		check_failures++; \
 		fprintf(stderr, "%s:%d: CHECK_EQ failed: %s == %lld, expected %s == %lld\n", \
-		        __FILE__, __LINE__, #a, a_, #b, b_); \
+		        __FILE__, __LINE__, #a, (long long)a_, #b, (long long)b_); \
 	} \
 } while (0)
 

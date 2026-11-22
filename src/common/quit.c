@@ -85,7 +85,7 @@ static void *signal_thread(void *arg)
 static void *key_thread(void *arg)
 {
 	int fd = (int)(isize)arg, n, i, seen = 0;
-	unsigned char buf[256];
+	u8 buf[256];
 	char hex[16 * 3 + 1];
 
 	for (;;) {

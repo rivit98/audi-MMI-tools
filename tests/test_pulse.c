@@ -8,7 +8,7 @@
 #include "check.h"
 #include "pulse.h"
 
-static u32 rd32(const unsigned char *p)
+static u32 rd32(const u8 *p)
 {
 	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 |
 	       (u32)p[3] << 24;
@@ -16,7 +16,7 @@ static u32 rd32(const unsigned char *p)
 
 static void test_header(void)
 {
-	unsigned char h[WAV_HEADER];
+	u8 h[WAV_HEADER];
 
 	wav_header(h, 44100, 1, 16, 1000);
 	CHECK(memcmp(h, "RIFF", 4) == 0);

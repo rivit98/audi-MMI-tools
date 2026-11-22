@@ -358,7 +358,7 @@ void check_new_delete(Result &r)
 	delete[] a;
 	EXPECT(Tracked::live == 0);
 
-	alignas(Tracked) unsigned char buf[sizeof(Tracked)];
+	alignas(Tracked) u8 buf[sizeof(Tracked)];
 	Tracked *t = new (buf) Tracked;
 	EXPECT(Tracked::live == 1 && (void *)t == buf);
 	t->~Tracked();
@@ -1073,7 +1073,7 @@ void check_math(Result &r)
 	auto root = std::sqrt(std::complex<f64>(-4, 0));
 	EXPECT(near(root.real(), 0, 1e-15) && near(root.imag(), 2, 1e-15));
 	EXPECT(std::midpoint(1, 3) == 2);
-	note(r, fmt("sizeof(long double)=%u", (unsigned)sizeof(long double)));
+	note(r, fmt("sizeof(long double)=%u", (unsigned)sizeof(long double))); // types-ok: the C type itself
 }
 
 // ---- random -------------------------------------------------------------------------
@@ -1134,21 +1134,21 @@ void check_chrono(Result &r)
 	struct timespec ts;
 	auto steady = steady_clock::now();
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	long long mono_ns = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
-	long long diff_ms = (mono_ns - duration_cast<nanoseconds>(steady.time_since_epoch()).count()) / 1000000;
+	i64 mono_ns = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+	i64 diff_ms = (mono_ns - duration_cast<nanoseconds>(steady.time_since_epoch()).count()) / 1000000;
 	EXPECT(diff_ms >= 0 && diff_ms < 50);
 
 	auto sys_s = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-	long long now_s = (long long)time(nullptr);
+	i64 now_s = (long long)time(nullptr);
 	EXPECT(sys_s - now_s >= -2 && sys_s - now_s <= 2);
 	EXPECT(steady_clock::is_steady);
 
 	auto t0 = steady_clock::now();
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	long long c0 = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+	i64 c0 = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 	std::this_thread::sleep_for(100ms);
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	long long c1 = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+	i64 c1 = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 	auto slept = duration_cast<milliseconds>(steady_clock::now() - t0).count();
 	EXPECT(slept >= 95 && slept < 400);
 	EXPECT(c1 - c0 >= 95 && c1 - c0 < 400);
@@ -1291,7 +1291,7 @@ void check_sync(Result &r)
 	std::condition_variable cv;
 	std::queue<int> q;
 	bool done = false;
-	long long consumed = 0;
+	i64 consumed = 0;
 	std::thread consumer([&] {
 		std::unique_lock<std::mutex> lk(m);
 		for (;;) {
@@ -1351,7 +1351,7 @@ void check_sync(Result &r)
 
 template <typename M> std::string reuse_rounds(const char *what)
 {
-	alignas(M) unsigned char buf[sizeof(M)];
+	alignas(M) u8 buf[sizeof(M)];
 	for (int round = 0; round < 3; round++) {
 		M *m = new (buf) M();
 		try {
@@ -1380,7 +1380,7 @@ template <typename M> std::string reuse_rounds(const char *what)
 
 std::string cv_reuse_rounds()
 {
-	alignas(std::condition_variable) unsigned char buf[sizeof(std::condition_variable)];
+	alignas(std::condition_variable) u8 buf[sizeof(std::condition_variable)];
 	std::mutex m;
 	for (int round = 0; round < 3; round++) {
 		auto *cv = new (buf) std::condition_variable();
@@ -1515,11 +1515,11 @@ void check_atomics(Result &r)
 // The counter is 32-bit and wraps (the host's plain loop can exceed 2^32);
 // lost = done - counter, mod 2^32.
 
-using AddLoop = unsigned long long (*)(unsigned *count, const bool *stop);
+using AddLoop = u64 (*)(unsigned *count, const bool *stop);
 
-__attribute__((noinline)) unsigned long long plain_add_until(unsigned *count, const bool *stop)
+__attribute__((noinline)) u64 plain_add_until(unsigned *count, const bool *stop)
 {
-	unsigned long long n = 0;
+	u64 n = 0;
 
 	while (!__atomic_load_n(stop, __ATOMIC_RELAXED)) {
 		__atomic_store_n(count, __atomic_load_n(count, __ATOMIC_RELAXED) + 1u,
@@ -1543,7 +1543,7 @@ bool round_robin()
 }
 
 struct Stress {
-	unsigned long long done = 0;
+	u64 done = 0;
 	unsigned lost = 0;
 	bool rr = true;
 };
@@ -1553,7 +1553,7 @@ Stress stress(AddLoop loop, unsigned ms)
 	const int nthreads = 4;
 	unsigned count = 0;
 	bool stop = false;
-	unsigned long long done[nthreads] = {};
+	u64 done[nthreads] = {};
 	std::atomic<bool> all_rr{true};
 	std::vector<std::thread> pool;
 
@@ -1569,7 +1569,7 @@ Stress stress(AddLoop loop, unsigned ms)
 		t.join();
 
 	Stress s;
-	for (unsigned long long d : done)
+	for (u64 d : done)
 		s.done += d;
 	s.lost = (unsigned)s.done - __atomic_load_n(&count, __ATOMIC_RELAXED);
 	s.rr = all_rr.load();

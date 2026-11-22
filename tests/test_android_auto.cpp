@@ -141,13 +141,13 @@ struct TlsServer {
 	std::vector<u8>     in, *out = nullptr;
 	bool                     done = false;
 
-	static int send_cb(void *ctx, const unsigned char *b, usize n)
+	static int send_cb(void *ctx, const u8 *b, usize n)
 	{
 		auto *s = static_cast<TlsServer *>(ctx);
 		s->out->insert(s->out->end(), b, b + n);
 		return (int)n;
 	}
-	static int recv_cb(void *ctx, unsigned char *b, usize n)
+	static int recv_cb(void *ctx, u8 *b, usize n)
 	{
 		auto *s = static_cast<TlsServer *>(ctx);
 		if (s->in.empty())
@@ -169,8 +169,8 @@ struct TlsServer {
 		mbedtls_entropy_add_source(&entropy, aa::entropy_source, nullptr, 32,
 		                           MBEDTLS_ENTROPY_SOURCE_STRONG);
 		return mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy, nullptr, 0) == 0 &&
-		       mbedtls_x509_crt_parse(&cert, (const unsigned char *)crt.c_str(), crt.size() + 1) == 0 &&
-		       mbedtls_pk_parse_key(&key, (const unsigned char *)k.c_str(), k.size() + 1, nullptr, 0,
+		       mbedtls_x509_crt_parse(&cert, (const u8 *)crt.c_str(), crt.size() + 1) == 0 &&
+		       mbedtls_pk_parse_key(&key, (const u8 *)k.c_str(), k.size() + 1, nullptr, 0,
 		                            mbedtls_ctr_drbg_random, &drbg) == 0 &&
 		       mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM,
 		                                   MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&

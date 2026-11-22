@@ -15,6 +15,8 @@
 #ifndef HELLO7_GUIDE_H
 #define HELLO7_GUIDE_H
 
+#include "types.h"
+
 #define GUIDE_BYTES    16       /* control bytes: 0-15 (16-26 are unit state) */
 #define GUIDE_MAX      40
 #define GUIDE_QUIET_MS 2000
@@ -48,7 +50,7 @@ struct guide {
 
 void guide_start(struct guide *g, unsigned now);
 /* A ch8 message during the current prompt. */
-void guide_key(struct guide *g, const unsigned char *buf, int n, unsigned now);
+void guide_key(struct guide *g, const u8 *buf, int n, unsigned now);
 /* 1 if the current prompt ended now (g->cur moved on to the next). */
 int guide_tick(struct guide *g, unsigned now);
 int guide_done(const struct guide *g);

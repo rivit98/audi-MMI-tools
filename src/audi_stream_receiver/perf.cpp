@@ -46,7 +46,7 @@ std::thread       writer_thread;
 // --- writer thread only -------------------------------------------------
 // avg/max of one stage
 struct Stat {
-	unsigned long long sum = 0;
+	u64 sum = 0;
 	unsigned max = 0;
 
 	void add(unsigned v)
@@ -63,7 +63,7 @@ struct Stat {
 	}
 };
 
-long long cpu_us()
+i64 cpu_us()
 {
 	struct rusage ru;
 
@@ -76,10 +76,10 @@ long long cpu_us()
 struct Agg {
 	unsigned start_ms = 0, shown = 0, bad = 0, dropped = 0, full = 0;
 	unsigned capped = 0, held = 0;    // shown pictures the cap held back / whose ack it held
-	unsigned long long vfb_bytes = 0, vfb_rows = 0, jpeg_bytes = 0;
+	u64 vfb_bytes = 0, vfb_rows = 0, jpeg_bytes = 0;
 	Stat rx, wait, decode, render, copy, flip, latency, phone, cap, hold;
-	unsigned long long idle_us = 0;
-	long long cpu_us0 = 0;
+	u64 idle_us = 0;
+	i64 cpu_us0 = 0;
 
 	void reset(unsigned now)
 	{
@@ -134,7 +134,7 @@ struct Agg {
 		char s_rx[24], s_wait[24], s_dec[24], s_ren[24], s_cpy[24], s_flp[24], s_lat[24];
 		char s_cpu[16], s_fmt[160], s_ph[24], s_cap[24], s_hold[24];
 		unsigned span = now - start_ms, n = shown;
-		long long c = cpu_us();
+		i64 c = cpu_us();
 
 		if (span == 0)
 			span = 1;

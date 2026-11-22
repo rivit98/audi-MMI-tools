@@ -87,15 +87,15 @@ static int contains(const char *s, usize len, const char *want, usize wl)
 /* "1.2" -> 1, 2. 1 if the token is a version. */
 static int parse_version(const char *s, usize len, u16 *major, u16 *minor)
 {
-	unsigned long a, b;
+	u64 a, b;
 	char *end;
 
 	if (len == 0 || s[0] < '0' || s[0] > '9')
 		return 0;
-	a = strtoul(s, &end, 10);
+	a = strtoull(s, &end, 10);
 	if (end >= s + len || *end != '.')
 		return 0;
-	b = strtoul(end + 1, &end, 10);
+	b = strtoull(end + 1, &end, 10);
 	if (end != s + len || a > 0xffff || b > 0xffff)
 		return 0;
 	*major = (u16)a;

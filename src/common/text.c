@@ -10,8 +10,8 @@
 
 u32 utf8_next(const char **s, const char *end)
 {
-	const unsigned char *p = (const unsigned char *)*s;
-	const unsigned char *e = (const unsigned char *)end;
+	const u8 *p = (const u8 *)*s;
+	const u8 *e = (const u8 *)end;
 	u32 cp, min;
 	int n, i;
 

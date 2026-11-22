@@ -110,7 +110,7 @@ bool try_switch(libusb_device *dev, const libusb_device_descriptor &dd)
 		log_msg("%04x:%04x speaks AOA v%d, switching to Android Auto", dd.idVendor, dd.idProduct,
 		        ver[0] | ver[1] << 8);
 		for (int i = 0; i < 6 && ok; i++)
-			ok = libusb_control_transfer(h, 0x40, 52, 0, (u16)i, (unsigned char *)kStrings[i],
+			ok = libusb_control_transfer(h, 0x40, 52, 0, (u16)i, (u8 *)kStrings[i],
 			                             (u16)(std::strlen(kStrings[i]) + 1), 1000) >= 0;
 		ok = ok && libusb_control_transfer(h, 0x40, 53, 0, 0, nullptr, 0, 1000) >= 0;
 		if (!ok)

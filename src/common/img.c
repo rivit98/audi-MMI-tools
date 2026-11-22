@@ -18,9 +18,9 @@
 #include "stb_image_write.h"
 #pragma GCC diagnostic pop
 
-int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h)
+int img_write_bmp_rgba(const char *path, const u8 *rgba, int w, int h)
 {
-	unsigned char *rgb = malloc((usize)w * h * 3), *p = rgb;
+	u8 *rgb = malloc((usize)w * h * 3), *p = rgb;
 	int x, y, ok;
 
 	if (rgb == NULL)
@@ -28,7 +28,7 @@ int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h
 	/* stb takes top-down rows and writes the file bottom-up; ours are
 	 * bottom-up already, so hand them over reversed. */
 	for (y = h - 1; y >= 0; y--) {
-		const unsigned char *src = rgba + (usize)y * w * 4;
+		const u8 *src = rgba + (usize)y * w * 4;
 
 		for (x = 0; x < w; x++, src += 4) {
 			*p++ = src[0];
@@ -42,9 +42,9 @@ int img_write_bmp_rgba(const char *path, const unsigned char *rgba, int w, int h
 }
 
 int img_png_encode_argb(const u32 *px, int stride, int w, int h,
-                        unsigned char **out, usize *len)
+                        u8 **out, usize *len)
 {
-	unsigned char *rgb = malloc((usize)w * h * 3), *p = rgb;
+	u8 *rgb = malloc((usize)w * h * 3), *p = rgb;
 	int x, y, n;
 
 	if (rgb == NULL)
@@ -53,9 +53,9 @@ int img_png_encode_argb(const u32 *px, int stride, int w, int h,
 		const u32 *row = px + (usize)y * stride;
 
 		for (x = 0; x < w; x++) {
-			*p++ = (unsigned char)(row[x] >> 16);
-			*p++ = (unsigned char)(row[x] >> 8);
-			*p++ = (unsigned char)row[x];
+			*p++ = (u8)(row[x] >> 16);
+			*p++ = (u8)(row[x] >> 8);
+			*p++ = (u8)row[x];
 		}
 	}
 	*out = stbi_write_png_to_mem(rgb, w * 3, w, h, 3, &n);
@@ -68,7 +68,7 @@ int img_png_encode_argb(const u32 *px, int stride, int w, int h,
 
 int img_png_write_argb(FILE *f, const u32 *px, int stride, int w, int h)
 {
-	unsigned char *buf;
+	u8 *buf;
 	usize len;
 	int rc = 0;
 

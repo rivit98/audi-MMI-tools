@@ -17,20 +17,20 @@
 
 struct cpustat_thread {
 	int                tid;
-	unsigned long long us;
+	u64 us;
 };
 
 /* One sample period. */
 struct cpustat_sample {
-	unsigned long long wall_us;
-	unsigned long long self_us;        /* this process, all its threads */
-	long long          unit_us;        /* the whole unit busy; < 0 = unknown */
+	u64 wall_us;
+	u64 self_us;        /* this process, all its threads */
+	i64          unit_us;        /* the whole unit busy; < 0 = unknown */
 	unsigned           n;              /* threads that ran (or exist) */
 	struct cpustat_thread thr[CPUSTAT_THREADS];
 };
 
 struct cpustat_win {
-	unsigned long long wall_us, self_us, unit_us;
+	u64 wall_us, self_us, unit_us;
 	unsigned           samples;
 	unsigned           max_self, max_unit;   /* % of the busiest sample */
 	int                unit_known;           /* every sample had unit_us */
@@ -39,7 +39,7 @@ struct cpustat_win {
 };
 
 /* part of whole in %, rounded; 0 if whole is 0, at most 100. */
-unsigned cpustat_pct(unsigned long long part, unsigned long long whole);
+unsigned cpustat_pct(u64 part, u64 whole);
 
 void cpustat_reset(struct cpustat_win *w);
 void cpustat_add(struct cpustat_win *w, const struct cpustat_sample *s);

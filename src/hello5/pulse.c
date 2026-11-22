@@ -72,19 +72,19 @@ void pulse_render(i16 *pcm, unsigned n)
 		ping(pcm + (usize)k * period, len);
 }
 
-static void put16(unsigned char *p, u16 v)
+static void put16(u8 *p, u16 v)
 {
-	p[0] = (unsigned char)v;
-	p[1] = (unsigned char)(v >> 8);
+	p[0] = (u8)v;
+	p[1] = (u8)(v >> 8);
 }
 
-static void put32(unsigned char *p, u32 v)
+static void put32(u8 *p, u32 v)
 {
 	put16(p, (u16)v);
 	put16(p + 2, (u16)(v >> 16));
 }
 
-void wav_header(unsigned char *h, u32 rate, u16 voices,
+void wav_header(u8 *h, u32 rate, u16 voices,
                 u16 bits, u32 data_len)
 {
 	u16 block = (u16)(voices * bits / 8);
@@ -106,7 +106,7 @@ void wav_header(unsigned char *h, u32 rate, u16 voices,
 int pulse_write_wav(const char *path, unsigned n)
 {
 	u32 ns = pulse_samples(n), i;
-	unsigned char hdr[WAV_HEADER], *le;
+	u8 hdr[WAV_HEADER], *le;
 	i16 *pcm = malloc((usize)ns * sizeof(*pcm));
 	FILE *f;
 	int rc = -1;
@@ -115,7 +115,7 @@ int pulse_write_wav(const char *path, unsigned n)
 		return -1;
 	pulse_render(pcm, n);
 	/* little-endian on disk whatever the host (the SH4 is LE anyway) */
-	le = (unsigned char *)pcm;
+	le = (u8 *)pcm;
 	for (i = 0; i < ns; i++)
 		put16(le + i * 2, (u16)pcm[i]);
 	wav_header(hdr, PULSE_RATE, 1, 16, ns * 2);

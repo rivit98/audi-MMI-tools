@@ -200,9 +200,22 @@ docs/                   this guide and the deep dives
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 
 Integer, size and float types use the short names from `src/common/types.h`
-(C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`, not
-`uint32_t`, `size_t` or `double`. `usize`/`isize` also replace `uintptr_t`,
-`ssize_t` and `ptrdiff_t`. Include `"types.h"` wherever they are used.
+(C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`. Include
+`"types.h"` in every file that uses them. Never write `uint8_t`..`int64_t`,
+`size_t`, `ssize_t`, `uintptr_t`, `ptrdiff_t`, `float`, `double`,
+`unsigned char`, `signed char`, `short`, `long long` or `unsigned long`
+(`u8` for bytes, `u64`/`i64` for 64-bit, `usize`/`isize` for sizes, pointer
+arithmetic and `ssize_t` results, `strtoull` into a `u64`). Exceptions:
+
+- printf casts: `(long long)x`, `(unsigned long long)x`, `(unsigned long)x`
+  for `%lld`, `%llu`, `%lu`. `u64` is `unsigned long long` on the car but
+  `unsigned long` on the host, so a `u64` passed straight to `%llu` warns in
+  the host tests.
+- third-party code (`stb_image*.h`, `src/common/qnx/`, mbedTLS) and `sdk/`,
+  whose headers and stubs mirror the unit's own APIs.
+- a line marked `types-ok` (hello8's checks of the C types themselves).
+
+`make test` runs `tools/check_types.sh` first and fails on anything else.
 
 Keep logic that doesn't touch the car's APIs in pure files and test it on
 the host (`tests/test_*.c`): protocol parsing, decoding, layout, stream

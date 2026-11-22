@@ -93,7 +93,7 @@ static long parse_hex(const char *w)
 	if (*w == '#')
 		w++;
 	for (i = 0; i < 6; i++) {
-		int d = hexdigit((unsigned char)w[i]);
+		int d = hexdigit((u8)w[i]);
 
 		if (d < 0)
 			return -1;
@@ -195,8 +195,8 @@ static char *keep_numbers(const char *s)
 	if (out == NULL)
 		return NULL;
 	for (; *s; s++) {
-		if (*s == ' ' && o > out && isdigit((unsigned char)o[-1]) &&
-		    isalnum((unsigned char)s[1])) {
+		if (*s == ' ' && o > out && isdigit((u8)o[-1]) &&
+		    isalnum((u8)s[1])) {
 			*o++ = (char)0xC2;
 			*o++ = (char)0xA0;
 		} else {

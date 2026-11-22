@@ -89,7 +89,7 @@ struct result {
 	int output;                  /* index into outputs[], -1 = none attached */
 	int player_status, stopped;
 	int time_events, errors;
-	long long max_pos_ms;
+	i64 max_pos_ms;
 	unsigned knob[NATTEMPTS];
 	int reg_rc[NATTEMPTS], reg_ok[NATTEMPTS], show_rc[NATTEMPTS];
 	int vc_rc[NATTEMPTS];        /* first non-zero videoctrl devctl rc, -1 no fd */
@@ -291,7 +291,7 @@ static void parse_player_log(const char *path, struct result *r)
 			r->time_events++;
 			p = strstr(line, "cur=");
 			if (p != NULL) {
-				long long cur = strtoll(p + 4, NULL, 10);
+				i64 cur = strtoll(p + 4, NULL, 10);
 
 				if (cur > r->max_pos_ms)
 					r->max_pos_ms = cur;

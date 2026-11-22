@@ -239,7 +239,7 @@ private:
 		        (unsigned long long)s.video_frames, (unsigned long long)(s.video_bytes >> 10),
 		        (unsigned long long)((s.audio_bytes[0] + s.audio_bytes[1] + s.audio_bytes[2]) >> 10),
 		        s.pings_sent, s.pongs);
-		unsigned long long frames = s.video_frames;
+		u64 frames = s.video_frames;
 		std::string error = s.error;
 		session_.reset();
 		update([&](Status &st) {

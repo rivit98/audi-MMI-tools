@@ -118,7 +118,7 @@ static const char *sd_path;
 static const char *out_dir;    /* <sd_path>/var: everything written */
 static struct mesh cube, torus, ground;
 static GLuint checker_tex, crate_tex;
-static unsigned char probe_state[PROBE_MAX];
+static u8 probe_state[PROBE_MAX];
 static int nprobes;
 
 /* ---- assets (built once by the CPU) ---- */
@@ -750,13 +750,13 @@ static int parse_tori(struct opts *o, const char *s)
 	o->nsteps = 0;
 	while (*s != '\0') {
 		char *end;
-		unsigned long n = strtoul(s, &end, 10), secs = 0;
+		u64 n = strtoull(s, &end, 10), secs = 0;
 
 		if (end == s || n == 0 || n > MAX_TORI || o->nsteps == MAX_STEPS)
 			return -1;
 		if (*end == ':') {
 			s = end + 1;
-			secs = strtoul(s, &end, 10);
+			secs = strtoull(s, &end, 10);
 			if (end == s || secs == 0)
 				return -1;
 		}

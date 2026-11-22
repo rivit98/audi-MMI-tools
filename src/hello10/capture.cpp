@@ -8,6 +8,7 @@
  */
 extern "C" {
 #include "log.h"
+#include "types.h"
 #include "proc.h"
 }
 
@@ -167,7 +168,7 @@ std::string apply(int pid)
 		return err;
 	// Check every word first, so a mismatch changes nothing.
 	u16 old[sizeof(kWords) / sizeof(kWords[0])];
-	for (size_t i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
+	for (usize i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
 		err = read_u16(g_fd, kWords[i].addr, old[i]);
 		if (!err.empty())
 			return err;
@@ -175,7 +176,7 @@ std::string apply(int pid)
 			return "word at " + std::to_string(kWords[i].addr) + " is not 720 (" +
 			       std::to_string(old[i]) + "); not patched";
 	}
-	for (size_t i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
+	for (usize i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
 		err = write_u16(g_fd, kWords[i].addr, kWidthTo);
 		if (!err.empty()) {
 			log_msg("capture: write at 0x%08x failed: %s", kWords[i].addr, err.c_str());

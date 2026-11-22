@@ -23,6 +23,8 @@
 // as read: u32 ms, u32 length, bytes), changes.txt (every change of every key).
 //
 // usage: hello11 <sd_path>
+#include "types.h"
+
 extern "C" {
 #include "lmgr.h"
 #include "log.h"
@@ -107,7 +109,7 @@ std::string ch4_state = "not started";
 std::atomic<unsigned> clicks{0};
 std::atomic<bool> stopping{false};
 
-void on_key(const unsigned char *buf, int n, void *)
+void on_key(const u8 *buf, int n, void *)
 {
 	if (n > 7 && (buf[6] != 0 || buf[7] != 0))
 		clicks++;

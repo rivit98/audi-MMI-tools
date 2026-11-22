@@ -1,5 +1,6 @@
 /* test_cpustat.c - CPU-load windows and the "cpu:" line (src/common/cpustat.c). */
 #include <string.h>
+#include "types.h"
 
 #include "check.h"
 #include "cpustat.h"
@@ -9,7 +10,7 @@ static const char *names(int tid)
 	return tid == 1 ? "main" : tid == 3 ? "usb" : NULL;
 }
 
-static void sample(struct cpustat_sample *s, unsigned self_ms, long long unit_ms)
+static void sample(struct cpustat_sample *s, unsigned self_ms, i64 unit_ms)
 {
 	memset(s, 0, sizeof(*s));
 	s->wall_us = 1000000;

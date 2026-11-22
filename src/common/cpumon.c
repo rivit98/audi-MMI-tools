@@ -39,7 +39,7 @@ static unsigned        ncpu = 1;
 static unsigned        window_ms, warn_pct;
 
 struct snap {
-	unsigned long long wall, self, idle;      /* us */
+	u64 wall, self, idle;      /* us */
 	int                idle_ok;
 	unsigned           n;
 	struct cpustat_thread thr[CPUSTAT_THREADS];   /* run time so far */
@@ -85,7 +85,7 @@ void cpumon_now(int *self_pct, int *unit_pct, int *high)
 	pthread_mutex_unlock(&lock);
 }
 
-static unsigned long long now_us(void)
+static u64 now_us(void)
 {
 	struct timespec ts;
 
@@ -142,14 +142,14 @@ static void diff(const struct snap *a, const struct snap *b, struct cpustat_samp
 	out->wall_us = b->wall - a->wall;
 	out->self_us = b->self >= a->self ? b->self - a->self : 0;
 	if (a->idle_ok && b->idle_ok && b->idle >= a->idle) {
-		unsigned long long idle = b->idle - a->idle, cap = out->wall_us * ncpu;
+		u64 idle = b->idle - a->idle, cap = out->wall_us * ncpu;
 
 		out->unit_us = (long long)((idle < cap ? cap - idle : 0) / ncpu);
 	} else {
 		out->unit_us = -1;
 	}
 	for (i = 0; i < b->n; i++) {
-		unsigned long long was = 0;
+		u64 was = 0;
 
 		for (j = 0; j < a->n; j++)
 			if (a->thr[j].tid == b->thr[i].tid) {
@@ -169,7 +169,7 @@ static void mem_text(char *out, usize cap, unsigned *free_mb)
 {
 	struct stat st;
 	struct mallinfo mi = mallinfo();
-	unsigned long long heap = (unsigned long long)(unsigned)mi.uordblks + (unsigned)mi.usmblks;
+	u64 heap = (unsigned long long)(unsigned)mi.uordblks + (unsigned)mi.usmblks;
 	char f[24] = "?";
 
 	*free_mb = 0;

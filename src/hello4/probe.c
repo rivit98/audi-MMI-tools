@@ -309,7 +309,7 @@ static const struct {
 };
 #define NPROBES ((int)(sizeof(probes) / sizeof(probes[0])))
 
-int probes_run(int width, int height, unsigned char state[PROBE_MAX])
+int probes_run(int width, int height, u8 state[PROBE_MAX])
 {
 	static const char *const verdict[] = { "SKIP", "PASS", "FAIL" };
 	int i, n[3] = { 0, 0, 0 };

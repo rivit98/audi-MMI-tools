@@ -22,6 +22,8 @@
 #ifndef HELLO4_PROBE_H
 #define HELLO4_PROBE_H
 
+#include "types.h"
+
 enum { PROBE_SKIP, PROBE_PASS, PROBE_FAIL };
 
 #define PROBE_MAX 16
@@ -29,6 +31,6 @@ enum { PROBE_SKIP, PROBE_PASS, PROBE_FAIL };
 /* Runs every probe on a w x h surface; state[i] gets PROBE_*. Leaves the
  * GL state reset (no tests enabled, identity matrices). Returns the
  * number of probes. */
-int probes_run(int w, int h, unsigned char state[PROBE_MAX]);
+int probes_run(int w, int h, u8 state[PROBE_MAX]);
 
 #endif

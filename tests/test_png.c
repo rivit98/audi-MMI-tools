@@ -27,7 +27,7 @@ static u32 rnd(void)
 	return rng >> 8;
 }
 
-static u32 be32(const unsigned char *p)
+static u32 be32(const u8 *p)
 {
 	return (u32)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
@@ -35,7 +35,7 @@ static u32 be32(const unsigned char *p)
 static void save(const char *name, const struct canvas *c)
 {
 	char path[256];
-	unsigned char *buf, hdr[8];
+	u8 *buf, hdr[8];
 	usize len;
 	FILE *f;
 	int x, y;
@@ -62,13 +62,13 @@ static void save(const char *name, const struct canvas *c)
 	f = fopen(path, "wb");
 	CHECK(f != NULL);
 	hdr[0] = hdr[1] = hdr[4] = hdr[5] = 0;
-	hdr[2] = (unsigned char)(c->w >> 8); hdr[3] = (unsigned char)c->w;
-	hdr[6] = (unsigned char)(c->h >> 8); hdr[7] = (unsigned char)c->h;
+	hdr[2] = (u8)(c->w >> 8); hdr[3] = (u8)c->w;
+	hdr[6] = (u8)(c->h >> 8); hdr[7] = (u8)c->h;
 	fwrite(hdr, 1, 8, f);
 	for (y = 0; y < c->h; y++)
 		for (x = 0; x < c->w; x++) {
 			u32 p = c->px[y * c->stride + x];
-			unsigned char rgb[3] = { p >> 16, p >> 8, p };
+			u8 rgb[3] = { p >> 16, p >> 8, p };
 
 			fwrite(rgb, 1, 3, f);
 		}
@@ -86,7 +86,7 @@ static struct canvas make(int w, int h)
 int main(void)
 {
 	struct canvas c;
-	unsigned char *buf;
+	u8 *buf;
 	usize len;
 	int x, y;
 

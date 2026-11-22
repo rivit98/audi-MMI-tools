@@ -101,7 +101,7 @@ unsigned knob_events(void)
 	return knob_count;
 }
 
-static void on_key(const unsigned char *buf, int n, void *arg)
+static void on_key(const u8 *buf, int n, void *arg)
 {
 	(void)buf;
 	(void)n;

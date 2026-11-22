@@ -69,7 +69,7 @@ void debug_cb(void *, int level, const char *file, int line, const char *msg)
 // (seed_source), which runs it through AES before use. Weak, but what it protects is
 // a USB cable inside the car; the session keys also get the phone's
 // randomness through ECDHE.
-int entropy_source(void *, unsigned char *out, usize len, usize *olen)
+int entropy_source(void *, u8 *out, usize len, usize *olen)
 {
 	usize got = 0;
 	for (const char *dev : {"/dev/urandom", "/dev/random"}) {
@@ -99,10 +99,10 @@ int entropy_source(void *, unsigned char *out, usize len, usize *olen)
 // CTR-DRBG's seed straight from entropy_source, without mbedTLS's entropy
 // pool: on the unit mbedtls_entropy_func fails (-0x003c, CTR-DRBG "entropy
 // source failed") while the same code passes on a PC and under qemu-sh4.
-static int seed_source(void *, unsigned char *out, usize len)
+static int seed_source(void *, u8 *out, usize len)
 {
 	while (len > 0) {
-		unsigned char buf[MBEDTLS_ENTROPY_MAX_GATHER];
+		u8 buf[MBEDTLS_ENTROPY_MAX_GATHER];
 		usize n = len < sizeof(buf) ? len : sizeof(buf), got = 0;
 		if (entropy_source(nullptr, buf, n, &got) != 0 || got == 0)
 			return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
@@ -144,7 +144,7 @@ struct Tls::Impl {
 		mbedtls_pk_free(&key);
 	}
 
-	static int send_cb(void *ctx, const unsigned char *buf, usize len)
+	static int send_cb(void *ctx, const u8 *buf, usize len)
 	{
 		Impl *d = static_cast<Impl *>(ctx);
 		if (d->out == nullptr)
@@ -152,7 +152,7 @@ struct Tls::Impl {
 		d->out->insert(d->out->end(), buf, buf + len);
 		return (int)len;
 	}
-	static int recv_cb(void *ctx, unsigned char *buf, usize len)
+	static int recv_cb(void *ctx, u8 *buf, usize len)
 	{
 		Impl *d = static_cast<Impl *>(ctx);
 		usize avail = d->in.size() - d->in_off;
@@ -198,19 +198,19 @@ bool Tls::init(const std::string &cert_pem, const std::string &key_pem, std::str
 {
 	static const char kPers[] = "mmi3g android_auto";
 	int rc = mbedtls_ctr_drbg_seed(&d_->drbg, seed_source, nullptr,
-	                           reinterpret_cast<const unsigned char *>(kPers), sizeof(kPers) - 1);
+	                           reinterpret_cast<const u8 *>(kPers), sizeof(kPers) - 1);
 	if (rc != 0) {
 		set_error("random generator", rc);
 		goto fail;
 	}
 	// PEM parsing wants the terminating NUL counted
-	rc = mbedtls_x509_crt_parse(&d_->cert, reinterpret_cast<const unsigned char *>(cert_pem.c_str()),
+	rc = mbedtls_x509_crt_parse(&d_->cert, reinterpret_cast<const u8 *>(cert_pem.c_str()),
 	                            cert_pem.size() + 1);
 	if (rc != 0) {
 		set_error("certificate", rc);
 		goto fail;
 	}
-	rc = mbedtls_pk_parse_key(&d_->key, reinterpret_cast<const unsigned char *>(key_pem.c_str()),
+	rc = mbedtls_pk_parse_key(&d_->key, reinterpret_cast<const u8 *>(key_pem.c_str()),
 	                          key_pem.size() + 1, nullptr, 0, mbedtls_ctr_drbg_random, &d_->drbg);
 	if (rc != 0) {
 		set_error("private key", rc);

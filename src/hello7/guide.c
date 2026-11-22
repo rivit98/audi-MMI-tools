@@ -2,6 +2,7 @@
  * guide.c - see guide.h.
  */
 #include <stdio.h>
+#include "types.h"
 #include <string.h>
 
 #include "guide.h"
@@ -59,7 +60,7 @@ void guide_start(struct guide *g, unsigned now)
 	g->res[0].begin_ms = now;
 }
 
-void guide_key(struct guide *g, const unsigned char *buf, int n, unsigned now)
+void guide_key(struct guide *g, const u8 *buf, int n, unsigned now)
 {
 	struct guide_result *r;
 	int i, any = 0;

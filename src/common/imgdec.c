@@ -37,7 +37,7 @@ int imgdec_info(const u8 *data, unsigned n, int *w, int *h)
 int imgdec_argb(const u8 *data, unsigned n, int max_w, int max_h,
                 u32 **out, int *w, int *h)
 {
-	unsigned char *rgb;
+	u8 *rgb;
 	u32 *px;
 	usize i, count;
 	int comp;

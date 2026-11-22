@@ -289,7 +289,7 @@ static void log_fill_table(const struct fill_stat *st, int w, int h)
 	log_msg("fill-rate results (%dx%d, textured + blended full-screen layers):", w, h);
 	for (i = 0; i < NFILL; i++) {
 		unsigned span = st[i].last_ms - st[i].first_ms;
-		unsigned long long px;
+		u64 px;
 
 		/* the first frame of a step is the warm-up: its end starts the clock */
 		if (st[i].frames < 2 || span == 0) {

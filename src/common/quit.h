@@ -17,6 +17,8 @@
 #ifndef COMMON_QUIT_H
 #define COMMON_QUIT_H
 
+#include "types.h"
+
 enum {
 	QUIT_NONE = 0,
 	QUIT_TIMER,
@@ -34,7 +36,7 @@ enum {
  *
  * No key or button stops an app: a run always ends on its timer, a signal,
  * SD removal or the watchdog, so a stray press cannot cut a test short. */
-typedef void (*quit_key_cb)(const unsigned char *buf, int n, void *arg);
+typedef void (*quit_key_cb)(const u8 *buf, int n, void *arg);
 
 /* Call after log_open() and before any other thread exists. sd_path is
  * watched for card removal; watchdog_s arms alarm(). Returns 0, or -1 if

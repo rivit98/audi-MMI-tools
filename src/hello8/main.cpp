@@ -154,7 +154,7 @@ void log_toolchain()
 	        (unsigned)sizeof(pthread_mutex_t), (unsigned)sizeof(std::condition_variable),
 	        (unsigned)sizeof(pthread_cond_t), (unsigned)sizeof(std::thread),
 	        (unsigned)sizeof(std::shared_ptr<int>), (unsigned)sizeof(wchar_t),
-	        (unsigned)sizeof(long double), (unsigned)sizeof(time_t));
+	        (unsigned)sizeof(long double), (unsigned)sizeof(time_t)); // types-ok: the C types themselves
 }
 
 bool selected(const char *only, const char *name)

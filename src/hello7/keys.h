@@ -12,6 +12,8 @@
 #ifndef HELLO7_KEYS_H
 #define HELLO7_KEYS_H
 
+#include "types.h"
+
 enum key_ctl {
 	K_MAIN_RIGHT, K_MAIN_LEFT, K_VOL_UP, K_VOL_DOWN,
 	K_MENU, K_SOFT_TL, K_B1_40, K_B1_80,
@@ -29,13 +31,13 @@ struct key_hit {
 
 /* Decode buf[0..n). Returns the number of hits written to out (at most
  * max): K_RELEASE alone if no control is active. */
-int key_decode(const unsigned char *buf, int n, struct key_hit *out, int max);
+int key_decode(const u8 *buf, int n, struct key_hit *out, int max);
 
 const char *key_name(int ctl);
 
 /* The bits of buf[i] that can belong to a control: 0 for the unit-state
  * bytes 16-26 and past n, the always-set bits of bytes 14/15 removed. */
-int key_bits(const unsigned char *buf, int n, int i);
+int key_bits(const u8 *buf, int n, int i);
 
 /* "main knob right x2 + MENU" into buf. */
 void key_describe(const struct key_hit *hits, int n, char *buf, int size);

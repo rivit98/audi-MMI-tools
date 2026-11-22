@@ -147,7 +147,7 @@ static void draw_frame(int w, int h, unsigned ms, unsigned run_ms)
 static void take_screenshots(int w, int h)
 {
 	char path[256], cmd[320];
-	unsigned char *pixels = malloc((usize)w * h * 4);
+	u8 *pixels = malloc((usize)w * h * 4);
 	int rc;
 
 	if (pixels != NULL) {

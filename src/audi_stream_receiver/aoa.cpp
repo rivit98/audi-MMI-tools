@@ -204,7 +204,7 @@ void log_text(const char *what, const u8 *s, unsigned n)
 	unsigned o = 0;
 
 	for (unsigned i = 0; i < n && o + 5 < sizeof(buf); i++) {
-		unsigned char c = s[i];
+		u8 c = s[i];
 
 		if (c == '\n') {
 			buf[o++] = '\\';

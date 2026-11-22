@@ -51,7 +51,7 @@ int mesh_cube(struct mesh *m)
 	/* Per face: normal n, then u and v with u x v = n, so the corners
 	 * n + s*u + t*v in the order (-,-) (+,-) (+,+) (-,+) are
 	 * counter-clockwise seen from outside. */
-	static const signed char face[6][9] = {
+	static const i8 face[6][9] = {
 		{  1, 0, 0,   0, 0,-1,   0, 1, 0 },
 		{ -1, 0, 0,   0, 0, 1,   0, 1, 0 },
 		{  0, 1, 0,   1, 0, 0,   0, 0,-1 },
@@ -63,7 +63,7 @@ int mesh_cube(struct mesh *m)
 		{ 230, 40, 40 }, { 40, 210, 220 }, { 50, 210, 60 },
 		{ 220, 50, 210 }, { 50, 80, 235 }, { 240, 210, 40 },
 	};
-	static const signed char st[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+	static const i8 st[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
 	GLushort *idx;
 	int f, k, i;
 
@@ -71,7 +71,7 @@ int mesh_cube(struct mesh *m)
 		return -1;
 	idx = m->idx;
 	for (f = 0; f < 6; f++) {
-		const signed char *n = face[f], *u = face[f] + 3, *v = face[f] + 6;
+		const i8 *n = face[f], *u = face[f] + 3, *v = face[f] + 6;
 
 		for (k = 0; k < 4; k++) {
 			int vi = f * 4 + k;

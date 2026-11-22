@@ -8,6 +8,8 @@
 #ifndef HELLO8_CHECKS_H
 #define HELLO8_CHECKS_H
 
+#include "types.h"
+
 #include <string>
 #include <vector>
 
@@ -41,8 +43,8 @@ void mark_main();
 // __atomic_fetch_add on *count until *stop, returns how many it did. For
 // "atomics stress". On the car llcs.cpp has the SDK's default SH-4A LL/SC
 // atomics, gusa.cpp GCC's old sh4 default (soft-gusa).
-unsigned long long llcs_add_until(unsigned *count, const bool *stop);
-unsigned long long gusa_add_until(unsigned *count, const bool *stop);
+u64 llcs_add_until(unsigned *count, const bool *stop);
+u64 gusa_add_until(unsigned *count, const bool *stop);
 
 } // namespace checks
 

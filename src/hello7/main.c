@@ -82,7 +82,7 @@ static int dirty = 1;
 static int guided;
 static struct guide g;
 
-static void on_key(const unsigned char *buf, int n, void *arg)
+static void on_key(const u8 *buf, int n, void *arg)
 {
 	struct key_hit hits[KEY_MAX_HITS];
 	char what[96], hex[32 * 3 + 1], gap_s[16], where[48] = "";

@@ -77,7 +77,7 @@ int iom_attach_output(struct iom *g, const char *url)
 
 int iom_set_volume(struct iom *g, int volume)
 {
-	unsigned char v[4] = { (unsigned char)volume, 50, 50, 0 };
+	u8 v[4] = { (u8)volume, 50, 50, 0 };
 	struct iovec iov[2];
 
 	SETIOV(&iov[0], &g->output, sizeof(g->output));
