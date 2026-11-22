@@ -30,7 +30,11 @@
 //          each drawing path, one sub-test each: swdec, swcpu, swimage,
 //          swimage565, swyuv, swblit, swgl, swgl565 (also runnable alone)
 //
-// The default run is probe, then sw. seq (by name): three plays in a row. (1) c3, 720x480, as the unit
+// iomcopy (last in the default run): a second io-media-nvidia from RAM next
+// to the HMI's (iomcopy.h): an unchanged copy plays c3, then one with the
+// capture width at 800 plays it, then the original plays it again.
+//
+// The default run is probe, sw, then iomcopy. seq (by name): three plays in a row. (1) c3, 720x480, as the unit
 // plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
 // MP4) played, width put back. (3) c3 again. The crop tests above are answered
 // and run only by name.
@@ -52,10 +56,11 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: probe,sw)
+// usage: hello10 <sd_path> [test,test,...]   (default: probe,sw,iomcopy)
 #include "types.h"
 
 extern "C" {
+#include "iom.h"
 #include "log.h"
 #include "proc.h"
 #include "quit.h"
@@ -64,6 +69,7 @@ extern "C" {
 
 #include "capture.h"
 #include "csmp4.h"
+#include "iomcopy.h"
 #include "h264.h"
 #include "hw_stream.h"
 #include "player.h"
@@ -88,7 +94,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 600;    // the default run is ~3.5 min
+constexpr unsigned kWatchdogS = 720;    // the default run is ~6 min
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -100,7 +106,7 @@ constexpr const char *kLivePath = "/dev/hello10/live.mp4";
 constexpr const char *kRawClip = "c12_h264_800.h264";
 constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
 
-enum class Kind { File, Live, Probe, Patched, Sequence, Soft };
+enum class Kind { File, Live, Probe, Patched, Sequence, Soft, Copy };
 
 struct Test {
 	const char *name;
@@ -162,6 +168,13 @@ const std::vector<Test> kTests = {
 	{"swgl", "Software decoder: OpenGL", "Film the screen.", Kind::Soft, "gl", 0, 0, 0, 0},
 	{"swgl565", "Software decoder: OpenGL, 16-bit", "Film the screen.", Kind::Soft, "gl565", 0,
 	 0, 0, 0},
+	// last in the default run: it may take the radio or the screen until a restart
+	{"iomcopy", "A second io-media (about 2 min)",
+	 "A copy of the MMI's media service starts next to the original, plays a video, then a "
+	 "copy that captures 800 wide plays it, then the original plays it again. If the radio "
+	 "goes quiet or the screen stops: note when, then restart the MMI (MENU + main knob + "
+	 "top-right key).",
+	 Kind::Copy, "c3_h264_480.mp4", 0, 0, 0, 0},
 };
 
 // The steps of seq: the 800-wide capture is set only for step 2.
@@ -475,9 +488,11 @@ void result_line(const Test &t, const Outcome &o)
 	summary.push_back(line);
 }
 
-// c5: an MP4 file on the card.
-bool run_file(const Test &t, const std::string &graph)
+// c5: an MP4 file on the card. *time_events: the TIME events seen (did it play).
+bool run_file(const Test &t, const std::string &graph, unsigned *time_events = nullptr)
 {
+	// testapp-cmdline only knows /dev/io-media: no query of another instance
+	const bool own_iom = std::strcmp(iom_root(), "/dev/io-media") == 0;
 	Player player;
 	std::string err = player.open(graph, clip_path(t.clip));
 	if (err.empty())
@@ -498,9 +513,10 @@ bool run_file(const Test &t, const std::string &graph)
 		if (now >= kStartMs + t.watch_ms)
 			break;
 		if (!o.video_on && now >= kStartMs) {
-			query = std::thread([&o, graph, &t] {
-				o.q = query_graph(graph, std::string("query_") + t.name + ".log");
-			});
+			if (own_iom)
+				query = std::thread([&o, graph, &t] {
+					o.q = query_graph(graph, std::string("query_") + t.name + ".log");
+				});
 			vout::show();
 			o.video_on = true;
 			o.t_video = log_ms();
@@ -516,6 +532,8 @@ bool run_file(const Test &t, const std::string &graph)
 		query.join();
 	o.ps = &player.stats();
 	result_line(t, o);
+	if (time_events != nullptr)
+		*time_events = player.stats().time_events;
 	return quit_poll() == QUIT_NONE;
 }
 
@@ -677,6 +695,99 @@ bool run_patched(const Test &t, const std::string &graph)
 	return go;
 }
 
+// iomcopy: a second io-media from RAM (iomcopy.h), next to the HMI's.
+// (1) unchanged copy: starts? the original still alive? plays c3?
+// (2) only if (1) played: the copy with the capture width at 800 plays c3
+//     (720 wide): right edge black or frozen = the capture stops at the
+//     line's end; garbled or slanted = it counts pixels (phone-mirroring 7.14)
+// (3) the original plays c3 again: the HMI's io-media still works.
+bool run_iomcopy(const Test &t)
+{
+	static unsigned graphs;
+	if (access(clip_path(t.clip).c_str(), R_OK) != 0) {
+		log_msg("FAIL %s: %s missing", t.name, clip_path(t.clip).c_str());
+		summary.push_back(std::string(t.name) + ": clip missing");
+		return quit_poll() == QUIT_NONE;
+	}
+	int orig = -1;
+	std::string err = capture::find_io_media(out_path("pidin_iomcopy.txt").c_str(), orig);
+	log_msg("%s: original io-media pid %d%s%s", t.name, orig, err.empty() ? "" : ": ",
+	        err.c_str());
+	std::string dir = out_path("");
+	dir.pop_back();
+
+	struct Step {
+		const char *name;
+		u16 width;   // 0 = the original
+		const char *what;
+		unsigned watch_ms;
+	};
+	const Step steps[] = {
+		{"copy720", 720, "1 of 3: the COPY plays the 720x480 video.", 10000},
+		{"copy800", 800,
+		 "2 of 3: the copy capturing 800 wide plays the 720x480 video. Is the RIGHT edge "
+		 "black or frozen, or is the picture garbled or slanted?",
+		 20000},
+		{"orig720", 0, "3 of 3: the original plays the 720x480 video again.", 8000},
+	};
+	bool copy_played = false;
+	for (const Step &s : steps) {
+		if (s.width == 800 && !copy_played) {
+			log_msg("%s: skipped, the unchanged copy didn't play", s.name);
+			summary.push_back(std::string(s.name) + ": skipped (copy720 didn't play)");
+			continue;
+		}
+		ui::show(s.name, std::string(s.what) + kSeen, kFooter);
+		if (sleep_quit(kLabelMs / 2))
+			return false;
+		ui::hide();
+
+		iomcopy::Copy copy;
+		if (s.width != 0) {
+			log_msg("== %s: start the copy", s.name);
+			err = copy.start(bin_dir, dir, s.width);
+			if (!err.empty()) {
+				log_msg("FAIL %s: %s", s.name, err.c_str());
+				summary.push_back(std::string(s.name) + ": " + err);
+				continue;   // copy800 then skips: copy_played stays false
+			}
+			// idle first: does the original (and the radio) survive the start?
+			bool stop = sleep_quit(5000);
+			log_msg("  after 5 s idle: copy %s, original pid %d %s", copy.alive() ? "alive" : "GONE",
+			        orig, iomcopy::pid_alive(orig) ? "alive" : "GONE");
+			if (stop)
+				return false;
+			if (!copy.alive()) {
+				summary.push_back(std::string(s.name) + ": the copy exited after its start");
+				continue;
+			}
+			iom_set_root(iomcopy::kMount);
+		}
+		Test step = t;
+		step.name = s.name;
+		step.title = s.what;
+		step.kind = Kind::File;
+		step.watch_ms = s.watch_ms;
+		char gname[48];
+		std::snprintf(gname, sizeof(gname), "hello10_%d_copy%u", (int)getpid(), ++graphs);
+		unsigned te = 0;
+		bool go = run_file(step, gname, &te);
+		iom_set_root(nullptr);
+		if (s.width == 720)
+			copy_played = te > 0;
+		if (s.width != 0) {
+			log_msg("  after play: copy %s, original pid %d %s", copy.alive() ? "alive" : "GONE",
+			        orig, iomcopy::pid_alive(orig) ? "alive" : "GONE");
+			copy.stop();
+		}
+		if (!go)
+			return false;
+	}
+	log_msg("RESULT %s: original io-media pid %d %s at the end", t.name, orig,
+	        iomcopy::pid_alive(orig) ? "alive" : "GONE");
+	return quit_poll() == QUIT_NONE;
+}
+
 // seq: play, play at 800 with the capture patched in memory, play again.
 // Each step gets its own screen; the patch is put back after step 2 whatever
 // happened.
@@ -724,6 +835,12 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 	        t.kind == Kind::Live || t.kind == Kind::Soft ? kRawClip : (t.clip ? t.clip : "no clip"));
 	if (t.kind == Kind::Sequence)
 		return run_sequence(t);
+	if (t.kind == Kind::Copy) {
+		ui::show(title, t.what, kFooter);
+		if (sleep_quit(kLabelMs))
+			return false;
+		return run_iomcopy(t);
+	}
 
 	if ((t.kind == Kind::File || t.kind == Kind::Patched) &&
 	    access(clip_path(t.clip).c_str(), R_OK) != 0) {
@@ -760,7 +877,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)   // the default run
-		return t.kind == Kind::Probe || std::strcmp(t.name, "sw") == 0;
+		return t.kind == Kind::Probe || t.kind == Kind::Copy || std::strcmp(t.name, "sw") == 0;
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }

@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <process.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -32,6 +33,32 @@ pid_t proc_start(const char *out_path, char *const argv[])
 	close(saved1);
 	close(saved2);
 	close(fd);
+	errno = err;
+	return pid;
+}
+
+pid_t proc_spawn(const char *out_path, char *const argv[], char *const envp[])
+{
+	struct inheritance inh;
+	int out, in, err, fd_map[3];
+	pid_t pid;
+
+	out = open(out_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (out < 0)
+		return -1;
+	in = open("/dev/null", O_RDONLY);
+	fd_map[0] = in >= 0 ? in : SPAWN_FDCLOSED;
+	fd_map[1] = out;
+	fd_map[2] = out;
+	memset(&inh, 0, sizeof(inh));
+	inh.flags = SPAWN_SETGROUP | SPAWN_SETSIGMASK;
+	inh.pgroup = SPAWN_NEWPGROUP;
+	sigemptyset(&inh.sigmask);
+	pid = spawn(argv[0], 3, fd_map, &inh, argv, envp != NULL ? envp : environ);
+	err = errno;
+	close(out);
+	if (in >= 0)
+		close(in);
 	errno = err;
 	return pid;
 }

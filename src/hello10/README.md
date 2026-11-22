@@ -22,7 +22,11 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `seq` | c3 at 720, `cap800`, c3 at 720 again | The same, with a control before and after |
 | `sw` | c12 (800×480) decoded in **software** on the SH4: 15 s decode only (`swdec`), then 8 s on screen through each drawing path (`swcpu`, `swimage`, `swimage565`, `swyuv`, `swblit`, `swgl`, `swgl565`), each also runnable alone | How many frames a second the SH4 decodes, which drawing path gets the picture on screen, and how fast. Section "Software decoder" |
 
-The default is `probe` and then `sw`, about 3.5 minutes. `seq` runs by name.
+| `iomcopy` | a second io-media-nvidia from RAM next to the HMI's own: an unchanged copy plays c3 (10 s), then a copy with the capture width at 800 plays it (20 s), then the original plays it (8 s). Section "io-media copy" | Can a copy run beside the original, and does the media port capture an 800-sample line (phone-mirroring §7.14)? |
+
+The default is `probe`, `sw` and then `iomcopy`, about 6 minutes. `seq`
+runs by name. `iomcopy` is last: it may leave the radio or the screen
+broken until the MMI restarts.
 
 How each piece works:
 
@@ -107,6 +111,50 @@ wrong pixel. `swyuv`'s `format=` says which YUV format libgf took.
 | wrong colours or stripes, `readback=wrong` only for `swyuv` | the 2D engine takes the format but reads it differently (the layout is a guess) |
 | `FAIL draw/flip failed: <code>` | libgf or GL refuses that format or size |
 
+## io-media copy (`iomcopy`)
+
+io-media's capture width can't be changed in the running process (the
+`/proc` write is refused, phone-mirroring §7.14), so `iomcopy` runs a
+second io-media-nvidia from RAM and leaves the HMI's alone.
+
+- **The copy:** `/mnt/efs-system/sbin/io-media-nvidia` copied to the run
+  directory as `iom-copy` (or `iom-copy800` with the three width words
+  `d0 02` → `20 03` at file offsets 0x14a190, 0x14a26e, 0x14ad20; each
+  must read 720 first). It is started with the original's `/etc/iom.cfg`
+  plus `mountpoint = "/dev/hello10-iom"` in `global-options`
+  (`iomcopy_cfg.h`, host-tested, checked on the unit's files), `-B` and
+  srv-starter's `NV_*` environment. Nothing is written to flash.
+- **Why it can share the unit [inferred from the P1001 binaries]:** the
+  config's `mountpoint` replaces `/dev/io-media` (option parsing at
+  `0x080892b0`); `-B` keeps it in the foreground (without it,
+  `procmgr_daemon` gives it a new pid); io-media is a client of
+  `devg-NVTS` (`/dev/nvdsprm0`) and `devg-NVMiniRM` (`/dev/nvminirm0`),
+  and the DSP image is loaded once at boot by NvElfLoader, so the copy
+  doesn't reload the DSP.
+- **Not known:** whether `devg-NVTS` serves a second client, and what the
+  copy's start-up does to the DSP tasks the original runs (the audio
+  mixer, the health monitor). Hence the steps below and the radio left on.
+- **Steps:** start the copy, wait for its mountpoint (15 s at most), 5 s
+  idle, then play c3 through it (our player pointed at the copy with
+  `iom_set_root`), stop it (TERM, KILL). `copy800` runs only if `copy720`
+  played. `orig720` plays c3 through the HMI's io-media again.
+- **Logged:** the copy's start (pid, time to the mountpoint), what appeared
+  in `/dev`, `/dev/name/*`, `/dev/shmem`, `/dev/tsshmem` while it started,
+  whether the copy and the original are alive after the idle and after the
+  play, how the copy ended, and a `RESULT copy720` / `copy800` / `orig720`
+  line each (the fields above; `query` is empty for the copy:
+  testapp-cmdline knows only `/dev/io-media`). Files in `var/hello10/`:
+  `iom-copy*_out.txt` (the copy's output), `iom-copy*_ls_before.txt`,
+  `_ls_after.txt`.
+
+| Seen | Meaning |
+|---|---|
+| `copy720` plays (TIME events, picture), radio on, `orig720` plays | a copy works beside the original |
+| `copy800`: right 80 columns black or frozen | the media port stops at the line's end: an 800-wide signal from a patched DSP image would be captured |
+| `copy800`: garbled or slanted picture | the port counts pixels: 800 needs a matching signal, or is out |
+| no mountpoint, or the copy exits | it can't run beside the original (its `_out.txt` and the slog say why) |
+| radio silent or HMI media broken afterwards | the copy disturbed the DSP; restart the MMI |
+
 ## Running
 
 - **Run:** `hello10 <sd_path> [test,test,...]`, e.g. `crop`. `make sd
@@ -164,7 +212,8 @@ Run on the car (`seq` + `sw` with `gf_draw_image` only). The extended `probe`
 and host-tested (`tests/test_hello10_mapinfo.cpp`), not yet run on the car.
 The `sw` sub-tests (CPU, draw image BGRA/RGB565/YUV, blit, GL RGBA/RGB565,
 each with read-back, state dump and d-shot) are built and host-tested, not
-yet run on the car. Open: which drawing path shows the picture, and why
+yet run on the car. `iomcopy` is built, its config and patch host-tested and
+checked against the unit's files, not yet run on the car. Open: which drawing path shows the picture, and why
 `gf_draw_image` output stays invisible; the capture-width probe needs a
 patched io-media copy (or a RAM page patch, if `probe` finds one) instead of
 the `/proc` write.

@@ -26,6 +26,18 @@
 #define DCMD_PLAY         0x00000F06
 #define DCMD_ERROR_INFO   0x40100F11
 
+static char root[96] = "/dev/io-media";
+
+void iom_set_root(const char *r)
+{
+	snprintf(root, sizeof(root), "%s", r != NULL && r[0] ? r : "/dev/io-media");
+}
+
+const char *iom_root(void)
+{
+	return root;
+}
+
 static int dc_int(struct iom *g, int dcmd, int value)
 {
 	return devctl(g->fd, dcmd, &value, sizeof(value), NULL);
@@ -36,7 +48,7 @@ int iom_create(struct iom *g, const char *name)
 	int flags, rc;
 
 	g->output = -1;
-	snprintf(g->path, sizeof(g->path), "/dev/io-media/graphs/trackplayer/%s", name);
+	snprintf(g->path, sizeof(g->path), "%s/graphs/trackplayer/%s", root, name);
 	g->fd = open(g->path, O_RDWR | O_CREAT | O_EXCL, 0626);
 	if (g->fd < 0)
 		return errno;

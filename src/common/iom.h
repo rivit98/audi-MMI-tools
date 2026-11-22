@@ -54,6 +54,12 @@ struct iom_err {
 	u64 value;
 };
 
+/* Where io-media is mounted (default "/dev/io-media"): another instance
+ * started with its own config mountpoint (hello10's io-media copy). Set it
+ * before iom_create; graphs already made keep their path. */
+void iom_set_root(const char *root);
+const char *iom_root(void);
+
 int  iom_create(struct iom *g, const char *name);
 int  iom_set_speed(struct iom *g, int speed);          /* 1000 = normal */
 int  iom_set_time_notify(struct iom *g, int ms);

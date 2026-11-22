@@ -16,6 +16,13 @@
  * out_path. Returns the pid, or -1 (errno set). */
 pid_t proc_start(const char *out_path, char *const argv[]);
 
+/* Start a long-running child cleanly (QNX spawn(), as the runner starts
+ * apps): only stdin (/dev/null), stdout and stderr (out_path, appended),
+ * none of our other fds; its own process group; an empty signal mask (we
+ * block the quit signals). envp NULL = our environment. Returns the pid,
+ * or -1 (errno set). */
+pid_t proc_spawn(const char *out_path, char *const argv[], char *const envp[]);
+
 /* Wait up to timeout_ms for pid to exit. Returns 0 and the wait status in
  * *status if it did, -1 if it is still running. */
 int proc_wait(pid_t pid, unsigned timeout_ms, int *status);
