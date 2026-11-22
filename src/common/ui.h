@@ -1,4 +1,4 @@
-// ui.h - full-screen text screens for the test apps (hello9):
+// ui.h - full-screen text screens for the test apps (hello9, hello10):
 // cid 40, CPU-drawn through common/screen.c, as hello6's label.c.
 #ifndef COMMON_UI_H
 #define COMMON_UI_H
