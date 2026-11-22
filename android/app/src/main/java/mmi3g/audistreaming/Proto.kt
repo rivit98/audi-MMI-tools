@@ -9,27 +9,27 @@ package mmi3g.audistreaming
  *   HELLO 0x01 (both, "who I am", answered by HELLO_REPLY), HELLO_REPLY
  *   0x04 (both). 0x02 / 0x03 were TEXT / ACK, retired.
  *
- *   Video, one JPEG per picture (all integers LE):
+ *   Video is hardware H.264 only (all integers LE; proto.h has the details):
  *   VIDEO_CAPS 0x05 (MMI: landW u16, landH u16, portW u16, portH u16,
- *   maxBytes u32, formats u8: bit n-1 = format n; format 2 was PNG,
- *   retired), VIDEO_START 0x06 (phone: id u16, w u16, h u16,
- *   format u8, size u32, phoneMs u16 = scale + encode time, for the MMI's
- *   perf log; older MMI apps ignore it), VIDEO_DATA 0x07 (phone: id u16 + bytes),
- *   VIDEO_STOP 0x09 (phone, empty), VIDEO_ACKS 0x0D (MMI: shown u16, bad u16, dropped u16: this many more
- *   pictures are done; a JPEG at once, H.264 frames in batches). 0x08 was
- *   VIDEO_ACK, one per picture, retired; 0x0A was VIDEO_DETAILS (a status
- *   bar over a landscape picture), retired. STREAM_SETTINGS 0x0E (phone: ASCII
- *   "key=value ...", the settings streaming runs with, for the MMI's log
- *   only; older MMI apps log it as unknown and ignore it).
+ *   maxBytes u32, formats u8: bit n-1 = format n, h264MaxW u16, h264MaxH
+ *   u16, h264Fps u8, h264MaxFrame u32; 22 bytes). Only format 3 (H.264,
+ *   bit 2) is left: 1 was JPEG and 2 PNG, both retired and not to be reused.
+ *   The boxes and maxBytes are still on the wire but unused here.
+ *   H264_CONFIG 0x0B (phone: fps u8, frameBytes u32, spsLen u16, sps, ppsLen
+ *   u16, pps; NAL units without start codes) starts or restarts the stream.
+ *   Then each encoded frame (Annex-B) goes as VIDEO_START 0x06 (phone: id
+ *   u16, w u16, h u16, format u8 = FMT_H264, size u32, phoneMs u16 = 0) +
+ *   VIDEO_DATA 0x07 (phone: id u16 + bytes). VIDEO_ACKS 0x0D (MMI: shown
+ *   u16, bad u16, dropped u16: this many more frames are done, counted on
+ *   arrival, in batches). VIDEO_STOP 0x09 (phone, empty). H264_STATUS 0x0C
+ *   (MMI: code u8): PLAYING, SYNC (send an IDR), REFUSED (pause H.264 on
+ *   this link and try again later, [RefusedBackoff]), CONFIG (send
+ *   H264_CONFIG again). 0x08 was VIDEO_ACK, one per picture, retired; 0x0A
+ *   was VIDEO_DETAILS (a status bar over a landscape picture), retired.
  *
- *   Hardware H.264 (MMI apps with H.264; proto.h has the details):
- *   VIDEO_CAPS grows to 22 bytes with h264MaxW u16, h264MaxH u16, h264Fps
- *   u8, h264MaxFrame u32, and sets format bit 2. H264_CONFIG 0x0B (phone:
- *   fps u8, frameBytes u32, spsLen u16, sps, ppsLen u16, pps;
- *   NAL units without start codes) starts or restarts the stream; then each encoded
- *   frame (Annex-B) goes as a picture with format FMT_H264, counted in VIDEO_ACKS on arrival.
- *   H264_STATUS 0x0C (MMI: code u8): PLAYING, SYNC (send an IDR), REFUSED
- *   (send pictures instead), CONFIG (send H264_CONFIG again).
+ *   STREAM_SETTINGS 0x0E (phone: ASCII "key=value ...", the settings
+ *   streaming runs with, for the MMI's log only; older MMI apps log it as
+ *   unknown and ignore it).
  */
 object Proto {
     const val HELLO = 0x01
@@ -43,7 +43,7 @@ object Proto {
     const val VIDEO_ACKS = 0x0D
     const val STREAM_SETTINGS = 0x0E
 
-    const val FMT_JPEG = 1
+    /** VIDEO_START's format; 1 (JPEG) and 2 (PNG) are retired. */
     const val FMT_H264 = 3
 
     // H264_STATUS code
@@ -66,13 +66,12 @@ object Proto {
         return out
     }
 
-    /** The boxes a landscape / portrait picture must fit in (VIDEO_CAPS),
-     * and the limits of a hardware H.264 stream (0 from an older MMI app). */
+    /** VIDEO_CAPS: the limits of the MMI's hardware H.264 stream (0 from an
+     * older MMI app). The boxes and maxBytes are still on the wire, unused. */
     data class VideoCaps(val landW: Int, val landH: Int, val portW: Int, val portH: Int,
                          val maxBytes: Int, val formats: Int,
                          val h264MaxW: Int = 0, val h264MaxH: Int = 0, val h264Fps: Int = 0,
                          val h264MaxFrame: Int = 0) {
-        val jpeg: Boolean get() = takes(FMT_JPEG)
         val h264: Boolean get() = takes(FMT_H264) && h264MaxW > 0 && h264MaxH > 0 && h264Fps > 0
         fun takes(format: Int): Boolean = formats and (1 shl (format - 1)) != 0
     }
@@ -116,17 +115,17 @@ object Proto {
         return encode(STREAM_SETTINGS, b)
     }
 
-    /** One picture (format FMT_*) as VIDEO_START + VIDEO_DATA frames, back
-     * to back. phoneMs: what scaling and encoding it took. */
-    fun picture(id: Int, w: Int, h: Int, format: Int, data: ByteArray, phoneMs: Int): ByteArray {
+    /** One H.264 frame (Annex-B) as VIDEO_START + VIDEO_DATA frames, back
+     * to back. */
+    fun h264Frame(id: Int, w: Int, h: Int, data: ByteArray): ByteArray {
         val chunk = MAX_PAYLOAD - 2
         val nData = (data.size + chunk - 1) / chunk
         val out = ByteArray(HDR + START_LEN + nData * (HDR + 2) + data.size)
         val start = ByteArray(START_LEN)
         put16(start, 0, id); put16(start, 2, w); put16(start, 4, h)
-        start[6] = format.toByte()
+        start[6] = FMT_H264.toByte()
         put32(start, 7, data.size)
-        put16(start, 11, phoneMs.coerceIn(0, 0xffff))
+        // start[11..12]: phoneMs, 0 (the encoder's time isn't known per frame)
         encode(VIDEO_START, start).copyInto(out, 0)
         var o = HDR + start.size
         var i = 0

@@ -22,18 +22,12 @@ import java.util.concurrent.Executors
  * activity then goes back to waiting. A link is single-use.
  *
  * Video: the MMI announces what it can show in VIDEO_CAPS ([videoCaps],
- * null for an MMI app without video). [sendPicture] keeps at most
- * [MAX_IN_FLIGHT] pictures in flight: one being decoded and drawn on the
- * MMI, the next already there waiting, so the MMI never sits idle while
- * the phone captures, compresses and sends. The MMI keeps only the newest
- * waiting picture, so nothing queues up. A picture counts as done when
- * the MMI acks it (shown, bad or dropped). Only how many are in flight is
- * kept ([FlightWindow]): acks are counts, for no id in particular.
- *
- * H.264 (format FMT_H264): the MMI counts each frame as done as soon as it
+ * null for an MMI app without video). [sendFrame] sends one H.264 frame;
+ * the MMI counts each frame as done (shown, bad or dropped) as soon as it
  * is in its stream and acks them in batches, so up to [H264_IN_FLIGHT] are
- * allowed; what the MMI says about the stream (H264_STATUS) lands in [h264]
- * for the capture service to pick up.
+ * allowed. Only how many are in flight is kept ([FlightWindow]): acks are
+ * counts, for no id in particular. What the MMI says about the stream
+ * (H264_STATUS) lands in [h264] for the streaming service to pick up.
  */
 class AccessoryLink(
     private val usb: UsbManager,
@@ -93,30 +87,29 @@ class AccessoryLink(
         return true
     }
 
-    /** True if [sendPicture] would take a picture now. */
-    fun readyForPicture(maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
+    /** True if [sendFrame] would take a frame now. */
+    fun readyForFrame(): Boolean {
         if (closed) return false
         expire()
-        return inFlight.hasRoom(maxInFlight)
+        return inFlight.hasRoom(H264_IN_FLIGHT)
     }
 
     private fun expire() {
         val lost = inFlight.expire(SystemClock.elapsedRealtime())
-        if (lost > 0) Log.w(TAG, "$lost pictures never acked")
+        if (lost > 0) Log.w(TAG, "$lost frames never acked")
     }
 
-    /** Queues a picture (format Proto.FMT_*); false if maxInFlight are
-     * still in flight. */
-    fun sendPicture(id: Int, w: Int, h: Int, format: Int, data: ByteArray, phoneMs: Int,
-                    maxInFlight: Int = MAX_IN_FLIGHT): Boolean {
+    /** Queues one H.264 frame (Proto.h264Frame); false if [H264_IN_FLIGHT]
+     * are still in flight. */
+    fun sendFrame(id: Int, w: Int, h: Int, data: ByteArray): Boolean {
         if (closed) return false
         expire()
-        if (!inFlight.take(maxInFlight, SystemClock.elapsedRealtime())) return false
+        if (!inFlight.take(H264_IN_FLIGHT, SystemClock.elapsedRealtime())) return false
         video.sent++
         video.bytes = data.size
         video.w = w
         video.h = h
-        write(Proto.picture(id, w, h, format, data, phoneMs))
+        write(Proto.h264Frame(id, w, h, data))
         return true
     }
 
@@ -223,7 +216,6 @@ class AccessoryLink(
     companion object {
         private const val TAG = "AudiStreaming"
         const val ACK_TIMEOUT_MS = 3000L
-        const val MAX_IN_FLIGHT = 2
         const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked every ~0.2 s
         /** Who this is, in the MMI's log: the build first, then the phone. */
         val HELLO: String get() = "audi_streaming-android/1 build ${AppLog.version}, ${Build.MANUFACTURER} ${Build.MODEL}"

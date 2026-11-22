@@ -211,9 +211,9 @@ class MmiH264 {
 
     private fun pump(link: AccessoryLink) {
         val e = enc ?: return
-        while (queue.isNotEmpty() && link.readyForPicture(AccessoryLink.H264_IN_FLIGHT)) {
+        while (queue.isNotEmpty() && link.readyForFrame()) {
             val f = queue.first()
-            if (!link.sendPicture(nextId, e.w, e.h, Proto.FMT_H264, f, 0, AccessoryLink.H264_IN_FLIGHT)) break
+            if (!link.sendFrame(nextId, e.w, e.h, f)) break
             queue.removeFirst()
             nextId = if (nextId == 0xffff) 1 else nextId + 1
         }

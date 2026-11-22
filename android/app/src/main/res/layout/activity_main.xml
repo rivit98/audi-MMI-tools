@@ -86,28 +86,6 @@
                 android:id="@+id/screen_options"
                 layout="@layout/stream_options" />
 
-            <LinearLayout style="@style/OptionRow">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minEms="5"
-                    android:text="@string/format"
-                    android:textSize="14sp" />
-
-                <Spinner
-                    android:id="@+id/format"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:entries="@array/formats" />
-
-                <ImageButton
-                    android:id="@+id/info_format"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-
 
             <LinearLayout style="@style/OptionRow">
 

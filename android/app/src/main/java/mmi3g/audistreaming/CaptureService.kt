@@ -13,12 +13,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
-import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
-import android.media.Image
-import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -31,51 +27,37 @@ import android.os.SystemClock
 import android.view.Display
 import android.view.WindowInsets
 import android.view.WindowManager
-import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Screen streaming to the MMI: the phone's screen (MediaProjection) as
- * JPEG pictures or H.264 ([Streaming.format]), pictures at most [Streaming.maxFps] a
- * second and never more than
- * AccessoryLink.MAX_IN_FLIGHT in flight. The next picture goes as soon as
- * one in flight is acked and 1/maxFps has passed since the last was sent,
- * so a slow MMI sets the rate itself (a fixed tick would skip every other
- * one when an ack takes a little longer than the interval). Runs as a
- * foreground service so it keeps going while another app is in front -
- * that is the point of it.
+ * H.264, which the MMI's DM642 decodes (docs/phone-mirroring.md
+ * 7.10-7.12). Runs as a foreground service so it keeps going while another
+ * app is in front - that is the point of it.
  *
- * The capture is a virtual display mirroring the screen at k times the
- * picture that fits the MMI's box for the current orientation
- * (VideoFit.fit / factor; k = 2 landscape, 4 portrait on a 2340x1080
- * phone), box-filtered down k:1 (Downscale) - one big bilinear step made
- * text blurry. A rotation resizes it. The navigation bar stays out of the
- * pictures ([ScreenCrop]) unless [Streaming.hideNavBar] is off.
+ * The hardware encoder ([HwEncoder], 720x432 for the MMI's 720x576 limit,
+ * Android 10+) gets the virtual display through [GlScaler], which leaves the
+ * navigation bar out ([ScreenCrop], unless [Streaming.hideNavBar] is off)
+ * and box-filters k:1 (straight into the encoder, Android's one 3.25:1
+ * bilinear step blurred text). The "Sharp H.264" switch makes k = 1 for
+ * comparison. A phone whose GL setup fails gets the direct path, navigation
+ * bar included. The bit rate is the drop-down's. The scaler draws at
+ * exactly the "Max fps" slider's rate (at most the MMI's 25, [FrameClock]),
+ * a still screen too; the MMI times its stream at 25 fps and fills the rest
+ * with skip frames. The frames go to the MMI through [MmiH264] (queue, IDRs,
+ * the MMI's H264_STATUS), on whatever link [Streaming.link] holds, so
+ * unplugging and replugging the phone carries on streaming.
  *
- * Pictures are JPEG q90.
- * The pictures go to whatever link [Streaming.link] holds, so unplugging
- * and replugging the phone carries on streaming. Only a screen that
- * changes produces pictures; a new link gets the last one again.
- *
- * H.264 (the MMI's DM642 decodes it, docs/phone-mirroring.md
- * 7.10-7.12): the hardware encoder ([HwEncoder], 720x432 for the MMI's
- * 720x576 limit, Android 10+) gets the virtual display through [GlScaler],
- * which leaves the navigation bar out and box-filters k:1 (straight into
- * the encoder, Android's one 3.25:1 bilinear step blurred text). The
- * "Sharp H.264" switch makes k = 1 for comparison. A phone whose GL setup
- * fails gets the direct path, navigation bar included. The bit rate is the drop-down's. The
- * scaler draws at exactly the "Max fps" slider's rate (at most the MMI's
- * 25, [FrameClock]), a still screen too; the MMI times its stream at 25 fps
- * and fills the rest with skip frames. The frames go to the MMI through
- * [MmiH264] (queue, IDRs, the MMI's H264_STATUS); a REFUSED falls back to
- * JPEG until H.264 is tried again ([RefusedBackoff]: 5 s, doubling to 60 s).
+ * H.264 is the only format. A REFUSED pauses the stream on that link until
+ * H.264 is tried again ([RefusedBackoff]: 5 s, doubling to 60 s). An MMI app
+ * without H.264 gets nothing, and a phone that can't encode H.264 (before
+ * Android 10, or the encoder fails) stops streaming; [Streaming.status]
+ * says why.
  *
  * H.264 is landscape only: a portrait screen would fill a narrow strip of
  * the MMI with unreadable text, so while the phone is portrait the scaler
  * draws a "turn the phone to landscape" card ([Notice]) instead, into the
  * same stream (no MMI restart). The direct path can't draw it: its picture
- * stops (the MMI holds the last one). JPEG still follows the rotation.
+ * stops (the MMI holds the last one).
  *
  * [Streaming.keepScreenOn] holds a screen wake lock while streaming: the
  * activity's FLAG_KEEP_SCREEN_ON only counts while its window is visible,
@@ -94,24 +76,15 @@ class CaptureService : Service() {
     private lateinit var handler: Handler
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
-    private var reader: ImageReader? = null
-    private var geom: ScreenCrop.Geometry? = null     // the pictures', not the scaler's
     // the screen and what to leave out of it, read every SCREEN_CHECK_MS
     private var screen = VideoFit.Size(0, 0)
     private var insets = ScreenCrop.NONE
     private var screenAt = 0L
-    // capture -> picture: the capture's pixels, the downscaled ones, and
-    // the picture as a bitmap
-    private var src = IntArray(0)
-    private var px = IntArray(0)
-    private var pxBuf: ByteBuffer? = null
-    private var frame: Bitmap? = null
-    private var nextId = 1
-    private var last: Picture? = null
-    private var lastSent = false
-    private var lastLink: AccessoryLink? = null
     private lateinit var screenLock: PowerManager.WakeLock
     @Volatile private var destroying = false
+    // why streaming stopped by itself (H.264 can't run on this phone): kept
+    // in Streaming.status after the service is gone
+    @Volatile private var stopReason = ""
 
     // what the last status line counted (capture thread)
     private var statusAt = 0L
@@ -139,12 +112,9 @@ class CaptureService : Service() {
     private val mmi = MmiH264()                       // the encoder's frames to the MMI
     private val enc: HwEncoder? get() = mmi.enc
     private var scaler: GlScaler? = null              // null: the display draws into enc directly
-    private var h264Failed = ""                       // the phone can't: why
     private var h264ScalerFailed = ""                 // GL scaler failed once: direct from then on
     private var fpsChangeAt = 0L
     private var portrait = false                      // the notice is up instead of the screen
-
-    private class Picture(val w: Int, val h: Int, val data: ByteArray, val phoneMs: Int)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -225,7 +195,7 @@ class CaptureService : Service() {
         AppLog.i("service destroyed")
         unregisterReceiver(screenEvents)
         Streaming.running = false
-        Streaming.status = ""
+        Streaming.status = stopReason
         handler.removeCallbacksAndMessages(null)
         handler.post {
             screenLock.release()
@@ -234,11 +204,8 @@ class CaptureService : Service() {
             scaler = null
             enc?.release()
             mmi.encoderGone()
-            reader?.close()
-            frame?.recycle()
             projection?.stop()
             display = null
-            reader = null
             projection = null
             Streaming.link?.sendVideoStop()
             thread.quitSafely()
@@ -248,8 +215,7 @@ class CaptureService : Service() {
 
     // --- capture thread ----------------------------------------------------
 
-    /** Sent a picture: wait out the fps limit. Else (MMI has its fill, screen
-     * unchanged, no MMI) look again shortly. H.264: every few ms. */
+    /** One step of streaming, every few ms. */
     private fun tick() {
         var next = POLL_MS
         if (Streaming.keepScreenOn != screenLock.isHeld) {
@@ -258,13 +224,8 @@ class CaptureService : Service() {
         }
         logStatus()
         try {
-            sendSettings(wantH264())
-            if (wantH264()) {
-                next = h264Tick()
-            } else {
-                stopEncoder()
-                if (capture()) next = 1000L / Streaming.maxFps.coerceIn(MIN_FPS, MAX_FPS)
-            }
+            sendSettings()
+            next = h264Tick()
         } catch (e: RuntimeException) {
             AppLog.w("capture", e)
             Streaming.status = "capture error: ${e.message}"
@@ -273,22 +234,21 @@ class CaptureService : Service() {
     }
 
     /** What streaming runs with, for the MMI's log (STREAM_SETTINGS) and ours:
-     * the user's settings, what is sent (JPEG after a REFUSED) and the frame size. */
-    private fun settingsText(sendingH264: Boolean): String {
+     * the user's settings and the frame size. */
+    private fun settingsText(): String {
         fun on(b: Boolean) = if (b) 1 else 0
-        return "format=${Streaming.format} sending=${if (sendingH264) "H264" else "JPEG"} " +
-            "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
+        return "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
             "sharp=${on(Streaming.sharp)} " +
             "hide_nav_bar=${on(Streaming.hideNavBar)} keep_screen_on=${on(Streaming.keepScreenOn)} " +
-            "frame_kb=${mmi.frameBytes / 1024} jpeg_q=$QUALITY android=${Build.VERSION.SDK_INT}"
+            "frame_kb=${mmi.frameBytes / 1024} android=${Build.VERSION.SDK_INT}"
     }
 
     /** STREAM_SETTINGS to the link when streaming starts on it or a setting
      * changes; up= (ms since the phone booted) lines its log up with ours. */
-    private fun sendSettings(sendingH264: Boolean) {
+    private fun sendSettings() {
         val link = Streaming.link ?: return
         if (link.videoCaps == null) return                    // no MMI app yet
-        val text = settingsText(sendingH264)
+        val text = settingsText()
         if (link === settingsLink && text == settingsSent) return
         settingsLink = link
         settingsSent = text
@@ -333,21 +293,31 @@ class CaptureService : Service() {
 
     // --- H.264 (capture thread) -------------------------------------------
 
-    private fun wantH264(): Boolean {
-        if (Streaming.format != Format.H264) return false
-        val link = Streaming.link ?: return enc != null      // keep it through a replug
-        val caps = link.videoCaps ?: return false
-        return caps.h264 && !mmi.refused(link) && h264Failed.isEmpty() && Build.VERSION.SDK_INT >= 29
-    }
-
     /** One step of the H.264 stream; returns the delay to the next. */
     private fun h264Tick(): Long {
+        if (stopReason.isNotEmpty()) return POLL_MS          // stopping
+        if (!phoneCanH264) {
+            fail("needs Android 10 or newer")
+            return POLL_MS
+        }
+        // no link: the encoder stays, for a replug
         val link = Streaming.link
         if (link == null) {
             Streaming.status = "H.264: waiting for the MMI"
             return POLL_MS
         }
-        val caps = link.videoCaps ?: return POLL_MS
+        val caps = link.videoCaps
+        if (caps == null || !caps.h264) {
+            stopEncoder()
+            Streaming.status = if (caps == null) "waiting for the MMI app's video caps"
+                else "the MMI app has no H.264 (older audi_stream_receiver?): nothing to send"
+            return POLL_MS
+        }
+        if (mmi.refused(link)) {
+            stopEncoder()
+            Streaming.status = "the MMI refused H.264 (see its log), trying again soon"
+            return POLL_MS
+        }
         val wantFps = Streaming.maxFps.coerceIn(MIN_FPS, caps.h264Fps)
         val now = SystemClock.elapsedRealtime()
         val e = enc
@@ -374,7 +344,7 @@ class CaptureService : Service() {
         // the MMI's status, then the frames
         if (!mmi.step(link)) {
             stopEncoder()
-            Streaming.status = "the MMI refused H.264 (see its log): JPEG for now"
+            Streaming.status = "the MMI refused H.264 (see its log), trying again soon"
             return POLL_MS
         }
         val sc = scaler
@@ -392,18 +362,10 @@ class CaptureService : Service() {
         // behind the GL scaler the still screen is drawn on its clock: no
         // encoder repeats on top of that
         val viaGl = h264ScalerFailed.isEmpty()
-        val e = HwEncoder(w, h, fps, Streaming.bitRate, !viaGl, handler, mmi::onConfig, mmi::onFrame) { why ->
-            AppLog.w("H.264: $why")
-            h264Failed = why
-            Streaming.status = "H.264 failed ($why): JPEG instead"
-        }
+        val e = HwEncoder(w, h, fps, Streaming.bitRate, !viaGl, handler, mmi::onConfig, mmi::onFrame, ::fail)
         if (!e.start()) return false
         // the one virtual display (Android 14 allows one per projection)
-        // now draws into the encoder; the picture path gets it back on
-        // its next resize
-        reader?.close()
-        reader = null
-        geom = null
+        // draws into the encoder
         // the display through the GPU (GlScaler): navigation bar left out,
         // box-filtered k:1; without it, Android's one bilinear step blurs text
         var input = e.surface
@@ -488,6 +450,16 @@ class CaptureService : Service() {
                  else "landscape: H.264 shows the screen again")
     }
 
+    /** The phone can't do H.264: no fallback, streaming stops and
+     * [Streaming.status] keeps why. */
+    private fun fail(why: String) {
+        if (stopReason.isNotEmpty()) return
+        AppLog.w("H.264: $why: streaming stops")
+        stopReason = "H.264 failed ($why): streaming stopped"
+        Streaming.status = stopReason
+        stopSelf()
+    }
+
     private fun stopEncoder() {
         val e = enc ?: return
         display?.surface = null
@@ -496,89 +468,6 @@ class CaptureService : Service() {
         e.release()
         mmi.encoderGone()
         AppLog.i("H.264 off")
-    }
-
-    // --- pictures (capture thread) ------------------------------------------
-
-    /** True if a picture was sent. */
-    private fun capture(): Boolean {
-        val link = Streaming.link
-        val caps = link?.videoCaps
-        if (link == null || caps == null || !caps.jpeg) {
-            Streaming.status = when {
-                link == null -> "waiting for the MMI"
-                caps == null -> "MMI app has no video (old audi_stream_receiver?)"
-                else -> "MMI takes no JPEG"
-            }
-            return false
-        }
-        readScreen()
-        val cw = insets.contentW(screen.w)
-        val ch = insets.contentH(screen.h)
-        val want = VideoFit.fit(cw, ch, caps)
-        val g = ScreenCrop.geometry(screen.w, screen.h, insets, want.w, want.h, VideoFit.factor(cw, ch, want))
-        if (g != geom) resize(g)
-        val r = reader ?: return false
-        // Not while the MMI has its fill: an image taken now could not be
-        // sent, and a static screen makes no new one to replace it.
-        if (!link.readyForPicture()) return false
-
-        val note = if (Streaming.format == Format.H264) {
-            "H.264 off: " + when {
-                Build.VERSION.SDK_INT < 29 -> "needs Android 10"
-                h264Failed.isNotEmpty() -> h264Failed
-                link === mmi.refusedLink -> "the MMI refused it (trying again soon)"
-                else -> "the MMI app has none (older audi_stream_receiver?)"
-            } + ", JPEG instead"
-        } else ""
-        val pic = r.acquireLatestImage()?.use { image ->
-            val t0 = SystemClock.elapsedRealtime()
-            grab(image)
-            encode(t0)
-        }
-        // A static screen makes no new images: a new link (replug) gets the
-        // last picture again, otherwise the MMI keeps the one it shows.
-        val toSend = pic ?: last?.takeIf { link !== lastLink || !lastSent }
-            ?: return false
-        last = toSend
-        lastSent = false
-        if (toSend.data.size > caps.maxBytes) {
-            Streaming.status = "picture ${toSend.data.size} B > MMI max ${caps.maxBytes} B"
-            lastSent = true                  // never fits: don't retry it
-            return false
-        }
-        if (!link.sendPicture(nextId, toSend.w, toSend.h, Proto.FMT_JPEG, toSend.data, toSend.phoneMs)) return false
-        nextId = if (nextId == 0xffff) 1 else nextId + 1
-        lastLink = link
-        lastSent = true
-        Streaming.status = "${toSend.w}x${toSend.h} (x${geom?.k}) JPEG " +
-            "${toSend.data.size / 1024} KB, phone ${toSend.phoneMs} ms" + if (note.isNotEmpty()) "; $note" else ""
-        return true
-    }
-
-    /** The image's kept part, box-filtered down k:1, into [frame]. */
-    private fun grab(image: Image) {
-        val g = geom ?: return
-        val plane = image.planes[0]
-        val stride = plane.rowStride / plane.pixelStride
-        val ints = plane.buffer.order(ByteOrder.nativeOrder()).asIntBuffer()
-        // the last row may come without its padding
-        val n = minOf(ints.remaining(), stride * image.height)
-        if (src.size < stride * image.height) src = IntArray(stride * image.height)
-        ints.get(src, 0, n)
-        Downscale.box(src, stride, g.k, g.picW, g.picH, px, g.cropY * stride + g.cropX)
-        val buf = pxBuf!!
-        buf.clear()
-        buf.asIntBuffer().put(px, 0, g.picW * g.picH)
-        frame!!.copyPixelsFromBuffer(buf)
-    }
-
-    /** [frame] as JPEG; phoneMs counts from t0 (capture taken). */
-    private fun encode(t0: Long): Picture {
-        val f = frame!!
-        val out = ByteArrayOutputStream(64 * 1024)
-        f.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-        return Picture(f.width, f.height, out.toByteArray(), (SystemClock.elapsedRealtime() - t0).toInt())
     }
 
     /** [screen] and [insets] up to date; the capture thread calls this far
@@ -606,33 +495,6 @@ class CaptureService : Service() {
         if (metrics.bounds.width() != s.w || metrics.bounds.height() != s.h) return ScreenCrop.NONE
         val bar = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
         return ScreenCrop.sane(ScreenCrop.Insets(bar.left, bar.top, bar.right, bar.bottom), s.w, s.h)
-    }
-
-    /** First call creates the virtual display; later ones (rotation, other
-     * MMI caps) resize it - Android 14 allows one per projection. */
-    private fun resize(g: ScreenCrop.Geometry) {
-        val p = projection ?: return
-        val dpi = resources.displayMetrics.densityDpi
-        val cw = g.capW
-        val ch = g.capH
-        val old = reader
-        val r = ImageReader.newInstance(cw, ch, PixelFormat.RGBA_8888, 2)
-        val d = display
-        if (d == null) {
-            display = p.createVirtualDisplay("mmi-mirror", cw, ch, dpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, displayEvents, handler)
-        } else {
-            d.surface = r.surface
-            d.resize(cw, ch, dpi)
-        }
-        reader = r
-        old?.close()
-        px = IntArray(g.picW * g.picH)
-        pxBuf = ByteBuffer.allocateDirect(g.picW * g.picH * 4).order(ByteOrder.nativeOrder())
-        frame?.recycle()
-        frame = Bitmap.createBitmap(g.picW, g.picH, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
-        AppLog.i("capture $g (${if (g.picW < g.picH) "portrait" else "landscape"})")
-        geom = g
     }
 
     private fun notification(): Notification {
@@ -669,8 +531,7 @@ class CaptureService : Service() {
         const val DEFAULT_FPS = 5
         const val MIN_FPS = 1
         const val MAX_FPS = 25            // H.264 runs at up to the MMI's 25
-        private const val POLL_MS = 20L   // waiting for an ack or a new image
-        const val QUALITY = 90            // 60 rings around text
+        private const val POLL_MS = 20L   // waiting for the MMI or the encoder
         private const val H264_TICK_MS = 5L
         private const val FPS_SETTLE_MS = 700L
         private const val SCREEN_CHECK_MS = 200L
@@ -680,6 +541,9 @@ class CaptureService : Service() {
         // 128 KB frames
         val BIT_RATES = intArrayOf(2_500_000, 4_000_000, 6_000_000)
         const val DEFAULT_BIT_RATE = 4_000_000
+
+        /** The hardware encoder streaming needs: Android 10+. */
+        val phoneCanH264: Boolean get() = Build.VERSION.SDK_INT >= 29
 
         fun start(context: Context, resultCode: Int, data: Intent) {
             val i = Intent(context, CaptureService::class.java)
@@ -700,10 +564,8 @@ object Streaming {
     @Volatile var link: AccessoryLink? = null
     @Volatile var running = false
     @Volatile var status = ""
-    /** Pictures a second at most, set by the activity (its slider). */
+    /** Frames a second at most, set by the activity (its slider). */
     @Volatile var maxFps = CaptureService.DEFAULT_FPS
-    /** Picture format, set by the activity (its drop-down). */
-    @Volatile var format = Format.H264
     /** H.264 bits a second, set by the activity (its drop-down). */
     @Volatile var bitRate = CaptureService.DEFAULT_BIT_RATE
     /** H.264 box-filtered k:1 (sharp text) or k = 1 (Android's one scaling
@@ -715,10 +577,3 @@ object Streaming {
     @Volatile var keepScreenOn = false
 }
 
-/** The format drop-down, in its order (res/values/strings.xml formats). A
- * saved choice that is no longer here reads as H.264. */
-enum class Format {
-    /** The phone's hardware encoder, decoded by the MMI's DM642. */
-    H264,
-    JPEG,
-}

@@ -37,10 +37,9 @@ import android.widget.TextView
  * "Stream screen" asks for screen capture and starts CaptureService, which
  * sends the screen to the MMI (at most "Max fps" pictures a second, 5 by
  * default; the MMI's acks slow it down further) through the link
- * published in [Streaming.link]. "Format" picks H.264 (default) or JPEG
- * (CaptureService; remembered). "H.264 rate" (2.5-8 Mbit/s) and "Sharp
- * H.264" (the GPU box downscale, GlScaler; off = the old direct path, for
- * comparison) apply to H.264 only, also remembered. "Max fps", "H.264 rate"
+ * published in [Streaming.link], as H.264 (the only format). "H.264 rate"
+ * (2.5-6 Mbit/s) and "Sharp H.264" (the GPU box downscale, GlScaler; off =
+ * the old direct path, for comparison) are remembered. "Max fps", "H.264 rate"
  * and "Keep screen on" are on both pages ([StreamOptions]): the
  * Android Auto mode streams with the same settings. "Keep screen on" (remembered) has CaptureService hold the
  * screen on while it streams, so a timeout can't lock the phone and end the
@@ -128,19 +127,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         streamButton = findViewById(R.id.stream)
         videoView = findViewById(R.id.video_status)
         streamButton.setOnClickListener { toggleStreaming() }
-        Streaming.format = Format.entries.firstOrNull {
-            it.name == getPreferences(MODE_PRIVATE).getString(PREF_FORMAT, null)
-        } ?: Format.H264
-        findViewById<Spinner>(R.id.format).apply {
-            setSelection(Streaming.format.ordinal)
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
-                    Streaming.format = Format.entries[pos]
-                    getPreferences(MODE_PRIVATE).edit().putString(PREF_FORMAT, Streaming.format.name).apply()
-                }
-                override fun onNothingSelected(parent: AdapterView<*>) {}
-            }
-        }
         val prefs = getPreferences(MODE_PRIVATE)
         setUpStreamOptions(prefs)
 
@@ -358,7 +344,9 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         aaStatus.text = if (AaService.running) AaService.status else getString(R.string.aa_off)
         streamButton.text = getString(if (Streaming.running) R.string.stream_stop else R.string.stream_start)
         // the screen page streams only while Android Auto mode is off
-        streamButton.isEnabled = Streaming.running || (caps != null && !AaService.running)
+        // and only as H.264: an MMI app and a phone that can do it
+        streamButton.isEnabled = Streaming.running ||
+            (caps != null && caps.h264 && CaptureService.phoneCanH264 && !AaService.running)
         videoView.text = when {
             Streaming.running && l != null -> {
                 val v = l.video
@@ -375,9 +363,11 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             }
             Streaming.running -> "Video: ${Streaming.status}"
             l == null -> "Video: not connected"
+            !CaptureService.phoneCanH264 -> "Video: needs Android 10 or newer (H.264 encoder)"
             caps == null -> "Video: the MMI app sent no video caps (an old audi_stream_receiver?)"
-            else -> "Video: off. MMI shows up to ${caps.landW}x${caps.landH} " +
-                "(landscape) / ${caps.portW}x${caps.portH} (portrait)"
+            !caps.h264 -> "Video: the MMI app has no H.264 (an old audi_stream_receiver?)"
+            else -> "Video: off. MMI takes H.264 up to ${caps.h264MaxW}x${caps.h264MaxH}, ${caps.h264Fps} fps" +
+                if (Streaming.status.isNotEmpty()) "; last stream: ${Streaming.status}" else ""
         }
     }
 
@@ -445,7 +435,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     companion object {
         private const val ACTION_PERMISSION = "mmi3g.audistreaming.USB_PERMISSION"
         private const val REQ_CAPTURE = 1
-        private const val PREF_FORMAT = "format"
         private const val PREF_SHARP = "sharp_h264"
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
         private const val PREF_MODE = "mode"
@@ -455,7 +444,6 @@ class MainActivity : Activity(), AccessoryLink.Listener {
         private const val AA_PACKAGE = "com.google.android.projection.gearhead"
         private val INFO = listOf(
             Triple(R.id.info_stream, R.string.info_stream_title, R.string.info_stream),
-            Triple(R.id.info_format, R.string.info_format_title, R.string.info_format),
             Triple(R.id.info_sharp, R.string.info_sharp_title, R.string.info_sharp),
             Triple(R.id.info_hide_nav_bar, R.string.info_hide_nav_bar_title, R.string.info_hide_nav_bar),
             Triple(R.id.info_aa, R.string.info_aa_title, R.string.info_aa),

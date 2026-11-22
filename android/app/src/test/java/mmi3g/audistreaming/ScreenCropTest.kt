@@ -84,13 +84,4 @@ class ScreenCropTest {
         val g = ScreenCrop.Geometry(100, 200, 10, 20, 30, 60, 2)
         assertArrayEquals(floatArrayOf(0.1f, 0.3f, 0.7f, 0.3f, 0.1f, 0.9f, 0.7f, 0.9f), GlBox.quadTex(g), 1e-6f)
     }
-
-    @Test
-    fun boxReadsFromTheOffset() {
-        // a 4x2 capture, 2x2 kept from (1, 0), k = 2: only the middle counts
-        val src = intArrayOf(0x111111, 0x101010, 0x202020, 0x777777, 0x222222, 0x101010, 0x202020, 0x777777)
-        val out = IntArray(1)
-        Downscale.box(src, 4, 2, 1, 1, out, 1)
-        assertEquals(0xff181818.toInt(), out[0])
-    }
 }

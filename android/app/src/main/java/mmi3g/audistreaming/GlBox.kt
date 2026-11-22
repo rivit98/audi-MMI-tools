@@ -8,8 +8,7 @@ package mmi3g.audistreaming
  * bilinear step: each output pixel looks at 2x2 of the ~3x3 screen pixels
  * it covers, so thin text strokes are hit or missed (blurry H.264 text). With it the virtual display runs at k times the picture,
  * Android's step is about 1:1 (2340 -> 2160 for k = 3), and every output
- * pixel is the average of the k x k capture pixels under it - what
- * Downscale.box does for the JPEG pictures.
+ * pixel is the average of the k x k capture pixels under it.
  */
 object GlBox {
     /** The largest k <= MAX_FACTOR with k times the picture's content still
