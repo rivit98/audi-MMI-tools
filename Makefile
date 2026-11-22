@@ -468,7 +468,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -533,6 +533,9 @@ build/test_pulse:  tests/test_pulse.c tests/check.h src/hello5/pulse.c src/hello
 build/test_svcid:  tests/test_svcid.c tests/check.h src/hello5/svcid.c src/hello5/svcid.h
 # hello5's pid fallback: sloginfo / pidin lines (src/hello5/pidscan.c)
 build/test_pidscan: tests/test_pidscan.c tests/check.h src/hello5/pidscan.c src/hello5/pidscan.h
+# step d's helper link (src/hello5/ducklink.c), with shell-script helpers
+build/test_ducklink: tests/test_ducklink.c tests/check.h src/hello5/ducklink.c src/hello5/ducklink.h \
+                     src/common/log.c src/common/log.h
 # the HBDSI wire format (common/hbdsi_wire.c): broker attach, messages, listing
 build/test_hbdsi:  tests/test_hbdsi.c tests/check.h src/common/hbdsi_wire.c src/common/hbdsi_wire.h
 # hello7's ch8 decoding, on messages logged from the car

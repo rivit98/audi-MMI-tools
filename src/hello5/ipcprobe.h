@@ -45,11 +45,12 @@ unsigned ipc_find_max_ms(void);
 /* MMI3GApplication's pid, and the channels of it to send HBDSI to, best
  * first: the ones MMI3GNavigation holds a plain (non-side) connection to,
  * then its side-channel ones, then the channels MMI3GApplication's own
- * threads receive on (those need /proc). out_dir: where the pid lookup's
- * tool output goes. Returns how many chids were written, or -1 if the
- * process is not running. Logs what it found ("step d: ..." lines). */
+ * threads receive on (those need /proc). *n_nav: how many of the list's
+ * first entries the navigation is connected to. out_dir: where the pid
+ * lookup's tool output goes. Returns how many chids were written, or -1 if
+ * the process is not running. Logs what it found ("step d: ..." lines). */
 int ipc_app_channels(const char *out_dir, pid_t *app_pid, int *chids,
-                     unsigned max);
+                     unsigned max, unsigned *n_nav);
 
 /* Is `from` connected to pid/chid? 1 yes, 0 no. Used to tell whether a
  * service accepted a ConnectRequest: the server answers every request,

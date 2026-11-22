@@ -455,9 +455,11 @@ static unsigned recv_chids(int self, int *chids, unsigned n, unsigned max)
 }
 
 int ipc_app_channels(const char *out_dir, pid_t *app_pid, int *chids,
-                     unsigned max)
+                     unsigned max, unsigned *n_nav)
 {
 	unsigned n = 0;
+
+	*n_nav = 0;
 
 	find_procs(out_dir);
 	*app_pid = procs[0].pid;
@@ -470,6 +472,7 @@ int ipc_app_channels(const char *out_dir, pid_t *app_pid, int *chids,
 		log_msg("step d: MMI3GNavigation holds plain connections to %u of "
 		        "MMI3GApplication's channels", n);
 		n = conn_chids(0, 1, chids, n, max, 1);
+		*n_nav = n;
 	} else {
 		log_msg("step d: MMI3GNavigation is not running, no connection to "
 		        "learn the channel from");

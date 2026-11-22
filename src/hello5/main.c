@@ -28,9 +28,10 @@
  *      HBDSI, as the navigation does (does the radio get quieter?), plays
  *      pings on io-audio "navi" while it is open, gives it back, then plays
  *      3 control pings with no channel (play_duck below). The broker does
- *      not know the interface, so it sends the ConnectRequest straight to
- *      MMI3GApplication with a server id looked for in that process's own
- *      memory (duck_internal, svcscan.c).
+ *      not know the interface, so a helper process sends the
+ *      ConnectRequest straight to MMI3GApplication with a server id looked
+ *      for in that process's own memory (duckhelper.c, svcscan.c); hello5
+ *      never sends to the MMI itself.
  *   p  no sound: which channels MMI3GApplication, MMI3GNavigation and the
  *      servicebroker are connected to and receive on (ipcprobe.c), the
  *      evidence for how the navigation reaches audio management.
@@ -146,7 +147,9 @@
 
 #include <sys/asoundlib.h>
 
-#include "hbdsi.h"
+#include "hbdsi_wire.h"
+#include "duckhelper.h"
+#include "ducklink.h"
 #include "log.h"
 #include "proc.h"
 #include "quit.h"
@@ -154,8 +157,6 @@
 #include "iom.h"
 #include "ipcprobe.h"
 #include "pulse.h"
-#include "svcid.h"
-#include "svcscan.h"
 
 #define DEFAULT_STEPS   "mntv"
 #define DEFAULT_OUTPUTS "m2,m1,m6,m4,m7"
@@ -191,6 +192,7 @@ static unsigned clip_ms;
 static const char *wav;         /* beep's path, for testapp-file */
 static const char *player;      /* testapp-file, NULL if not found */
 static const char *sd_path;
+static const char *self_path;    /* argv[0], spawned as step d's helper */
 static const char *out_dir;    /* <sd_path>/var: everything written */
 
 /* io-media mixer outputs: every DSPOUT_TDM* name io-media-nvidia's mixer
@@ -1092,17 +1094,15 @@ static int play_native(const struct step *s, const char *log_file, struct play *
  *   5  control: 3 pings on navi with no channel: silent, as before?
  * With no connection at all, 5 still plays: is navi heard without one?
  * Every HBDSI step is logged, so a failure says where it stopped. The
- * broker's interface list goes to var/hello5_broker.txt. */
+ * broker's interface list goes to var/hello5_broker.txt.
+ *
+ * hello5 itself sends nothing to the MMI: a send to the wrong channel can
+ * block the sender for good, and a stuck hello5 would keep its screen on
+ * top. A helper process without a screen does every send (duckhelper.c),
+ * each answer has a deadline (ducklink.c), and a helper that misses one is
+ * killed and left behind: the step goes on to the control pings. */
 
-#define DUCK_IFACE        "SGAudioManagement"
-#define DUCK_ROLE         "AudioManagementDevCtrl"      /* its component */
-#define DUCK_MAX_CHIDS    8             /* channels of the server we collect */
-#define DUCK_TRY_CHIDS    8             /* and how many we send to */
-#define DUCK_MAX_IDS      (SVC_MAX_IDS + 2)
-#define DUCK_MAX_TRIES    24            /* ConnectRequests in all */
-#define DUCK_CONNECT_MS   1000          /* for a ConnectRequest reply */
-#define DUCK_BACK_MS      600           /* for the server to connect back */
-#define DUCK_TIMEOUT_MS   2000          /* for a server's reply */
+#define DUCK_HELPER_END_MS 3000        /* for the helper to exit after quit */
 #define DUCK_HOLD_MS      6000          /* phases 1 and 3 */
 #define DUCK_PINGS        6             /* phase 2 */
 #define DUCK_CONTROL      3             /* phase 5 */
@@ -1130,187 +1130,41 @@ static int duck_hold(const char *text, const char *question, const char *big,
 	return wait_ms(ms);
 }
 
-/* The broker's list, saved to var/, and the attach. Every candidate the
- * list names is tried, then the plain name at the usual versions. */
-static int duck_attach(struct hbdsi *c)
-{
-	static const u16 versions[][2] = { { 1, 0 }, { 1, 1 }, { 2, 0 }, { 0, 1 } };
-	static char text[16384];
-	char path[256], name[HBDSI_NAME_MAX];
-	u16 major, minor;
-	unsigned i;
-	int n, rc, status;
-	FILE *f;
+static struct duck_link duck_link;
 
-	n = hbdsi_broker_list(text, sizeof(text));
-	snprintf(path, sizeof(path), "%s/hello5_broker.txt", out_dir);
-	f = fopen(path, "w");
-	if (f != NULL) {
-		fputs(text, f);
-		fclose(f);
-	}
-	log_msg("step d: %s: %d bytes of status (saved to %s)", HBDSI_BROKER_PATH,
-	        n, path);
-	for (i = 0; hbdsi_listing_find(text, DUCK_IFACE, i, name, sizeof(name),
-	                               &major, &minor); i++) {
-		if (strstr(name, "Client") != NULL)
-			continue;
-		rc = hbdsi_attach(c, name, major, minor, &status);
-		log_msg("step d: attach \"%s\" %u.%u (listed): %s, broker: %d %s", name,
-		        major, minor, strerror(rc), status, hbdsi_broker_status_name(status));
-		if (rc == EOK && status == HBDSI_BROKER_OK) {
-			snprintf(duck_note, sizeof(duck_note), "attached %.60s %u.%u", name,
-			         major, minor);
-			return 0;
-		}
-	}
-	for (i = 0; i < sizeof(versions) / sizeof(versions[0]); i++) {
-		rc = hbdsi_attach(c, DUCK_IFACE, versions[i][0], versions[i][1], &status);
-		log_msg("step d: attach \"%s\" %u.%u: %s, broker: %d %s", DUCK_IFACE,
-		        versions[i][0], versions[i][1], strerror(rc), status,
-		        hbdsi_broker_status_name(status));
-		if (rc != EOK)
-			return -1;      /* no broker at all */
-		if (status == HBDSI_BROKER_OK) {
-			snprintf(duck_note, sizeof(duck_note), "attached %s %u.%u",
-			         DUCK_IFACE, versions[i][0], versions[i][1]);
-			return 0;
-		}
-		if (status != HBDSI_BROKER_VERSION_MISMATCH && i > 0)
-			break;
-	}
-	return -1;
+static int duck_stop(void)
+{
+	return quit_poll() != QUIT_NONE;
 }
 
-/* The other way in, when the broker does not know the interface: send the
- * ConnectRequest straight to MMI3GApplication, the way its own child
- * processes do (docs/hbdsi.md section 4). Three things are needed and
- * none of them comes from the broker:
- *   the server's pid         /proc, else sloginfo / pidin arg (ipcprobe.c)
- *   the channel to send to   the channels MMI3GNavigation is connected to
- *                            and the ones MMI3GApplication receives on
- *                            (ipcprobe.c)
- *   the service's server id  the component id from the bootstrap table,
- *                            looked for in the process's own memory
- *                            (svcscan.c), with the id read from the
- *                            binary as the fallback
- * The server answers every ConnectRequest, found or not, with its own
- * channels, so the reply says nothing about success. What does: it only
- * connects back to our channels when it found the service. */
-static int duck_internal(struct hbdsi *c)
+/* RequestAudioFocus / ReleaseAudioFocus(src, eSNK_SPEAKERS), sent by the
+ * helper. 0, an errno from the helper, or ETIMEDOUT / EPIPE / EINTR when
+ * the helper missed its deadline / is gone / we are asked to stop. */
+static int duck_focus_src(i32 src, int on)
 {
-	pid_t app = 0;
-	int chids[DUCK_MAX_CHIDS];
-	u32 ids[SVC_MAX_IDS + 2];
-	unsigned nids = 0, tries = 0, k;
-	struct svc_result scan;
-	char path[256];
-	int n, i, rc;
+	char cmd[32], reply[64];
+	int rc;
 
-	n = ipc_app_channels(out_dir, &app, chids, DUCK_MAX_CHIDS);
-	if (n <= 0) {
-		log_msg("step d: no channel of MMI3GApplication to send to");
-		return -1;
+	snprintf(cmd, sizeof(cmd), "focus %d %d", (int)src, on);
+	rc = link_cmd(&duck_link, cmd, DUCK_TIMEOUT_MS, reply, sizeof(reply),
+	              duck_stop);
+	switch (rc) {
+	case LINK_OK:
+		return atoi(reply);
+	case LINK_TIMEOUT:
+		snprintf(duck_note, sizeof(duck_note), "helper stuck in %s",
+		         on ? "RequestAudioFocus" : "ReleaseAudioFocus");
+		return ETIMEDOUT;
+	case LINK_STOP:
+		return EINTR;
+	default:
+		return EPIPE;
 	}
-	snprintf(path, sizeof(path), "%s/hello5_services.txt", out_dir);
-	if (svc_scan(app, DUCK_ROLE, path, &scan) == 0)
-		for (k = 0; k < scan.nids && nids < DUCK_MAX_IDS; k++)
-			ids[nids++] = scan.ids[k];
-	/* the ids the binary's bootstrap table gives, in case the scan found
-	 * nothing: they are what the table says audio management is */
-	for (k = 0; k < 2; k++) {
-		u32 id = k == 0 ? SVC_ID_AUDIO_DEVCTRL : SVC_ID_AUDIO_PRESCTRL;
-		unsigned j;
-
-		for (j = 0; j < nids; j++)
-			if (ids[j] == id)
-				break;
-		if (j == nids && nids < DUCK_MAX_IDS)
-			ids[nids++] = id;
-	}
-	svc_ids_rank(ids, nids);
-
-	/* the best id on every channel first, then the next id: an answer on
-	 * the wrong channel costs a ConnectRequest timeout at most */
-	for (k = 0; k < nids && tries < DUCK_MAX_TRIES; k++) {
-		for (i = 0; i < n && i < DUCK_TRY_CHIDS && tries < DUCK_MAX_TRIES; i++) {
-			unsigned waited = 0;
-			int back = 0;
-
-			tries++;
-			hbdsi_target(c, (u32)app, (u32)chids[i], ids[k]);
-			rc = hbdsi_connect(c, DUCK_CONNECT_MS);
-			if (rc != EOK) {
-				log_msg("step d: chid %d, server id 0x%08x: ConnectRequest: %s",
-				        chids[i], (unsigned)ids[k], strerror(rc));
-				hbdsi_close(c);
-				hbdsi_init(c);
-				continue;
-			}
-			/* it may connect back after its reply: give it a moment.
-			 * Two signs, each enough: its connection to our channel, or
-			 * any message or pulse on our channels. */
-			for (;;) {
-				back = ipc_connected_to(app, getpid(), c->chid[0]) ||
-				       ipc_connected_to(app, getpid(), c->chid[1]);
-				if (back || c->rx_msgs[0] + c->rx_msgs[1] +
-				            c->rx_pulses[0] + c->rx_pulses[1] > 0 ||
-				    waited >= DUCK_BACK_MS)
-					break;
-				nap(50);
-				waited += 50;
-			}
-			log_msg("step d: chid %d, server id 0x%08x: answered (its chids "
-			        "%u/%u pid %u), after %u ms: connected back %s, rx %u+%u "
-			        "messages %u+%u pulses", chids[i], (unsigned)ids[k],
-			        (unsigned)c->srv.chid[0], (unsigned)c->srv.chid[1],
-			        (unsigned)c->srv.pid, waited, back ? "YES" : "no",
-			        c->rx_msgs[0], c->rx_msgs[1], c->rx_pulses[0],
-			        c->rx_pulses[1]);
-			if (back || c->rx_msgs[0] + c->rx_msgs[1] > 0) {
-				log_msg("RESULT step d: %s answered on chid %d with server id "
-				        "0x%08x and %s", DUCK_ROLE, chids[i], (unsigned)ids[k],
-				        back ? "connected back" : "sent a message (no "
-				        "connection seen)");
-				snprintf(duck_note, sizeof(duck_note),
-				         "chid %d, server id 0x%08x", chids[i],
-				         (unsigned)ids[k]);
-				return 0;
-			}
-			hbdsi_close(c);
-			hbdsi_init(c);
-		}
-	}
-	log_msg("step d: %u ConnectRequest(s), none reached %s", tries, DUCK_ROLE);
-	return -1;
 }
 
-static void duck_log_attach(const struct hbdsi_attach_reply *r)
+static int duck_focus(int on)
 {
-	log_msg("step d: server nd %u pid %u chid %u, word0 0x%x, server id <%u.%u>, "
-	        "client id <%u.%u>", (unsigned)r->nd, (unsigned)r->pid,
-	        (unsigned)r->chid, (unsigned)r->word0, (unsigned)r->server_id[0],
-	        (unsigned)r->server_id[1], (unsigned)r->client_id[0],
-	        (unsigned)r->client_id[1]);
-}
-
-/* RequestAudioFocus / ReleaseAudioFocus(src, eSNK_SPEAKERS). */
-static int duck_focus_src(struct hbdsi *c, i32 src, int on)
-{
-	const i32 args[2] = { src, SGAM_SNK_SPEAKERS };
-	u32 id = on ? SGAM_REQ_AUDIO_FOCUS : SGAM_REQ_RELEASE_FOCUS;
-	unsigned t0 = log_ms();
-	int rc = hbdsi_request(c, id, args, 2, DUCK_TIMEOUT_MS);
-
-	log_msg("step d: %s(%d, %d) = request %u: %s after %u ms",
-	        on ? "RequestAudioFocus" : "ReleaseAudioFocus", (int)args[0],
-	        (int)args[1], (unsigned)id, strerror(rc), log_ms() - t0);
-	return rc;
-}
-
-static int duck_focus(struct hbdsi *c, int on)
-{
-	return duck_focus_src(c, SGAM_SRC_NAVTTS, on);
+	return duck_focus_src(SGAM_SRC_NAVTTS, on);
 }
 
 /* Phase 4: the other sources worth a try (docs/hbdsi.md section 3), each
@@ -1378,7 +1232,7 @@ static int duck_control(snd_pcm_t *h, const i16 *pcm, int connected)
 
 /* Phase 4: each other source asked for, held, pinged, given back. 1 if
  * asked to stop. */
-static int duck_other_sources(struct hbdsi *c, snd_pcm_t *h, const i16 *pcm)
+static int duck_other_sources(snd_pcm_t *h, const i16 *pcm)
 {
 	char text[160], big[32];
 	unsigned i;
@@ -1391,7 +1245,7 @@ static int duck_other_sources(struct hbdsi *c, snd_pcm_t *h, const i16 *pcm)
 		         duck_sources[i].name);
 		log_msg("step d: source %u/%u: %d %s", i + 1, DUCK_NSOURCES,
 		        (int)duck_sources[i].src, duck_sources[i].name);
-		rc = duck_focus_src(c, duck_sources[i].src, 1);
+		rc = duck_focus_src(duck_sources[i].src, 1);
 		if (rc != EOK) {
 			log_msg("step d: source %d: request not sent (%s), next",
 			        (int)duck_sources[i].src, strerror(rc));
@@ -1406,20 +1260,20 @@ static int duck_other_sources(struct hbdsi *c, snd_pcm_t *h, const i16 *pcm)
 		if (h != NULL && duck_pings(h, pcm, DUCK_SRC_PINGS, text,
 		                            "LISTEN: pings heard?"))
 			goto stop;
-		duck_focus_src(c, duck_sources[i].src, 0);
+		duck_focus_src(duck_sources[i].src, 0);
 		if (duck_hold("Given back.", "LISTEN: radio back to normal?",
 		              "given back", 2000))
 			return 1;
 	}
 	return 0;
 stop:
-	duck_focus_src(c, duck_sources[i].src, 0);
+	duck_focus_src(duck_sources[i].src, 0);
 	return 1;
 }
 
 static int play_duck(const struct step *s, const char *log_file, struct play *p)
 {
-	struct hbdsi c;
+	char *argv[4], reply[128];
 	struct clip train;
 	snd_pcm_t *h = NULL;
 	i16 *pcm;
@@ -1430,7 +1284,7 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	duck_index = cur_index;
 	duck_count = cur_count;
 	duck_note[0] = '\0';
-	hbdsi_init(&c);
+	link_init(&duck_link);
 	pcm = malloc(pulse_samples(DUCK_PINGS) * sizeof(i16));
 	if (pcm == NULL) {
 		log_msg("step d: no memory for the pings");
@@ -1448,36 +1302,42 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 		log_msg("step d: navi would not open, the pings stay silent");
 
 	duck_screen(s->todo, NULL, "asking the MMI", 0);
-	if (duck_attach(&c) == 0) {
-		duck_log_attach(&c.r);
-		rc = hbdsi_connect(&c, DUCK_TIMEOUT_MS);
-		if (rc != EOK) {
-			log_msg("RESULT step d: ConnectRequest: %s", strerror(rc));
-			snprintf(duck_note, sizeof(duck_note), "connect: %s", strerror(rc));
-			goto control;
-		}
-	} else {
-		/* the broker does not know it: the way its own children go */
-		log_msg("step d: no attach to %s through the broker, going straight to "
-		        "MMI3GApplication", DUCK_IFACE);
-		hbdsi_close(&c);
-		hbdsi_init(&c);
-		duck_screen(s->todo, NULL, "reading the MMI", 0);
-		if (duck_internal(&c) != 0) {
-			log_msg("RESULT step d: no connection to %s", DUCK_IFACE);
-			snprintf(duck_note, sizeof(duck_note), "%s: no connection",
-			         DUCK_IFACE);
-			goto control;
-		}
+	argv[0] = (char *)self_path;
+	argv[1] = (char *)sd_path;
+	argv[2] = (char *)DUCK_HELPER_ARG;
+	argv[3] = NULL;
+	rc = link_start(&duck_link, argv);
+	if (rc != 0) {
+		log_msg("RESULT step d: helper %s would not start: %s", self_path,
+		        strerror(rc));
+		snprintf(duck_note, sizeof(duck_note), "no helper: %s", strerror(rc));
+		goto control;
+	}
+	rc = link_cmd(&duck_link, "connect", DUCK_BROKER_MS, reply, sizeof(reply),
+	              duck_stop);
+	if (duck_link.note[0] != '\0')
+		snprintf(duck_note, sizeof(duck_note), "%s", duck_link.note);
+	if (rc == LINK_STOP)
+		goto out;
+	if (rc != LINK_OK) {
+		log_msg("RESULT step d: no connection to %s (%s)", DUCK_IFACE,
+		        rc == LINK_ERR ? reply :
+		        rc == LINK_TIMEOUT ? "the helper is stuck in a send, given up" :
+		        "the helper is gone");
+		if (rc == LINK_TIMEOUT)
+			snprintf(duck_note, sizeof(duck_note), "helper stuck (%.70s)",
+			         duck_link.note[0] ? duck_link.note : "connect");
+		goto control;
 	}
 	connected = 1;
-	log_msg("RESULT step d: connected to %s (server pid %u chid %u, server id "
-	        "<%u.%u>)", DUCK_IFACE, (unsigned)c.r.pid, (unsigned)c.r.chid,
-	        (unsigned)c.r.server_id[0], (unsigned)c.r.server_id[1]);
+	log_msg("RESULT step d: connected to %s (server pid, chid, server id: %s)",
+	        DUCK_IFACE, reply);
 
 	/* 1: the channel alone */
-	rc = duck_focus(&c, 1);
+	rc = duck_focus(1);
 	focus = rc == EOK;
+	if (rc == EINTR)
+		goto out;
 	if (!focus) {
 		log_msg("RESULT step d: RequestAudioFocus not sent: %s", strerror(rc));
 		goto control;
@@ -1494,14 +1354,14 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	                            "between them?"))
 		goto out;
 	/* 3: give it back */
-	duck_focus(&c, 0);
+	duck_focus(0);
 	focus = 0;
 	if (duck_hold("hello5 has given the channel back.",
 	              "LISTEN: is the radio back to its normal volume?",
 	              "channel closed", DUCK_HOLD_MS))
 		goto out;
 	/* 4: the other sources */
-	if (duck_other_sources(&c, h, pcm))
+	if (duck_other_sources(h, pcm))
 		goto out;
 control:
 	/* 5: control, no channel (also when nothing connected) */
@@ -1511,14 +1371,15 @@ control:
 		p->eof = 1;
 	else
 		p->refused = 1;
-	log_msg("step d: rx: %u+%u messages, %u+%u pulses from the server",
-	        c.rx_msgs[0], c.rx_msgs[1], c.rx_pulses[0], c.rx_pulses[1]);
+	if (link_cmd(&duck_link, "rx", 0, reply, sizeof(reply), duck_stop) == LINK_OK)
+		log_msg("step d: rx: %s (messages, messages, pulses, pulses) from the "
+		        "server", reply);
 out:
 	if (focus)
-		duck_focus(&c, 0);      /* never leave the radio lowered */
+		duck_focus(0);          /* never leave the radio lowered */
 	if (h != NULL)
 		snd_pcm_close(h);
-	hbdsi_close(&c);
+	link_end(&duck_link, DUCK_HELPER_END_MS);
 	free(pcm);
 	p->stopped = !p->eof && !p->refused;
 	return 0;
@@ -1590,14 +1451,13 @@ static unsigned step_max_ms(const struct step *s)
 	if (s->play == play_probe)
 		return ipc_probe_max_ms() + STEP_DONE_MS;
 	if (s->play == play_duck)
-		return s->intro_s * 1000 + STEP_DONE_MS + ipc_find_max_ms() +
-		       svc_scan_max_ms() +
-		       DUCK_MAX_TRIES * (DUCK_CONNECT_MS + DUCK_BACK_MS) +
-		       2 * DUCK_HOLD_MS +
+		return s->intro_s * 1000 + STEP_DONE_MS + duck_connect_max_ms() +
+		       2 * DUCK_HOLD_MS + 3 * (DUCK_TIMEOUT_MS + DUCK_LINK_SLACK_MS) +
 		       (DUCK_PINGS + DUCK_CONTROL) * PULSE_PERIOD_MS +
-		       DUCK_NSOURCES * (DUCK_SRC_HOLD_MS + 2000 + 2 * DUCK_TIMEOUT_MS +
+		       DUCK_NSOURCES * (DUCK_SRC_HOLD_MS + 2000 +
+		                        2 * (DUCK_TIMEOUT_MS + DUCK_LINK_SLACK_MS) +
 		                        DUCK_SRC_PINGS * PULSE_PERIOD_MS) +
-		       STEP_SLACK_MS;
+		       DUCK_HELPER_END_MS + 1000 + STEP_SLACK_MS;
 	return s->intro_s * 1000 + STEP_DONE_MS + 2000 +
 	       2 * ((s->pings + s->chain) * PULSE_PERIOD_MS + STEP_SLACK_MS);
 }
@@ -1731,6 +1591,10 @@ int main(int argc, char *argv[])
 		return 2;
 	}
 	sd_path = argv[1];
+	self_path = argv[0];
+	/* step d's helper: no screen, no keys, no sound (duckhelper.h) */
+	if (argc > 2 && strcmp(argv[2], DUCK_HELPER_ARG) == 0)
+		return duck_helper_main(sd_path);
 	out_dir = var_dir(sd_path);
 	if (argc > 2)
 		steps = argv[2];

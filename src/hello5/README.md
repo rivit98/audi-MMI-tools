@@ -51,8 +51,17 @@ an on-screen question for the listener.
 **Not explained**
 - In `t` and `v` the first ping can come ~12 dB under the rest (amplifier fade-in? [inferred]).
 
-**Do not run step `d` as it is**: a ConnectRequest to the wrong channel
-hangs hello5 for good (see above).
+**Step `d` can no longer hang the run** (built, not yet confirmed on the
+car). hello5 sends nothing to the MMI itself: it spawns a copy of itself
+without a screen (`hello5 <sd_path> @duck`, `duckhelper.c`) that does
+every HBDSI send, and talks to it over two pipes (`ducklink.c`, protocol in
+`ducklink.h`). Before each send the helper says how long it may take; a
+helper that misses that deadline (+2 s) is killed and left behind, and the
+step goes on to the control pings. The helper only tries the channels
+MMI3GApplication shares with the navigation, minus 6 and 13
+(`DUCK_SKIP_CHIDS`): that leaves chid 14. Its log is
+`var/hello5_helper.log`; hello5's log has every line exchanged
+(`helper <-` / `helper ->`).
 
 Details: [docs/platform-notes.md §9](../../docs/platform-notes.md) (audio),
 [docs/hbdsi.md](../../docs/hbdsi.md) (step `d`), knob/button decoding moved to [hello7](../hello7/).
