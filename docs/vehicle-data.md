@@ -83,7 +83,7 @@ From the firmware's strings and the open files of the running unit
 | ch2 | MMI3GApplication (`COnOffIPC`), MMI3GMisc | power state frames, docs/power-onoff.md §4 [confirmed] |
 | ch3 | MMI3GApplication `IPCD::init` (0x08803f60) | MOST subsystem control channel [confirmed] |
 | ch4 | MMI3GApplication `CHBIpcProtocol` (0x08806aa4) | MOST subsystem message channel: logical devices, BAP [confirmed, §5] |
-| ch5 | `ndr` reads (fd 9, `r-`), NavCore holds it write-only (fd 12, `-w`) | vehicle signals [confirmed, §3] |
+| ch5 | `ndr` reads (fd 9, `r-`), NavCore holds it write-only (fd 12, `-w`) | **both directions.** In: vehicle signals [confirmed, §3]. Out: NavCore's ADAS data, the map's predicted route (`AdasSpeedLimits`, `AdasPsdStatisticsWriter`, "ADAS-IPC: MUTE!" next to `/dev/ipc/ch5` in NavCore's strings) for the car's control units [inferred: strings]. Our apps must never write it. |
 | ch6 | MMI3GMisc (`CHBJobDU`, thread `SwdlIpcDUWorkerThread`) | software download: KWP diagnostic jobs to a download unit [confirmed: strings] |
 | ch7 | MMI3GMisc (`CHBJobIOCBase`, `CHBJobIOCErase`) | software download: erasing and flashing the IOC over KWP [confirmed: strings] |
 | ch8 | MMI3GApplication, MMI3GMedia, ejecthandler | knobs and buttons, platform-notes.md §8 [confirmed] |
