@@ -263,3 +263,49 @@ from §4 and the server id from §5. Two things make this readable:
   keeps it in the connection record. So step `d` sends client id 0 and
   takes the id from the first message the server sends back
   (`hbdsi.c`), for the requests that follow.
+
+### 6.1 What step `d` gets on the car
+
+- **Finding the processes.** `/proc` lists 74 pids and every
+  `/proc/<pid>/as` opens, but `DCMD_PROC_MAPDEBUG_BASE` (the name lookup,
+  `ipcprobe.c`) fails with `EBADF` on all of them, our own included, so no
+  name comes from `/proc` [confirmed]. `DCMD_PROC_TIDSTATUS`,
+  `DCMD_PROC_MAPINFO` and `read()` on the same files work. `sloginfo`
+  (MMI3GApplication, MMI3GNavigation) and `pidin arg` (servicebroker)
+  give the pids.
+- **Who talks to whom** (step `p`, `ipcprobe.c`) [confirmed]:
+  MMI3GApplication receives on chids 1 3 6 12 13 15 19 22 48 50 (58
+  threads) and holds a plain connection to the servicebroker's chid 1.
+  MMI3GNavigation holds side-channel connections to MMI3GApplication's
+  chids **6, 13 and 14** and none plain; MMI3GApplication holds side
+  channels to the navigation's chids 4 and 5. `pidin -p <pid> fd` on
+  either MMI3G process never finishes (killed after ~18 s); on the
+  servicebroker it does.
+- **The memory scan** reads 258 segments, ~150 MB of MMI3GApplication, in
+  ~70 s. `"AudioManagementDevCtrl"` is in 26 places, but no word points at
+  any of them and no component-id-shaped word sits next to them: 0
+  candidate ids [confirmed]. `0x00020027` stays the only id to try.
+- **ConnectRequest to chid 6** (id `0x00020027`): replied at once with
+  all zeros (chids 0/0, pid 0, nd 0), nothing connected back within
+  600 ms, the receive threads got nothing [confirmed]. A zero reply is
+  not `replyConnectRequest`'s (§6 above), so chid 6 is not the HBDSI root
+  channel; probably the per-child "ready" channel of §4 [inferred].
+- **ConnectRequest to chid 13 never returns** [confirmed]. Nothing comes
+  back, the 600 ms `TimerTimeout` doesn't end the `MsgSend`, and neither
+  do SIGTERM, `_exit()` or SIGKILL: the process stays REPLY-blocked for
+  good. That is what QNX does when the server's channel was created with
+  `_NTO_CHF_UNBLOCK`: a timeout or a signal only sends the server an
+  unblock pulse, and the client waits until the server replies [inferred
+  from the QNX kernel's rules]. MMI3GApplication's thread for that channel
+  ignores both the message and the pulse.
+
+**Consequences.** A `MsgSend` to an unknown channel of an MMI3G process
+can block the sending thread, and its whole process, forever. A stuck
+process keeps its displayable on top (the screen freezes on the app's
+last picture, the HMI underneath can't be reached), and `run.sh` waits
+on it forever, so no later app runs. Radio sound and the volume knob kept
+working, so MMI3GApplication's audio side was alive [confirmed on video].
+Before any more probing: send from a separate process that owns no
+screen (or give the screen back before the first send), and let run.sh
+move on when a killed app doesn't exit. Of MMI3GApplication's channels,
+only 14 (also used by the navigation) is untried.

@@ -17,7 +17,9 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `crop` | c12 cropped to 720×480, 25 fps, 30 s | Does an 800-wide coded picture play? A **red "CUT" band** on the right = the DSP ignores the crop |
 | `cropnav` | c12 cropped to 720×416, 20 s | Is the **blue band** at the bottom gone, and is the picture stretched to the full height? (cutting Android Auto's bottom bar) |
 | `slow` | as `crop`, frames at 15 fps, gap fill to 25, 20 s | Skip frames on an 800-wide coded picture: what a paced phone sends |
-
+| `probe` | reads io-media-nvidia's three capture-width words (`capture.cpp`) through `/proc/<pid>/as` | Are the addresses right? (read only) |
+| `cap800` | c3 (720×480) with io-media's capture width written to 800 in memory, 30 s | Does the media port capture an 800-sample line? (phone-mirroring §7.14) |
+| `seq` | c3 at 720, `cap800`, c3 at 720 again | The same, with a control before and after |
 | `sw` | c12 (800×480) decoded in **software** on the SH4: 20 s decode only, then on screen through `gf_draw_image` as BGRA (15 s) and as YUV (10 s) | How many frames a second the SH4 decodes, and how many reach the screen. Section "Software decoder" |
 
 The default is `seq` (the capture width test) and then `sw`, about 3 minutes.
@@ -107,7 +109,33 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 | black, `errors` > 0 or no TIME events | refused or the DSP stopped: `slog.txt` for an assertion |
 | `cropnav`: blue band gone, picture full height | the vertical crop works; the VCAP stretches 416 lines to 480 |
 
+## Results
+
+**Works**
+- `seq` videos 1 and 3 (c3, 720×480 through the DSP): picture on screen,
+  knob turns seen, io-media reports 720×480, no errors; lag median ~330 ms
+  and ~540 ms.
+- `sw` decoding: 800×480 Baseline at **37.6 fps** (752 frames in 20 s),
+  decode ms min/median/p90/max 22/25/28/63, IDR ~54 ms, P ~25 ms, no errors.
+- `gf_draw_image` returns 0 for `BGRA8888` and for `PLANAR_YUV_420`; the
+  loop runs at 12.1 fps (BGRA: decode 26 + CPU convert 33 + flip 23 ms)
+  and 21.6 fps (I420: decode 26 + flip 20 ms, no convert).
+
+**Doesn't work**
+- `cap800` (video 2): the in-memory patch is refused. The three words read
+  720, the first write fails with `ESRVRFAULT` ("Server fault on msg
+  pass"), nothing is changed and video 2 is skipped (phone-mirroring §7.14).
+- `sw` on screen: **no decoded picture is visible**. During both drawing
+  steps the screen alternates between the previous text screen (the step's
+  instructions, left in the VFB) and the HMI's radio screen showing
+  through, about every 2–4 s, though every draw and flip returns 0. So the
+  2D engine's writes don't reach the surface the layer manager shows, or
+  arrive transparent (cid 40 is a "Transparent" displayable,
+  platform-notes §3.1) [inferred, cause not known]. The fps figures above
+  are the loop's, not frames seen.
+
 ## State
 
-Built, host-tested (the SPS rewrite, the software decoder against ffmpeg);
-not yet run on the car.
+Run on the car (`seq` + `sw`). Open: why `gf_draw_image` output stays
+invisible; the capture-width probe needs a patched io-media copy from the
+card instead of the in-memory patch.

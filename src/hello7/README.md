@@ -50,12 +50,19 @@ control explains shows as `unknown b<byte> 0x<bits>`.
 
 **Works**
 - Main knob (bytes 6/7) and volume knob (bytes 4/5) decode, with detent counts.
-- Buttons show as a bit in byte 0, 1 or 3, then an all-zero release message.
+- Buttons show as a bit in byte 0, 1, 2 or 3, then an all-zero release message.
+- The guided mode ran end to end (27 steps, ~3 min): 21 steps got their
+  control, no two steps the same bytes. Every button is now named
+  (platform-notes §8 table).
+- The touch pad sends 29/30-byte messages (bytes 14–15 `02 02`) with extra
+  bytes after byte 26 (`ca ..` down, `3d`/`3e` + coordinate, `cb` up).
 
 **Doesn't work**
 - The HMI still acts on every knob and button.
-- Button names are guesses ("MENU" = byte 3 `0x04`); the rest are unnamed.
-  The guided mode is built to name them; not yet run on the car.
+- Joystick (main knob tilt, 4 steps) and the steering-wheel keys (2 steps):
+  nothing on ch8.
+- `keys.c` still names only the old eight controls; the rest log as
+  `unknown b<byte> 0x<bits>`. The touch pad's coordinates are not decoded.
 - This car's volume knob sometimes reports both directions in one turn (hardware fault).
 
 Details: [docs/platform-notes.md §8](../../docs/platform-notes.md).

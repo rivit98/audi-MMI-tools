@@ -38,15 +38,21 @@ an on-screen question for the listener.
 - QSA (`libasound`): every device takes the data, nothing is heard.
 - Other mixer outputs are silent or mute the car's audio; `TDM1_51_SAD` won't attach while the radio plays.
 - The servicebroker doesn't know `SGAudioManagement` (status 2).
-- Looking up the three processes' pids through `/proc` found none of them.
+- Looking up the three processes' pids through `/proc` found none of them
+  (`EBADF`); the `sloginfo` / `pidin arg` fallback finds all three, and
+  step `p` then lists their channels (docs/hbdsi.md §6.1).
+- Step `d`: the memory scan finds no server id; the ConnectRequest to
+  MMI3GApplication chid 6 gets an all-zero reply and no connect-back; the
+  one to chid 13 **never returns**. hello5 then can't be stopped (not even
+  by SIGKILL), its screen stays frozen on top of the HMI and run.sh never
+  starts the next app (hbdsi.md §6.1). No ping was played.
 - `testapp-file`'s exit code is always 1, success included.
 
 **Not explained**
 - In `t` and `v` the first ping can come ~12 dB under the rest (amplifier fade-in? [inferred]).
 
-**Not yet confirmed on the car**
-- Steps `p` and `d` with the widened pid lookup (`sloginfo`, `pidin arg`,
-  `procdiag`) and the direct ConnectRequest to MMI3GApplication.
+**Do not run step `d` as it is**: a ConnectRequest to the wrong channel
+hangs hello5 for good (see above).
 
 Details: [docs/platform-notes.md §9](../../docs/platform-notes.md) (audio),
 [docs/hbdsi.md](../../docs/hbdsi.md) (step `d`), knob/button decoding moved to [hello7](../hello7/).

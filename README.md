@@ -40,6 +40,7 @@ and what doesn't). Shared code is in [src/common/](src/common/).
 | [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`): names one control at a time on screen, logs what each sends |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP |
+| [hello10](src/hello10/README.md) | 800×480 video: io-media capture-width probe, software H.264 decoding on the SH4 |
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |

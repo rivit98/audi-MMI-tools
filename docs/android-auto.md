@@ -19,8 +19,9 @@ two places that the existing `audi_stream_receiver` work cannot answer:
    mirroring uses. Cropping the SPS of an 800x480 stream to 720 stays
    black (section 4.1). The way around it is on the phone: the phone app's
    Android Auto mode decodes Android Auto's video and sends the MMI a
-   720x432 stream (section 4.3). Software decode on the SH4 is unmeasured
-   (hello10's `sw` test measures it).
+   720x432 stream (section 4.3). Software decode on the SH4 is fast
+   enough (800x480 ~38 fps decode only), but getting the picture on screen
+   is not solved (phone-mirroring §4, src/hello10/README.md).
 2. **Live PCM audio out.** The only audible path found is file-based [repo].
 
 Do the two de-risking experiments (section 5, steps 1-3) before writing any
@@ -143,8 +144,9 @@ reach the screen through io-media. The options left:
   phone-mirroring §7.14.
 - **Software decode, Baseline.** Cheapest profile (no CABAC, no B-frames). Cost
   chain per frame: decode + YUV to RGB on the CPU + texture upload (31 ms for
-  800x480 RGBA measured [repo]). My guess is 8-15 fps on mostly static UI
-  [estimate]. P-frames cannot be dropped, so the decoder must keep up on
+  800x480 RGBA measured [repo]). Decode alone measured ~38 fps on the car
+  (hello10 `sw`); with `gf_draw_image` 12-22 fps and nothing visible yet
+  (phone-mirroring §4). P-frames cannot be dropped, so the decoder must keep up on
   average or latency grows until the ack window throttles the phone.
 - **Not usable:** the GPU's VCAP 1 "Partial Decode" is suspected MPEG-2 only
   [repo].

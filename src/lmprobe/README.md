@@ -29,12 +29,10 @@ before, during and after the bars. In the default run.
 **Expected, not errors**
 - Unregister before register returns `EINVAL`: check the register `result`, not just the devctl return.
 
-**Built, not yet run on the car**
-- The state dump: the files, then in the log the layer lines, the
-  displayables with their front/back sids, the foreground (layer 0) cid,
-  `second read` (0 = the server keeps the file offset), and `foreground
-  before X, after Y: restored`.
-- `lm_get_vfb ... after update`: the sid should change (the VFB is
-  double-buffered).
+- The state dump before, during and after the bars (`lmprobe_state_*.txt`),
+  parsed in the log: foreground cid 16 before, 40 while shown, 16 after
+  (`restored`); `second read 0`.
+- `lm_get_vfb ... after update` returns the other sid (1 → 0): the VFB is
+  double-buffered.
 
 Details: [docs/platform-notes.md §3](../../docs/platform-notes.md).

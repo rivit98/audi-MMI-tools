@@ -100,8 +100,9 @@ manager's state dump (§3.1).
 ### 3.1 The state dump: `read()` of `/dev/layermanager`
 
 A plain `read()` of `/dev/layermanager` returns layermanagerV2's
-`CGraphicsManager::dumpCurrentState` as text. The format strings are in the
-P1001 binary [confirmed in the binary, not yet read on the car]:
+`CGraphicsManager::dumpCurrentState` as text (~3.9 KB, `LayermanagerV2 v1.1
+4 Dec 2009`); a second `read()` on the same fd returns 0, so the server
+keeps the file offset [confirmed]. The lines that matter:
 
 ```
 Displayable id: %d
@@ -120,6 +121,29 @@ index 7), so it can put exactly that one back on exit instead of assuming
 `src/common/lmstate.c` parses it (pure, `tests/test_lmstate.c`). lmprobe
 saves a dump before, during and after its bars, and logs a second `read()`
 on the same fd to show whether the server honours the file offset.
+
+What the dump shows on the car [confirmed]:
+
+| layer (gf index) | idle HMI | with our cid 40 shown |
+|---|---|---|
+| 0 (7) | cid **16** | cid **40** |
+| 1 (6) | not attached (the **video layer**) | same |
+| 2 (5) | cid 19 | cid 16 |
+| 3 (4) | — | cid 19 |
+| 4–7 (3–0) | not attached | same |
+
+- cid 16 (the HMI screen) is "Transparent, pre-multiplied alpha"; cid 19
+  (the map) is opaque. Our cid 40 registered with flags 2 is
+  "Transparent"; none of them has alpha surfaces.
+- cids 17, 25, 26, 27, 29, 30, 31, 34 and 37 are video-capture displayables
+  ("used for capturing video signals", 25 and 37 on capture unit 0), all
+  800×480 and not visible.
+- `show {40,16,19}` pushes the HMI's 16 and 19 one layer down; after
+  unregistering 40 and showing `{40,16,19}` again the layers are exactly
+  as before (foreground cid 16 restored). The surfaces in use are six
+  800×480 `0x1420` ones, 9.2 MB of video memory.
+- `lm_get_vfb` after `lm_update_vfb` returns the other sid (1 → 0): the
+  double buffering of §3 seen from a client.
 
 ## 4. Display and layers
 
@@ -237,8 +261,8 @@ untried route to a clean offscreen capture. **[unverified]**
 The unit's only user input reaches us as 27-byte messages on `/dev/ipc/ch8`.
 Each message is the current state of the controls: bytes 14–15 are normally
 `01 02` (byte 17 = `01` too), and a message with all control bytes zero
-follows a button release. Decoded from a fixed sequence of turns and presses
-done by the user against the full 27-byte dumps:
+follows a button release. Named one control at a time by hello7's guided
+mode (A6 C7, MMI 3G+ with touch pad) [confirmed]:
 
 | byte | value | control |
 |---|---|---|
@@ -246,10 +270,42 @@ done by the user against the full 27-byte dumps:
 | 7 | detents | main rotary knob **anticlockwise (left)** |
 | 4 | detents | volume knob **up** |
 | 5 | detents | volume knob **down** |
-| 3 | `0x04` | **MENU**? The two buttons came in a different order in two decoding sessions, so the name is **unconfirmed**. The press always falls in the same second as the HMI's `OnOff new system state is 48` |
-| 1 | `0x02` | **top-left soft key**? The other of the two: **unconfirmed** |
-| 1 | `0x40` | another button (which one is unknown) |
-| 1 | `0x80` | another button (unknown) |
+| 0 | `0x01` | **RADIO** |
+| 0 | `0x02` | **MEDIA** |
+| 0 | `0x08` | **TEL** |
+| 0 | `0x10` | **NAV/MAP** |
+| 0 | `0x40` | **CAR** |
+| 1 | `0x01` | **next track** (`>>\|`) |
+| 1 | `0x02` | soft key **top left** |
+| 1 | `0x04` | soft key **bottom left** |
+| 1 | `0x08` | **previous track** (`\|<<`) |
+| 1 | `0x10` | soft key **top right** |
+| 1 | `0x20` | soft key **bottom right** |
+| 1 | `0x40` | **BACK** |
+| 1 | `0x80` | main knob **press** |
+| 2 | `0x01` | volume knob **press** (mute and unmute alike) |
+| 3 | `0x04` | **MENU** (same second as the HMI's `OnOff new system state is 48`) |
+
+Not on ch8 at all: the main knob's four tilt directions (a joystick; none
+came in 15 s each, so this car's knob has none or they travel elsewhere)
+and the steering-wheel volume wheel and arrow keys (most likely the wheel
+reaches the unit as BAP/CAN on another channel [inferred]).
+
+**Touch pad and the 29/30-byte messages.** Touch pad strokes come as
+messages with bytes 14–15 = `02 02` and 1–3 extra bytes after byte 26:
+
+```
+... 02 02 00 01 ... 00  ca 84 c6     finger down (first byte 0xCx)
+... 02 02 00 01 ... 00  3d 3c        moves: 0x3d/0x3e + one coordinate byte
+... 02 02 00 01 ... 00  3e 3a
+... 02 02 00 01 ... 00  cb           finger up
+```
+
+The same `02 02` + `c4 xx` pair also arrives ~0.6 s after a main-knob
+press or a soft key (`c4 06`, `c4 09`), with no hand on the pad. The pad's
+coordinate encoding (and what `c4 xx` is) is not decoded yet; the first
+extra byte looks like a type (`0xC4`/`0xCA`/`0xCB` events, `0x3D`/`0x3E`
+axis samples) [inferred].
 
 ```
 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 02 00 01 ...  main knob 1 detent right
@@ -282,9 +338,8 @@ done by the user against the full 27-byte dumps:
 - Bytes 16–26 are **state, not controls** [inferred]: byte 16 is constant
   within a run but has been seen as `00` in one and `03` in another,
   byte 26 as `11`, and bytes 23/25 change with no control touched. hello7
-  does not decode them. There are also 29- and 33-byte messages with
-  byte 14 = `02`, and unnamed button bits byte 1 `0x04`/`0x10`/`0x20` and
-  byte 0 `0x01`/`0x02`/`0x08`/`0x10`/`0x40` (src/hello7/README.md).
+  does not decode them. Messages with byte 14 = `02` (29, 30 or 33
+  bytes) carry the touch pad's extra bytes (above).
 - **Byte 15 looks like the unit's power state** [inferred]. It is `02` in
   normal operation. With nothing touched, ch8 sends a 29-byte message with
   bytes 14–15 = `02 02`, then `01 03` 0.2–0.6 s later and `01 00` about
@@ -310,9 +365,8 @@ done by the user against the full 27-byte dumps:
 removal or the watchdog — a stray press during a test cannot cut it short.
 `quit.c` still reads ch8, logs the first messages raw and offers the bytes to
 an app observer (`quit_init_ex`), which is how hello5 counts volume detents.
-**hello7** is the free-form input tester: it names every control as it is
-used (`src/hello7/keys.c`) and reports unknown bits by byte, so the unknown
-`0x40`/`0x80` buttons can be named with one press each.
+**hello7** is the input tester: its guided mode named the table above, one
+control per step; it reports bits it has no name for by byte.
 
 ## 9. Audio — only io-media's `TDM1_20_SAD` is heard
 

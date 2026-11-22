@@ -258,7 +258,7 @@ screen's shape) with the letterbox inside it (§7.12).
 |---|---|
 | Raw pixels (dirty tiles + LZ4, or DXT1 tiles) drawn with GL | GL upload ~50 MB/s with one upload in flight, so busy content (scrolling, maps) drops to ~15 fps; H.264 gives 25 fps at a fixed bandwidth with the SH4 mostly idle |
 | Talking to the DSP driver directly (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) | Reverse engineering a private NVIDIA protocol with no symbols; only worth it to cut io-media's ~0.5 s lag |
-| Software H.264 on the SH4 | No SIMD, 792 MHz: an estimated 5–10 fps at 720×336 **[unverified estimate]** |
+| Software H.264 on the SH4 | Decoding keeps up (800×480 Baseline: ~38 fps decode only, ~25 ms per P frame, ~54 ms per IDR, h264bsd **[confirmed]**, hello10 `sw`), but no fast way onto the screen is known: through `gf_draw_image` 12 fps (BGRA, CPU colour convert ~33 ms) or 22 fps (planar I420), and neither picture was visible (src/hello10/README.md). H.264 through the DSP costs ~10% CPU |
 | scrcpy over adb (the MMI as adb host) | Needs USB debugging always on, and its video still needs the DSP path |
 | Android Auto receiver on the MMI | Works up to the video, which is 800 wide and can't be shown (android-auto.md §4.1); the phone relay (§1) replaces it |
 
@@ -1148,11 +1148,16 @@ Four changes, all needed together:
 
 How to get the patches onto a running unit (efs-system stays untouched):
 
-- **io-media:** patch the bytes in the running process through
-  `/proc/<pid>/as` (a debugger-style write; the constant sits in a literal
-  pool in `.text`) [inferred], or stop it and run a patched copy from the
-  SD card with the same arguments (`-c /etc/iom.cfg`, `NMSDK_DSP_PD=1`).
-  The second also restarts the HMI's media stack.
+- **io-media:** patching the running process through `/proc/<pid>/as`
+  **doesn't work**. The file opens `O_RDWR` and the three width words
+  read back 720 at 0x0818a190 / 0x0818a26e / 0x0818ad20 (the addresses are
+  right), but the first `pwrite` fails with `ESRVRFAULT` ("Server fault on
+  msg pass") and nothing changes [confirmed, hello10 `seq`]. io-media-nvidia
+  runs from `/mnt/efs-system/sbin` (flash), so its `.text` is most likely
+  mapped straight from flash (execute in place) and procnto faults writing
+  it [inferred]. What is left: stop io-media and run a patched copy from
+  the SD card (copied into RAM) with the same arguments (`-c /etc/iom.cfg`,
+  `NMSDK_DSP_PD=1`). That also restarts the HMI's media stack.
 - **DSP:** NvElfLoader must load the patched image. Options: a procnto
   path-space link (`ln -sP <sd>/NvDspCodecs.elf /etc/NvDspCodecs.elf`)
   plus a DSP reload (io-media has crash recovery that runs NvElfLoader
@@ -1167,7 +1172,8 @@ How to get the patches onto a running unit (efs-system stays untouched):
   software refuses it; the hardware sees only a ratio. Whether it stops at
   EAV or counts pixels is only answered on the car. The probe needs no DSP
   change: patch io-media's capture width to 800 and play today's
-  720-wide signal. The right 80 columns black or stale = it stops at EAV
+  720-wide signal (in a patched io-media copy from the card: the in-memory
+  patch is refused, above). The right 80 columns black or stale = it stops at EAV
   (good); garbage or a sheared picture = it counts pixels. A read-only
   look first: with a clip playing, map the GPU's BAR0 and read 0x200448
   (pitch), 0x200450 (buffer length), 0x200468 and 0x20046c (scale) to see
