@@ -4,7 +4,7 @@ Layer manager test without OpenGL: replays DrGER's `showScreen` call for
 call, but draws eight colour bars straight into the VFB for 5 s and logs
 every raw devctl status. It also saves the layer manager's state dump
 (`read()` of `/dev/layermanager`, [docs/platform-notes.md §3.1](../../docs/platform-notes.md))
-before, during and after the bars. In the default run.
+before, during and after the bars. Not in the default run.
 
 - **Run:** `lmprobe <sd_path> [seconds]` (default 5)
 - **Output:** `var/lmprobe.log`, `lmprobe_dshot.png`, `lmprobe_sshot.png`,

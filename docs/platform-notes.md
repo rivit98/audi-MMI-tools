@@ -94,8 +94,8 @@ surface is the "noise over the map" in the GL apps' `s-shot`s (§7).
 `src/common/screen.c` re-fetches the VFB after each update and keeps both
 surfaces attached.
 
-This is settled. `lmprobe` stays in the default `TESTS` for the layer
-manager's state dump (§3.1).
+This is settled, and so is the state dump (§3.1): `lmprobe` is not in the
+default run.
 
 ### 3.1 The state dump: `read()` of `/dev/layermanager`
 

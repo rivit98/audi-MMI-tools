@@ -119,9 +119,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 #
 # hello is still built but no longer run: it proved the toolchain produces
 # binaries the MMI runs. Run it with `make sd SD_APPS="hello ..."`.
-# lmprobe proved the layer-manager / VFB sequence (docs/platform-notes.md)
-# and is back in the default run for the layer manager's state dump: which
-# displayables exist, which layer shows which, and their surfaces.
+# lmprobe proved the layer-manager / VFB sequence and read the layer
+# manager's state dump on the car (docs/platform-notes.md §3.1), so it is
+# no longer in the default run.
 # hello2 and hello3 joined them: both pass, and what they measured is
 # written up in docs/gpu-results.md.
 #
@@ -135,10 +135,8 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # too (the SDK's std::mutex calls pthread_mutex_init/destroy), so hello8 is
 # not in the default run.
 #
-# hello7, the guided knob and button tester (one control at a time,
-# logged), is in the default run until its RESULT lines have named the
-# controls. The MMI reacts to every button as well (hello7 shows its screen
-# again every second when MENU or BACK covers it).
+# hello7, the guided knob and button tester, has named every control on
+# ch8 (docs/platform-notes.md §8), so it is no longer in the default run.
 #
 # hello6 is not in the default run: its ten clips give the same answer
 # every time, and its main result, hardware H.264 on screen through VCAP 0
@@ -181,7 +179,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := lmprobe hello5 hello11 hello10 hello7 audi_stream_receiver
+TESTS   := hello5 hello11 hello10 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
