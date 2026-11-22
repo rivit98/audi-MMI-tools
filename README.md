@@ -37,7 +37,6 @@ and what doesn't). Shared code is in [src/common/](src/common/); the knob and bu
 | App | What it is |
 |---|---|
 | [hello](src/hello/README.md) | toolchain smoke test: writes `hello.txt` |
-| [hello1_rust](src/hello1_rust/README.md) | hello in Rust, built by gccrs (`make gccrs hello1_rust`, not in `make`) |
 | [lmprobe](src/lmprobe/README.md) | layer manager without GL: colour bars straight into the VFB |
 | [hello2](src/hello2/README.md) | OpenGL ES bring-up, full EGL/GL diagnostics |
 | [hello3](src/hello3/README.md) | GPU canvas, fill-rate benchmark |
@@ -91,7 +90,6 @@ What is built but not yet confirmed is listed in each app's README and in
 | [gpu-results.md](docs/gpu-results.md) | GL measurements, budgets, the freezes |
 | [cpp-apps.md](docs/cpp-apps.md) · [sdk/include-c++](sdk/include-c++/README.md) | C++ rules · how the C++ runtime is put together |
 | [qnx-sh-fpu-div0.md](docs/qnx-sh-fpu-div0.md) | why a divide by zero is a fatal SIGFPE |
-| [rust-gccrs.md](docs/rust-gccrs.md) | Rust via gccrs: toolchain, what compiles without `core`, the route to `std` |
 | [usb-stack.md](docs/usb-stack.md) | io-usb / libusbdi behaviour, AOA |
 | [phone-mirroring.md](docs/phone-mirroring.md) | video decoder, display path, streaming options and results |
 | [android-auto.md](docs/android-auto.md) | what an Android Auto receiver would need |
