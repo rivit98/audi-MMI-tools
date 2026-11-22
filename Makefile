@@ -128,10 +128,10 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # too (the SDK's std::mutex calls pthread_mutex_init/destroy), so hello8 is
 # not in the default run.
 #
-# hello7 is a tool, not a test: a guided knob and button tester (one
-# control at a time, logged), run when needed (`make sd SD_APPS="hello7 ..."`).
-# It is not in the default run: the MMI reacts to every button as well
-# (hello7 shows its screen again every second when MENU or BACK covers it).
+# hello7, the guided knob and button tester (one control at a time,
+# logged), is in the default run until its RESULT lines have named the
+# controls. The MMI reacts to every button as well (hello7 shows its screen
+# again every second when MENU or BACK covers it).
 #
 # hello6 is not in the default run: its ten clips give the same answer
 # every time, and its main result, hardware H.264 on screen through VCAP 0
@@ -174,7 +174,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := lmprobe hello5 hello11 hello10
+TESTS   := lmprobe hello5 hello11 hello10 hello7 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
