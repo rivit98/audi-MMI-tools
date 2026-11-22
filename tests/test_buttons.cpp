@@ -1,4 +1,4 @@
-// test_buttons.cpp - src/buttons/: the decoder on ch8 messages logged on the
+// test_buttons.cpp - src/common/buttons/: the decoder on ch8 messages logged on the
 // car (README.md there), the hub's observers and the event queue.
 #include "check.h"
 #include "types.h"

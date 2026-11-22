@@ -53,7 +53,7 @@ control explains shows as `unknown b<byte> 0x<bits>`.
 - Buttons show as a bit in byte 0, 1, 2 or 3, then an all-zero release message.
 - The guided mode ran end to end (27 steps, ~3 min): 21 steps got their
   control, no two steps the same bytes. Every button is now named
-  ([src/buttons/README.md](../buttons/README.md) table).
+  ([src/common/buttons/README.md](../common/buttons/README.md) table).
 - The touch pad sends 29/30-byte messages (bytes 14–15 `02 02`) with extra
   bytes after byte 26 (`ca ..` down, `3d`/`3e` + coordinate, `cb` up).
 
@@ -62,8 +62,8 @@ control explains shows as `unknown b<byte> 0x<bits>`.
 - Joystick (main knob tilt, 4 steps) and the steering-wheel keys (2 steps):
   nothing on ch8.
 - `keys.c` still names only the old eight controls (the full table is
-  decoded by [src/buttons](../buttons/README.md)); the rest log as
+  decoded by [src/common/buttons](../common/buttons/README.md)); the rest log as
   `unknown b<byte> 0x<bits>`. The touch pad's coordinates are not decoded.
 - This car's volume knob sometimes reports both directions in one turn (hardware fault).
 
-Details: [src/buttons/README.md](../buttons/README.md), the library that decodes ch8 for other apps.
+Details: [src/common/buttons/README.md](../common/buttons/README.md), the library that decodes ch8 for other apps.

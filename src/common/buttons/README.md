@@ -3,7 +3,7 @@
 A C++ library: the unit's knobs and buttons as events, for any app. It
 decodes `/dev/ipc/ch8` (the protocol below) and hands the events to any
 number of observers. Not an app: link it into one (the Makefile's
-`BUTTONS` group, `-Isrc/buttons`). The runner ([../runner/](../runner/README.md))
+`BUTTONS` group, `-Isrc/common/buttons`). The runner ([src/runner](../../runner/README.md))
 uses it.
 
 - `buttons.h` / `.cpp`: `Decoder`, pure. One ch8 message in, events out:
@@ -13,7 +13,7 @@ uses it.
 - `hub.h` / `.cpp`: `Hub` (observer: `subscribe(callback)` /
   `unsubscribe(id)`) and `EventQueue` (a subscriber that queues events for a
   main loop: `wait(e, ms)`, `poll(e)`, `clear()`).
-- Tests: [tests/test_buttons.cpp](../../tests/test_buttons.cpp), on messages
+- Tests: [tests/test_buttons.cpp](../../../tests/test_buttons.cpp), on messages
   logged on the car.
 
 ## Using it
@@ -160,7 +160,7 @@ To confirm: switch the ignition off on purpose during a run and compare.
 
 dev-ipc gives every reader of a channel its own copy of each message, and
 a reader that keeps the channel open without reading stalls it for every
-reader after 32 messages ([docs/vehicle-data.md §2.2](../../docs/vehicle-data.md)).
+reader after 32 messages ([docs/vehicle-data.md §2.2](../../../docs/vehicle-data.md)).
 For ch8 that includes MMI3GApplication, so: one reader per process
 (quit.c's), always reading, and no ch8 fd inherited by a child that won't
 read it (the runner spawns its apps with only stdin/stdout/stderr).

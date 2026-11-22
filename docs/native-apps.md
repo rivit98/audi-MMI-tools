@@ -198,7 +198,7 @@ docs/                   this guide and the deep dives
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
-| `BUTTONS` | `src/buttons/` (C++, add `-Isrc/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
+| `BUTTONS` | `src/common/buttons/` (C++, add `-Isrc/common/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
 
 Integer, size and float types use the short names from `src/common/types.h`
 (C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`. Include
@@ -574,7 +574,7 @@ All user input arrives as 27-byte state messages on `/dev/ipc/ch8`. `quit.c`
 reads it; pass a callback to `quit_init_ex()` to receive every message on
 its thread. For events (knob turns with detents, button press / release by
 name), link the `BUTTONS` group and feed a `buttons::Hub` from
-`quit_init_ex` ([src/buttons/README.md](../src/buttons/README.md): the API
+`quit_init_ex` ([src/common/buttons/README.md](../src/common/buttons/README.md): the API
 and the protocol).
 
 The **HMI still acts on every knob and button** while your app is on

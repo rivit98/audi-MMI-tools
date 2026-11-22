@@ -276,7 +276,7 @@ presses **[confirmed]**. Send them to the phone as AOA v2 HID events:
 | press | Enter |
 | BACK button | Esc (Android maps it to Back) |
 
-Every button on ch8 is named (src/buttons/README.md); the touch pad bytes are not decoded yet.
+Every button on ch8 is named (src/common/buttons/README.md); the touch pad bytes are not decoded yet.
 
 ---
 

@@ -2,7 +2,7 @@
 
 A test menu on the MMI's screen: turn the main knob to choose an app, press
 it to run it. Each app runs as it would under run.sh, and its verdict shows
-in the menu afterwards. Input comes from the [buttons](../buttons/README.md)
+in the menu afterwards. Input comes from the [buttons](../common/buttons/README.md)
 library.
 
 - **Card:** `make sd SD_APPS=runner MENU_APPS="hello7 hello11"`. run.sh
@@ -29,7 +29,7 @@ library.
 - The menu re-shows itself every second (the HMI takes the screen on some
   keys) and stays away while the HMI shows the rear camera.
 - The HMI still reacts to the knob while the menu is up (README in
-  [buttons](../buttons/README.md#the-hmi-keeps-the-input)): turning it also
+  [buttons](../common/buttons/README.md#the-hmi-keeps-the-input)): turning it also
   moves whatever the MMI shows underneath, and a press selects there too.
   Leave the MMI on a screen where that does no harm (for example the main
   menu of the radio).

@@ -287,14 +287,14 @@ LIBS_android_auto := -Lbuild/mbedtls-sh4 -lmbedtls -lusbdi -lgf
 CXXFLAGS_android_auto := -Wno-ignored-attributes $(AA_INC)
 
 # runner: C++. The test menu: the main knob chooses, its press runs the app
-# as run.sh would. Input from BUTTONS (src/buttons: ch8 decoding + observers,
+# as run.sh would. Input from BUTTONS (src/common/buttons: ch8 decoding + observers,
 # fed by quit.c); conf.cpp (apps.conf, verdicts) and menu.cpp are pure
 # (tests/test_runner.cpp).
-BUTTONS := $(wildcard src/buttons/*.cpp src/buttons/*.h) src/common/mono_cond.h
+BUTTONS := $(wildcard src/common/buttons/*.cpp src/common/buttons/*.h) src/common/mono_cond.h
 build/runner: $(wildcard src/runner/*.cpp src/runner/*.h) $(BUTTONS) $(call commonxx,camera) \
     src/common/camera_log.h $(BASE) $(SCREEN)
 LIBS_runner := -lgf
-CXXFLAGS_runner := -Isrc/buttons
+CXXFLAGS_runner := -Isrc/common/buttons
 
 # pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
 # status screens. Text drawing + PNG writer, no device libraries.
@@ -564,18 +564,18 @@ build/test_hello11: tests/test_hello11.cpp tests/check.h src/hello11/ipc4.cpp sr
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello11 -o $@ $(filter %.cpp,$^)
-# src/buttons: ch8 decoding on the car's messages, the hub and its queue
+# src/common/buttons: ch8 decoding on the car's messages, the hub and its queue
 # (hub.cpp stamps quit.c's messages with log.c's clock)
 build/test_buttons: tests/test_buttons.cpp tests/check.h $(BUTTONS) $(call common,log)
 	mkdir -p build
 	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
-	    -Isrc/buttons -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^)
+	    -Isrc/common/buttons -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^)
 # the runner's apps.conf parsing, verdicts and menu
 build/test_runner: tests/test_runner.cpp tests/check.h src/runner/conf.cpp src/runner/conf.h \
-    src/runner/menu.cpp src/runner/menu.h src/buttons/buttons.h
+    src/runner/menu.cpp src/runner/menu.h src/common/buttons/buttons.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
-	    -Isrc/buttons -Isrc/runner -o $@ $(filter %.cpp,$^)
+	    -Isrc/common/buttons -Isrc/runner -o $@ $(filter %.cpp,$^)
 # the HMI's rear camera, from dev-videoctrl's slog lines
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
 build/test_proto build/test_config_gate build/test_pacer build/test_camera:

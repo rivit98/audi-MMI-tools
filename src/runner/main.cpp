@@ -6,7 +6,7 @@
 //
 // The menu lists every app in apps.conf whose binary is in the runner's own
 // directory (run.sh copies the card's bin/ to /tmp/mmi_apps), in apps.conf's
-// order. Input: src/buttons (Hub fed by quit.c's ch8 thread, EventQueue).
+// order. Input: src/common/buttons (Hub fed by quit.c's ch8 thread, EventQueue).
 //
 // Apps are started with QNX's spawn(), not fork + exec, system() or ksh
 // (README.md: why). The runner closes its screen first and opens it again

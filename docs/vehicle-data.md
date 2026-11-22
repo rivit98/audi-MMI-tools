@@ -36,7 +36,7 @@ function this document relies on.
       ├─ ch3 + ch4 ─► MMI3GApplication MOST subsystem      ← BAP, car menus
       │                (IPCD, CHBIpcProtocol)                 (frames, 0xFADE)
       ├─ ch2 ─► on/off, power (docs/power-onoff.md)
-      └─ ch8 ─► knobs and buttons (src/buttons/README.md)
+      └─ ch8 ─► knobs and buttons (src/common/buttons/README.md)
 ```
 
 - **Yes, the MMI reads car data, but never raw CAN frames.** There is no
@@ -86,7 +86,7 @@ From the firmware's strings and the open files of the running unit
 | ch5 | `ndr` reads (fd 9, `r-`), NavCore holds it write-only (fd 12, `-w`) | **both directions.** In: vehicle signals [confirmed, §3]. Out: NavCore's ADAS data, the map's predicted route (`AdasSpeedLimits`, `AdasPsdStatisticsWriter`, "ADAS-IPC: MUTE!" next to `/dev/ipc/ch5` in NavCore's strings) for the car's control units [inferred: strings]. Our apps must never write it. |
 | ch6 | MMI3GMisc (`CHBJobDU`, thread `SwdlIpcDUWorkerThread`) | software download: KWP diagnostic jobs to a download unit [confirmed: strings] |
 | ch7 | MMI3GMisc (`CHBJobIOCBase`, `CHBJobIOCErase`) | software download: erasing and flashing the IOC over KWP [confirmed: strings] |
-| ch8 | MMI3GApplication, MMI3GMedia, ejecthandler | knobs and buttons, src/buttons/README.md [confirmed] |
+| ch8 | MMI3GApplication, MMI3GMedia, ejecthandler | knobs and buttons, src/common/buttons/README.md [confirmed] |
 | ch9 | MMI3GApplication (`CIOControllerPresCtrl`, thread `IOControllerIPCThread`) | IO controller requests and results, each with a domain, op type and id; which domains is [unknown] [confirmed: strings] |
 | ch10 | MMI3GMisc (`CKeyboardIPC`, `CSWDLKeyboardClient`) | software download for the control panel ("SWDLKeybd": keep-alive, progress bar, critical unlock) [confirmed: strings] |
 | ch11 | dev-irc | [unknown] (infrared?) |

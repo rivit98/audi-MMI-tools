@@ -260,7 +260,7 @@ untried route to a clean offscreen capture. **[unverified]**
 
 The knob and button protocol (the byte table, knob counts, touch pad
 messages, byte 15 as power state, the HMI keeping the input) is in
-[src/buttons/README.md](../src/buttons/README.md), next to the library that
+[src/common/buttons/README.md](../src/common/buttons/README.md), next to the library that
 decodes it.
 
 ## 9. Audio — only io-media's `TDM1_20_SAD` is heard

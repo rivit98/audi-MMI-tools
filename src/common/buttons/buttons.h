@@ -1,5 +1,5 @@
 // buttons.h - the unit's knobs and buttons as events, decoded from
-// /dev/ipc/ch8 (the protocol: src/buttons/README.md).
+// /dev/ipc/ch8 (the protocol: src/common/buttons/README.md).
 //
 // A ch8 message is the state of every control at once: knob bytes carry the
 // detents turned since the last message, buttons are bits that stay set while
