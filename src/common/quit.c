@@ -142,7 +142,10 @@ int quit_init_ex(const char *sd_path, unsigned watchdog_s,
 	}
 	alarm(watchdog_s);
 
-	fd = open(KEY_DEVICE, O_RDONLY);
+	/* close-on-exec: a child that inherits ch8 and never reads it fills
+	 * the channel's queue for every reader, the HMI included, after 32
+	 * messages (docs/vehicle-data.md 2.2) */
+	fd = open(KEY_DEVICE, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		log_msg("quit: open %s: %s; no key messages", KEY_DEVICE, strerror(errno));
 	} else if ((errno = pthread_create(&tid, NULL, key_thread, (void *)(isize)fd)) != 0) {

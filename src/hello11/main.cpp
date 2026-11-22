@@ -625,7 +625,7 @@ int main(int argc, char *argv[])
 		threads.emplace_back(writer_thread);
 		threads.emplace_back(ndr_thread);
 		threads.emplace_back(slog_thread);
-		int fd5 = open(kCh5, O_RDONLY);
+		int fd5 = open(kCh5, O_RDONLY | O_CLOEXEC);
 		if (fd5 < 0) {
 			log_msg("ch5: open %s: %s", kCh5, std::strerror(errno));
 			ch5_state = "no open";
@@ -633,7 +633,7 @@ int main(int argc, char *argv[])
 			ch5_state = "reading";
 			std::thread(ch5_thread, fd5).detach();
 		}
-		int fd = open(kCh4, O_RDONLY);
+		int fd = open(kCh4, O_RDONLY | O_CLOEXEC);
 		if (fd < 0) {
 			log_msg("ch4: open %s: %s", kCh4, std::strerror(errno));
 			ch4_state = "no open";

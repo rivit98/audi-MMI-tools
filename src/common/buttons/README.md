@@ -244,7 +244,9 @@ a reader that keeps the channel open without reading stalls it for every
 reader after 32 messages ([docs/vehicle-data.md §2.2](../../../docs/vehicle-data.md)).
 For ch8 that includes MMI3GApplication, so: one reader per process
 (quit.c's), always reading, and no ch8 fd inherited by a child that won't
-read it (the runner spawns its apps with only stdin/stdout/stderr).
+read it: quit.c opens ch8 with `O_CLOEXEC` (so do hello7 and hello11 for
+their channels), and the runner spawns its apps with only
+stdin/stdout/stderr.
 
 ### The HMI keeps the input
 

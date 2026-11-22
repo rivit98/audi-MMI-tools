@@ -164,7 +164,7 @@ static int pad_set_mode(int mode)
 	u8 cmd[16];
 	int len = tpad_mode_cmd(mode, cmd, sizeof(cmd)), fd, w, err;
 
-	fd = open(KEY_DEVICE, O_RDWR);
+	fd = open(KEY_DEVICE, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
 		log_msg("pad mode %d: open %s failed: %s", mode, KEY_DEVICE, strerror(errno));
 		return -1;
