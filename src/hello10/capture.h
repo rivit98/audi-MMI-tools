@@ -38,6 +38,18 @@ void restore();
 
 bool applied();
 
+// Read only. io-media's segment list (DCMD_PROC_MAPINFO) and ours, to
+// out_path; logs the segment holding each width word and our own code, with
+// the flags named and what a /proc write there can do (mapinfo.h).
+std::string maps(int pid, const char *out_path);
+
+// Read only. Maps io-media's file (file, MAP_SHARED, PROT_READ) at the
+// width word's page in our own process and logs what posix_mem_offset64
+// says about it (the physical address when it is plain memory), the word
+// read there and our segment's flags. Whether we share io-media's page, and
+// whether that page is RAM or flash, decides if it can be patched in place.
+std::string phys(const char *file);
+
 } // namespace capture
 
 #endif

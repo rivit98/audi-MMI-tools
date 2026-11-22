@@ -29,15 +29,19 @@
 //          800x480: decode only for 20 s, then on screen through
 //          gf_draw_image as BGRA (15 s) and as YUV (10 s), timed per frame
 //
-// The default run is seq, then sw. seq: three plays in a row. (1) c3, 720x480, as the unit
+// The default run is probe, seq, then sw. seq: three plays in a row. (1) c3, 720x480, as the unit
 // plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
 // MP4) played, width put back. (3) c3 again. The crop tests above are answered
 // and run only by name.
 //
+// probe (read only, in the default run): io-media's three capture-width
+// words through /proc/<pid>/as, its arguments and environment, its segment
+// list with the flags of the width words' segment (capture::maps), and the
+// physical address of that page as our own shared mapping of the file sees
+// it (capture::phys).
+//
 // Not in the default run (name them to run them):
 //
-//   probe    reads io-media's three capture-width words through
-//            /proc/<pid>/as, changes nothing
 //   cap800   c3 (720x480 MP4, plays on every unit) with io-media's capture
 //            width changed in memory from 720 to 800 for 30 s, then put back.
 //            Right edge black or frozen: the capture follows the signal's line
@@ -47,7 +51,7 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: seq,sw)
+// usage: hello10 <sd_path> [test,test,...]   (default: probe,seq,sw)
 #include "types.h"
 
 extern "C" {
@@ -127,8 +131,8 @@ const std::vector<Test> kTests = {
 	 "not stop or break up.",
 	 Kind::Live, nullptr, 20000, 15, 720, 480},
 	{"probe", "Probe io-media's capture width (no change)",
-	 "Reads io-media's width words and the loads that use them. The screen does not change; "
-	 "nothing to film.",
+	 "Reads io-media's width words, how its code is mapped and where that page sits. "
+	 "Nothing changes; nothing to do.",
 	 Kind::Probe, nullptr, 0, 0, 0, 0},
 	{"cap800", "720-wide clip, capture at 800 (30 s)",
 	 "io-media's capture width is 800 for this test. Is the RIGHT edge of the picture black "
@@ -619,6 +623,20 @@ bool run_probe(const Test &t)
 	if (err.empty())
 		err = capture::probe(pid);
 	summary.push_back(std::string(t.name) + ": " + (err.empty() ? "read 720 at all three words" : err));
+	if (pid > 0) {
+		// How io-media runs (for a copy started by hand) and how its code is
+		// mapped (can a page be patched at all); all read only.
+		char cmd[64];
+		std::snprintf(cmd, sizeof(cmd), "pidin -p %d arg", pid);
+		proc_shell(out_path("iom_arg.txt").c_str(), 5, cmd);
+		std::snprintf(cmd, sizeof(cmd), "pidin -p %d env", pid);
+		proc_shell(out_path("iom_env.txt").c_str(), 5, cmd);
+		proc_shell(out_path("asinfo.txt").c_str(), 5, "pidin syspage=asinfo");
+		std::string merr = capture::maps(pid, out_path("iom_maps.txt").c_str());
+		summary.push_back(std::string("maps: ") + (merr.empty() ? "see the maps: lines" : merr));
+	}
+	std::string perr = capture::phys("/mnt/efs-system/sbin/io-media-nvidia");
+	summary.push_back(std::string("phys: ") + (perr.empty() ? "see the phys: line" : perr));
 	return !sleep_quit(1000);
 }
 
@@ -726,7 +744,8 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)
-		return t.kind == Kind::Sequence || t.kind == Kind::Soft;   // the default run
+		return t.kind == Kind::Probe || t.kind == Kind::Sequence ||
+		       t.kind == Kind::Soft;   // the default run
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }

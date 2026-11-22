@@ -1152,12 +1152,38 @@ How to get the patches onto a running unit (efs-system stays untouched):
   **doesn't work**. The file opens `O_RDWR` and the three width words
   read back 720 at 0x0818a190 / 0x0818a26e / 0x0818ad20 (the addresses are
   right), but the first `pwrite` fails with `ESRVRFAULT` ("Server fault on
-  msg pass") and nothing changes [confirmed, hello10 `seq`]. io-media-nvidia
-  runs from `/mnt/efs-system/sbin` (flash), so its `.text` is most likely
-  mapped straight from flash (execute in place) and procnto faults writing
-  it [inferred]. What is left: stop io-media and run a patched copy from
-  the SD card (copied into RAM) with the same arguments (`-c /etc/iom.cfg`,
-  `NMSDK_DSP_PD=1`). That also restarts the HMI's media stack.
+  msg pass") and nothing changes [confirmed, hello10 `seq`]. procnto's
+  write handler only binds to the target's address space and copies the
+  bytes in (openqnx `pathmgr/procfs.c`, `procfs_write`): it never makes a
+  private copy of a page, so any page without `PROT_WRITE` faults, code
+  pages included [inferred from the openqnx source; the unit's procnto is
+  older]. Unlike Linux's `/proc/<pid>/mem` there is no copy-on-write for
+  the writer. The only place procnto privatizes a shared code page is a
+  software breakpoint (`DCMD_PROC_BREAK`, `memmgr_shared_to_private`), and
+  only on SMP; it writes a trap instruction, not our bytes. Programs map
+  their code `MAP_SHARED`, one copy for every process running the file
+  (MMI3GApplication's text: flags `0x571` = SHARED FIXED ELF NOSYNCFILE
+  r-x [confirmed]). hello10's `probe` logs io-media's own flags and the
+  physical address of the width word's page (`capture::maps`,
+  `capture::phys`) [built, not yet run]: if that page is RAM, mapping it
+  with `mmap_device_memory` would patch it for io-media (and every later
+  start until a reboot); if it is flash, no in-place patch exists.
+
+  **A patched copy instead** (static check, not tried): srv-starter starts
+  io-media as `/sbin/io-media-nvidia -c /etc/iom.cfg` (process 21, a
+  symlink to `/mnt/efs-system/sbin`), priority 10, partition `System`,
+  environment `NV_DEMUX=6 NV_MEDIAVIDEO=1 NV_ENABLE_DYNAMIC_PRIORITIES=1
+  NV_AVSYNC=7 NV_MEDIAAUDIO=6` (`NMSDK_DSP_PD=1` is defined but not listed
+  for it; hello10 `probe` saves the real `pidin arg` / `env`). It has
+  `OnTerminate IGNORE_ALL`, `MaxProcessRestarts 0`: nothing restarts it,
+  so a copy can take `/dev/io-media` after the original is slain, and
+  nothing brings the original back but us or a reboot. io-display and
+  mmelauncher (the HMI's media engine) need `/dev/io-media` and hold
+  connections to it; with `IGNORE_ALL` they are not restarted either, so
+  the HMI's media playback (and possibly the DSP's audio paths) likely
+  stays broken until a reboot [inferred]. A patched copy is the file with
+  `d0 02` → `20 03` at file offsets 0x14a190, 0x14a26e, 0x14ad20, run from
+  the card with the same arguments and environment.
 - **DSP:** NvElfLoader must load the patched image. Options: a procnto
   path-space link (`ln -sP <sd>/NvDspCodecs.elf /etc/NvDspCodecs.elf`)
   plus a DSP reload (io-media has crash recovery that runs NvElfLoader

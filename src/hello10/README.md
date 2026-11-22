@@ -17,12 +17,12 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `crop` | c12 cropped to 720×480, 25 fps, 30 s | Does an 800-wide coded picture play? A **red "CUT" band** on the right = the DSP ignores the crop |
 | `cropnav` | c12 cropped to 720×416, 20 s | Is the **blue band** at the bottom gone, and is the picture stretched to the full height? (cutting Android Auto's bottom bar) |
 | `slow` | as `crop`, frames at 15 fps, gap fill to 25, 20 s | Skip frames on an 800-wide coded picture: what a paced phone sends |
-| `probe` | reads io-media-nvidia's three capture-width words (`capture.cpp`) through `/proc/<pid>/as` | Are the addresses right? (read only) |
+| `probe` | read only: io-media-nvidia's three capture-width words through `/proc/<pid>/as`; its `pidin arg` / `env`; its segment list (`DCMD_PROC_MAPINFO`, flags named by `mapinfo.cpp`); the width word's page mapped `MAP_SHARED` from `/mnt/efs-system/sbin/io-media-nvidia` in our own process and its `posix_mem_offset64` | Are the addresses right? How is io-media's code mapped, and is that page RAM or flash (phone-mirroring §7.14)? |
 | `cap800` | c3 (720×480) with io-media's capture width written to 800 in memory, 30 s | Does the media port capture an 800-sample line? (phone-mirroring §7.14) |
 | `seq` | c3 at 720, `cap800`, c3 at 720 again | The same, with a control before and after |
 | `sw` | c12 (800×480) decoded in **software** on the SH4: 20 s decode only, then on screen through `gf_draw_image` as BGRA (15 s) and as YUV (10 s) | How many frames a second the SH4 decodes, and how many reach the screen. Section "Software decoder" |
 
-The default is `seq` (the capture width test) and then `sw`, about 3 minutes.
+The default is `probe`, `seq` (the capture width test) and then `sw`, about 3 minutes.
 
 How each piece works:
 
@@ -136,6 +136,16 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 
 ## State
 
-Run on the car (`seq` + `sw`). Open: why `gf_draw_image` output stays
-invisible; the capture-width probe needs a patched io-media copy from the
-card instead of the in-memory patch.
+Run on the car (`seq` + `sw`). The extended `probe` (mappings, physical
+address, io-media's arguments and environment) is built and host-tested
+(`tests/test_hello10_mapinfo.cpp`), not yet run on the car. Open: why
+`gf_draw_image` output stays invisible; the capture-width probe needs a
+patched io-media copy (or a RAM page patch, if `probe` finds one) instead of
+the `/proc` write.
+
+`probe` output: `maps:` lines (each width word's segment: flags, dev, ino,
+offset, what a `/proc` write there does; the same for hello10's own code,
+run from the card), a `phys:` line (`posix_mem_offset64` of our mapping of
+the file: rc, offset = physical address when it is plain memory, fd), and
+`var/hello10/iom_maps.txt`, `iom_arg.txt`, `iom_env.txt`, `asinfo.txt`
+(`pidin syspage=asinfo`: which physical ranges are RAM and which flash).

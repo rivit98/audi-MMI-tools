@@ -463,7 +463,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -559,6 +559,11 @@ build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(
 	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common $(AA_INC) \
 	    -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^) -Lbuild/mbedtls-host -lmbedtls
 # hello11's ch4 telegram parser, ch5 / slog parsers and step bookkeeping
+# hello10's naming of QNX mapping flags (src/hello10/mapinfo.cpp)
+build/test_hello10_mapinfo: tests/test_hello10_mapinfo.cpp tests/check.h src/hello10/mapinfo.cpp src/hello10/mapinfo.h
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/hello10 -o $@ $(filter %.cpp,$^)
 build/test_hello11: tests/test_hello11.cpp tests/check.h src/hello11/ipc4.cpp src/hello11/ipc4.h \
     src/hello11/sources.cpp src/hello11/sources.h src/hello11/watch.cpp src/hello11/watch.h
 	mkdir -p build
@@ -582,7 +587,7 @@ build/test_proto build/test_config_gate build/test_pacer build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_swdec build/test_hello11 build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_swdec build/test_hello11 build/test_hello10_mapinfo build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
