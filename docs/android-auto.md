@@ -75,7 +75,7 @@ aasdk's source (opencardev/aasdk) where android_auto relies on them.
 | TLS 1.2 client | **Built** | mbedTLS 3.6 compiled for the unit (no TLS library on it [repo]). The unit has no `/dev/random`: entropy from cycle-counter jitter. Handshake time on the SH-4 not measured. |
 | HU certificate + key | Fetched at build time | aasdk's `cert/headunit.crt` (issued by "Google Automotive Link" to JVC Kenwood, valid to 2045) + key, not in the repo. Its dates carry a `-0700` offset mbedTLS refuses without a one-line patch. The current app accepts it (section 7). |
 | Protobuf messages | **Built** | Written and read by hand (`src/common/pb.h`), about 30 messages; no generator. |
-| Input | Partly | The MMI has no touchscreen. Advertise rotary + D-pad. Knob detents and presses are decoded from `/dev/ipc/ch8` [repo]; push directions and other buttons are still open (platform-notes §8). |
+| Input | Partly | The MMI has no touchscreen. Advertise rotary + D-pad. Knob detents and presses are decoded from `/dev/ipc/ch8` [repo]; every button is named (src/buttons/README.md); the knob has no push directions on ch8. |
 | Sensors | **Built** | Fixed values: driving status unrestricted (parked), night mode off. |
 | Video | **Blocked at 800 wide** on the MMI | An SPS crop to 720 stays black (section 4.1). The phone app's Android Auto mode re-encodes on the phone instead (section 4.3). |
 | Audio | **Unproven** | Section 4.2. |

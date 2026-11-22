@@ -8,6 +8,9 @@
 #                        rendered on the car by pngondemand
 #   make sd SD_APPS="hello hello3"
 #                        the same with only those apps (in that order)
+#   make sd SD_APPS=runner MENU_APPS="hello7 hello11"
+#                        a knob-driven menu instead: run.sh starts only the
+#                        runner, which offers the MENU_APPS (src/runner/README.md)
 #   make test            host-side unit tests (tests/) in the SDK container
 #   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
@@ -174,13 +177,18 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # receives video but can't show it (the DM642 refuses 800 wide), so it is
 # no longer in the default run: the phone app's Android Auto mode streams
 # through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
+#
+# runner (src/runner/README.md) is a menu of apps, chosen with the main knob:
+# `make sd SD_APPS=runner MENU_APPS="..."` puts the MENU_APPS on the card
+# (with what they need) and run.sh starts only the runner.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
-           audi_stream_receiver android_auto
-CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
+           audi_stream_receiver android_auto runner
+CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto runner
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
 TESTS   := hello5 hello11 hello10 audi_stream_receiver
 SD_APPS ?= $(TESTS)
+MENU_APPS ?= hello7 $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
 PRE_S   := 3
@@ -277,6 +285,16 @@ build/android_auto: src/android_auto/main.cpp $(AA_CORE) $(call commonxx,aoa_hos
     build/mbedtls-sh4/libmbedtls.a $(AA_CERT)/.done
 LIBS_android_auto := -Lbuild/mbedtls-sh4 -lmbedtls -lusbdi -lgf
 CXXFLAGS_android_auto := -Wno-ignored-attributes $(AA_INC)
+
+# runner: C++. The test menu: the main knob chooses, its press runs the app
+# as run.sh would. Input from BUTTONS (src/buttons: ch8 decoding + observers,
+# fed by quit.c); conf.cpp (apps.conf, verdicts) and menu.cpp are pure
+# (tests/test_runner.cpp).
+BUTTONS := $(wildcard src/buttons/*.cpp src/buttons/*.h) src/common/mono_cond.h
+build/runner: $(wildcard src/runner/*.cpp src/runner/*.h) $(BUTTONS) $(call commonxx,camera) \
+    src/common/camera_log.h $(BASE) $(SCREEN)
+LIBS_runner := -lgf
+CXXFLAGS_runner := -Isrc/buttons
 
 # pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
 # status screens. Text drawing + PNG writer, no device libraries.
@@ -394,29 +412,32 @@ FWTOOLS_hello10 := testapp-cmdline
 FILES_hello5   := src/hello5/beep.wav
 
 ifneq ($(filter sd,$(MAKECMDGOALS)),)
-ifneq ($(filter-out $(APPS),$(SD_APPS)),)
-$(error SD_APPS: not an app: $(filter-out $(APPS),$(SD_APPS)) (APPS: $(APPS)))
+ifneq ($(filter-out $(APPS),$(SD_APPS) $(MENU_APPS)),)
+$(error SD_APPS / MENU_APPS: not an app: $(filter-out $(APPS),$(SD_APPS) $(MENU_APPS)) (APPS: $(APPS)))
 endif
 endif
-per_app   = $(sort $(foreach a,$(SD_APPS),$($(1)_$(a))))
+# What goes on the card: the SD_APPS, and with the runner its MENU_APPS.
+SD_ALL    := $(SD_APPS) $(if $(filter runner,$(SD_APPS)),$(filter-out $(SD_APPS),$(MENU_APPS)))
+per_app   = $(sort $(foreach a,$(SD_ALL),$($(1)_$(a))))
 SD_CLIPS  := $(call per_app,CLIPS)
 SD_FWTOOLS := $(wildcard $(addprefix $(FWEFS)/bin/,$(call per_app,FWTOOLS)))
 SD_FILES  := $(call per_app,FILES)
 
-# Only the SD_APPS are built and copied, plus run.sh's own tools (TOOLS,
-# showScreen). Anything else: add it to SD_APPS.
-sd: $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
+# Only the SD_APPS (+ MENU_APPS with the runner) are built and copied, plus
+# run.sh's own tools (TOOLS, showScreen). Anything else: add it to SD_APPS.
+sd: $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/var
-	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	cp $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
 	cp sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
-	$(if $(filter android_auto,$(SD_APPS)),mkdir -p build/sd/aa && cp $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/)
+	$(if $(filter android_auto,$(SD_ALL)),mkdir -p build/sd/aa && cp $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/)
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
 	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root"
 	@echo "  apps (run by run.sh): $(SD_APPS)"
+	$(if $(filter runner,$(SD_APPS)),@echo "  in the runner's menu: $(filter-out runner,$(SD_ALL))")
 	@echo "  clips: $(or $(SD_CLIPS),none)"
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
 	@du -sh build/sd | sed 's/\t.*/ on the card/; s/^/  /'
@@ -442,7 +463,8 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
+           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 \
+           build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -542,13 +564,25 @@ build/test_hello11: tests/test_hello11.cpp tests/check.h src/hello11/ipc4.cpp sr
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello11 -o $@ $(filter %.cpp,$^)
+# src/buttons: ch8 decoding on the car's messages, the hub and its queue
+# (hub.cpp stamps quit.c's messages with log.c's clock)
+build/test_buttons: tests/test_buttons.cpp tests/check.h $(BUTTONS) $(call common,log)
+	mkdir -p build
+	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/buttons -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^)
+# the runner's apps.conf parsing, verdicts and menu
+build/test_runner: tests/test_runner.cpp tests/check.h src/runner/conf.cpp src/runner/conf.h \
+    src/runner/menu.cpp src/runner/menu.h src/buttons/buttons.h
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/buttons -Isrc/runner -o $@ $(filter %.cpp,$^)
 # the HMI's rear camera, from dev-videoctrl's slog lines
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
 build/test_proto build/test_config_gate build/test_pacer build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_swdec build/test_hello11 build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_swdec build/test_hello11 build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

@@ -198,6 +198,7 @@ docs/                   this guide and the deep dives
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
+| `BUTTONS` | `src/buttons/` (C++, add `-Isrc/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
 
 Integer, size and float types use the short names from `src/common/types.h`
 (C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`. Include
@@ -570,20 +571,15 @@ Details: [platform-notes.md](platform-notes.md) §9, [src/hello5/README.md](../s
 ## 12. Input: knobs and buttons
 
 All user input arrives as 27-byte state messages on `/dev/ipc/ch8`. `quit.c`
-reads it. Pass a callback to `quit_init_ex()` to receive every message on
-its thread. `src/hello7/keys.c` decodes them.
-
-| Byte | Control |
-|---|---|
-| 6 / 7 | main rotary knob right / left: detent **counts** (a fast turn sends `02`) |
-| 4 / 5 | volume knob up / down: counts |
-| 1, 3 | buttons as bitmasks on press, then an all-zero message on release (~200–350 ms). `b3 0x04` likely MENU, `b1 0x02` likely top-left soft key (both unconfirmed) |
-| 14–15 | `01 02` normally. Byte 15 going `02 → 03 → 00` came with the car switching off (inferred power state) |
-| 16–26 | state, not controls |
+reads it; pass a callback to `quit_init_ex()` to receive every message on
+its thread. For events (knob turns with detents, button press / release by
+name), link the `BUTTONS` group and feed a `buttons::Hub` from
+`quit_init_ex` ([src/buttons/README.md](../src/buttons/README.md): the API
+and the protocol).
 
 The **HMI still acts on every knob and button** while your app is on
-screen. Keeping input from the HMI is open. Don't use MENU/BACK in an app
-design yet.
+screen. Keeping input from the HMI is open. Design around the main knob;
+MENU, BACK and the source keys bring the HMI's own screens up.
 
 ## 13. USB: talking to a phone
 

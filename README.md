@@ -26,7 +26,8 @@ hold **MENU + rotary knob + top-right soft key**. Details:
 ## Apps
 
 Each app lives in `src/<app>/` with a README (what it verifies, what works
-and what doesn't). Shared code is in [src/common/](src/common/).
+and what doesn't). Shared code is in [src/common/](src/common/); the knob and button library
+(ch8 events for any app) in [src/buttons/](src/buttons/README.md).
 
 | App | What it is |
 |---|---|
@@ -44,6 +45,7 @@ and what doesn't). Shared code is in [src/common/](src/common/).
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
+| [runner](src/runner/README.md) | test menu: the main knob chooses an app, its press runs it as run.sh would (`make sd SD_APPS=runner MENU_APPS=...`) |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens |
 
 Which apps a card gets by default, their timeouts and arguments:
