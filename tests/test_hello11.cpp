@@ -1,11 +1,14 @@
-// test_hello11.cpp - hello11's ch4 telegram parsing (src/hello11/ipc4.h) and
-// its change / step bookkeeping (src/hello11/watch.h). The telegrams are
+// test_hello11.cpp - hello11's ch4 telegram parsing (src/hello11/ipc4.h),
+// ch5 records and slog lines (src/hello11/sources.h) and its change / step
+// bookkeeping (src/hello11/watch.h). The telegrams are
 // built here in the layout ipc4.h describes.
 #include "types.h"
 #include "check.h"
 #include "ipc4.h"
+#include "sources.h"
 #include "watch.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -153,6 +156,60 @@ void test_watch()
 	CHECK(d[0] == std::string("[00 00] -> [ff 01]"));
 }
 
+void test_ch5()
+{
+	// RainSens 09.00 len 1 [42] ts 0x1234, then OutsideTemp 08.00 len 1, then a truncated one
+	std::vector<u8> b = {0x09, 0x00, 0x01, 0x00, 0x42, 0x34, 0x12,
+	                     0x08, 0x00, 0x01, 0x00, 0x1e, 0x00, 0x00,
+	                     0x0a, 0x00, 0x05, 0x00, 0x01};
+	usize skipped = 0;
+	std::vector<ch5::Record> rs = ch5::parse(b.data(), b.size(), &skipped);
+	CHECK_EQ(rs.size(), 2);
+	CHECK_EQ(rs[0].tag, 0x09);
+	CHECK_EQ(rs[0].payload.size(), 1);
+	CHECK_EQ(rs[0].payload[0], 0x42);
+	CHECK_EQ(rs[0].ts, 0x1234);
+	CHECK_EQ(rs[1].tag, 0x08);
+	CHECK_EQ(skipped, 5);
+	CHECK(ch5::key(rs[0]) == std::string("ch5 09.00 RainSens"));
+	CHECK(ch5::noisy(0x01));
+	CHECK(!ch5::noisy(0x09));
+	CHECK_EQ(ch5::parse(b.data(), 3, &skipped).size(), 0);
+	CHECK_EQ(skipped, 3);
+}
+
+// One slog event: header (flags | count << 16, code, time), then the text.
+void slog_event(std::vector<int> &ev, const char *text, bool is_text = true)
+{
+	usize n = std::strlen(text) + 1;
+	usize count = (n + sizeof(int) - 1) / sizeof(int);
+	ev.push_back((int)((count << 16) | (is_text ? 0x8 : 0)));
+	ev.push_back(0);
+	ev.push_back(0);
+	std::vector<int> data(count, 0);
+	std::memcpy(data.data(), text, n);
+	ev.insert(ev.end(), data.begin(), data.end());
+}
+
+void test_slog()
+{
+	std::vector<int> ev;
+	slog_event(ev, "[DispMgmt] Set brightness of display 0 to 70%");
+	slog_event(ev, "abc", false);
+	slog_event(ev, "VP0: source changed to 1");
+	std::vector<std::string> ls = slogtext::lines(ev.data(), ev.size());
+	CHECK_EQ(ls.size(), 2);
+	CHECK(ls[0] == std::string("[DispMgmt] Set brightness of display 0 to 70%"));
+	CHECK(slogtext::interesting(ls[0]));
+	CHECK(!slogtext::interesting(ls[1]));
+	CHECK(slogtext::interesting("MapInterface#externLightActive(1)"));
+	CHECK(slogtext::interesting("updateDayNightView(2)"));
+	CHECK(slogtext::key(ls[0]) == std::string("[DispMgmt] Set brightness of display # to #%"));
+	CHECK(slogtext::numbers(ls[0]) == std::string("0 70"));
+	// a truncated event is left out
+	CHECK_EQ(slogtext::lines(ev.data(), 5).size(), 0);
+}
+
 } // namespace
 
 int main()
@@ -161,5 +218,7 @@ int main()
 	test_resync_and_gaps();
 	test_bap();
 	test_watch();
+	test_ch5();
+	test_slog();
 	CHECK_DONE();
 }

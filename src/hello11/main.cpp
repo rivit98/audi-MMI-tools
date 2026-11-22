@@ -1,5 +1,6 @@
-// hello11 - can a native app tell (1) that the rear camera is wanted and (2)
-// that the car's lights are on (the HMI's night map), without the Java HMI?
+// hello11 - can a native app tell (1) that the rear camera is wanted, (2)
+// that the car's lights are on (the HMI's night map) and (3) that it is dark
+// outside (the light sensor, the display's dimming), without the Java HMI?
 // Read only: nothing is written to any channel or device.
 //
 // Sources, each value fed to watch::Watch under a key:
@@ -7,20 +8,26 @@
 //          subsystem (ipc4.h): every telegram's payload by function, and
 //          every BAP function (rear camera: BAP 0B.17). The light flag is
 //          expected in DA01.0C0D (InteriorLight, first byte).
-//          Reading stops at once if our counters show gaps: then dev-ipc
-//          would be sharing the telegrams between readers, not copying them,
-//          and MMI3GApplication would be missing the ones we took.
+//   ch5    /dev/ipc/ch5, the vehicle-signal records (sources.h), by tag;
+//          RainSens (tag 0x09) may carry the light sensor
 //   ndr    /dev/ndr/name/sensor/ReverseGear: ndr's reverse flag (from ch5)
-//   slog   dev-videoctrl's lines (common/camera): the HMI shows the camera
+//   slog   dev-videoctrl's lines (common/camera): the HMI shows the camera;
+//          and any line about brightness, dimming or day / night (sources.h)
+// dev-ipc gives every reader its own copy (docs/vehicle-data.md §2.2), as
+// long as each reader keeps reading: both channel threads only read. As a
+// guard, ch4 reading stops if our counters show gaps.
 //
-// The driver goes through steps (lights on / off twice, reverse in / out
-// twice, quiet steps before and after) and turns the main knob once at the
-// end of each. The summary names the keys that changed in every step of a
-// kind and in no quiet step.
+// The driver goes through steps (lights on / off twice, the light sensor
+// covered / free twice with the switch at AUTO, reverse in / out twice,
+// quiet steps before and after) and turns the main knob once at the end of
+// each. The summary names the keys that changed in every step of a kind and
+// in no quiet step.
 //
 // Output: <sd>/var/hello11.log (steps, the watched keys, summary),
 // <sd>/var/hello11/ch4.txt (every telegram, decoded), ch4.bin (the raw bytes
-// as read: u32 ms, u32 length, bytes), changes.txt (every change of every key).
+// as read: u32 ms, u32 length, bytes), ch5.bin (the same for ch5), slog.txt
+// (the brightness / day-night slog lines), changes.txt (every change of
+// every key).
 //
 // usage: hello11 <sd_path>
 #include "types.h"
@@ -33,6 +40,7 @@ extern "C" {
 
 #include "camera.h"
 #include "ipc4.h"
+#include "sources.h"
 #include "ui.h"
 #include "watch.h"
 
@@ -52,14 +60,17 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 1100;  // the intro's and steps' time limits add up to ~17 min
+constexpr unsigned kWatchdogS = 1800;  // the intro's and steps' time limits add up to ~26 min
 constexpr unsigned kQuietMs = 20000;
 constexpr unsigned kLightMs = 60000;    // a step's time limit
 constexpr unsigned kReverseMs = 150000; // the camera's follow-up time is up to ~90 s
+constexpr unsigned kDarkMs = 120000;    // auto headlights come on within seconds
+constexpr unsigned kBrightMs = 180000;  // and go off only after a delay
 constexpr unsigned kScreenMs = 1000;
 constexpr unsigned kPageMs = 30000;
 constexpr unsigned kGapCheckAfter = 20; // telegrams
 constexpr const char *kCh4 = "/dev/ipc/ch4";
+constexpr const char *kCh5 = "/dev/ipc/ch5";
 constexpr const char *kFooter = "hello11 - read only. Pull the SD card to stop.";
 const char *const kNdrPaths[] = {"/dev/ndr/name/sensor/ReverseGear", "/dev/navi/sensor/ReverseGear"};
 
@@ -82,6 +93,20 @@ const StepDef kSteps[] = {
 	 "Headlights ON again. Then turn the main knob ONE click."},
 	{"lights off 2", "lights off", kLightMs, true,
 	 "Light switch to 0 again. Then turn the main knob ONE click."},
+	{"switch to AUTO", "switch AUTO", kLightMs, true,
+	 "Turn the light switch to AUTO. Then turn the main knob ONE click. "
+	 "(The headlights stay off: it is light outside.)"},
+	{"sensor covered 1", "sensor covered", kDarkMs, true,
+	 "Cover the light sensor (top of the windscreen, behind the mirror) with your hand or a "
+	 "cloth and keep it covered. When the headlights come on, wait 10 more seconds (does the "
+	 "screen dim?), then turn the main knob ONE click, still covering."},
+	{"sensor free 1", "sensor free", kBrightMs, true,
+	 "Uncover the sensor. Wait until the headlights go OFF again (can take a minute or two), "
+	 "then turn the main knob ONE click."},
+	{"sensor covered 2", "sensor covered", kDarkMs, true,
+	 "Once more: cover the sensor. Headlights on, 10 more seconds, then ONE click."},
+	{"sensor free 2", "sensor free", kBrightMs, true,
+	 "Uncover the sensor. Headlights off, then ONE click. Leave the switch at AUTO."},
 	{"reverse 1", "reverse", kReverseMs, true,
 	 "Foot on the brake, select R. When the camera picture is on, turn the main knob ONE click. "
 	 "(This screen goes away while the camera is shown.)"},
@@ -100,10 +125,14 @@ std::string out_dir;
 
 std::mutex mu;                          // everything below, between the threads
 watch::Watch w;
-std::string light_now = "?", rvc_now = "?", ndr_now = "?";
+std::string light_now = "?", rvc_now = "?", ndr_now = "?", rain_now = "?", slog_now = "-";
 std::vector<std::string> text_q;        // -> ch4.txt
 std::vector<std::string> change_q;      // -> changes.txt
 std::vector<u8> raw_q;                  // -> ch4.bin
+std::vector<u8> raw5_q;                 // -> ch5.bin
+std::vector<std::string> slog_q;        // -> slog.txt
+u32 ch5_reads = 0, ch5_records = 0, ch5_skipped = 0, slog_lines = 0;
+std::string ch5_state = "not started";
 u32 ch4_telegrams = 0, ch4_gaps = 0, ch4_missing = 0, ch4_skipped = 0, ch4_odd = 0;
 std::string ch4_state = "not started";
 std::atomic<unsigned> clicks{0};
@@ -225,6 +254,94 @@ void ch4_thread(int fd)
 	}
 }
 
+// ---- ch5 ----
+
+void ch5_thread(int fd)
+{
+	u8 buf[4096];
+	for (;;) {
+		isize n = read(fd, buf, sizeof(buf));
+		if (stopping)
+			return;
+		if (n < 0 && errno == EINTR)
+			continue;
+		unsigned ms = log_ms();
+		if (n <= 0) {
+			log_msg("ch5: read returned %d (%s): stop reading", (int)n,
+			        n < 0 ? std::strerror(errno) : "end");
+			std::lock_guard<std::mutex> lock(mu);
+			ch5_state = "read failed";
+			close(fd);
+			return;
+		}
+		usize skipped = 0;
+		std::vector<ch5::Record> rs = ch5::parse(buf, (usize)n, &skipped);
+		std::lock_guard<std::mutex> lock(mu);
+		u32 hdr[2] = {ms, (u32)n};
+		raw5_q.insert(raw5_q.end(), (const u8 *)hdr, (const u8 *)hdr + sizeof(hdr));
+		raw5_q.insert(raw5_q.end(), buf, buf + n);
+		ch5_reads++;
+		ch5_records += (u32)rs.size();
+		ch5_skipped += (u32)skipped;
+		for (const ch5::Record &r : rs) {
+			if (ch5::noisy(r.tag))
+				continue;
+			// the sensor-ish tags go to the main log as they change
+			bool watched = r.tag == 0x09 || r.tag == 0x0a || r.tag == 0x08;
+			feed(ms, ch5::key(r), r.payload, watched);
+			if (r.tag == 0x09)
+				rain_now = ipc4::hex(r.payload, 8);
+		}
+		ch5_state = "reading";
+	}
+}
+
+// ---- slog: brightness / day-night lines ----
+
+void slog_thread()
+{
+	int fd = open("/dev/slog", O_RDONLY | O_NONBLOCK);
+	if (fd < 0) {
+		log_msg("slog: /dev/slog: %s: no brightness lines", std::strerror(errno));
+		return;
+	}
+	static int buf[4096];
+	bool backlog = true;            // the lines from before we started: file only
+	while (!stopping) {
+		isize n = read(fd, buf, sizeof(buf));
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n < 0 && errno != EAGAIN) {
+			log_msg("slog: read: %s: stop", std::strerror(errno));
+			break;
+		}
+		if (n <= 0) {
+			backlog = false;
+			usleep(250 * 1000);
+			continue;
+		}
+		unsigned ms = log_ms();
+		std::vector<std::string> ls = slogtext::lines(buf, (usize)n / sizeof(int));
+		std::lock_guard<std::mutex> lock(mu);
+		for (const std::string &l : ls) {
+			if (!slogtext::interesting(l))
+				continue;
+			char t[40];
+			std::snprintf(t, sizeof(t), "[%7u ms]%s ", ms, backlog ? " (before start)" : "");
+			slog_q.push_back(t + l);
+			if (backlog)
+				continue;
+			slog_lines++;
+			slog_now = l.substr(0, 60);
+			std::string v = slogtext::numbers(l);
+			feed(ms, "slog " + slogtext::key(l).substr(0, 60), std::vector<u8>(v.begin(), v.end()),
+			     false);
+			log_msg("slog: %s", l.c_str());
+		}
+	}
+	close(fd);
+}
+
 // ---- ndr ----
 
 void ndr_thread()
@@ -276,17 +393,30 @@ void writer_thread()
 	FILE *txt = std::fopen((out_dir + "/ch4.txt").c_str(), "w");
 	FILE *chg = std::fopen((out_dir + "/changes.txt").c_str(), "w");
 	FILE *bin = std::fopen((out_dir + "/ch4.bin").c_str(), "wb");
+	FILE *bin5 = std::fopen((out_dir + "/ch5.bin").c_str(), "wb");
+	FILE *slg = std::fopen((out_dir + "/slog.txt").c_str(), "w");
 	bool last = false;
 	while (!last) {
 		last = stopping;
 		usleep(500 * 1000);
-		std::vector<std::string> t, c;
-		std::vector<u8> r;
+		std::vector<std::string> t, c, sl;
+		std::vector<u8> r, r5;
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			t.swap(text_q);
 			c.swap(change_q);
 			r.swap(raw_q);
+			r5.swap(raw5_q);
+			sl.swap(slog_q);
+		}
+		if (slg != nullptr) {
+			for (const std::string &s : sl)
+				std::fprintf(slg, "%s\n", s.c_str());
+			std::fflush(slg);
+		}
+		if (bin5 != nullptr && !r5.empty()) {
+			std::fwrite(r5.data(), 1, r5.size(), bin5);
+			std::fflush(bin5);
 		}
 		if (txt != nullptr) {
 			for (const std::string &s : t)
@@ -303,7 +433,7 @@ void writer_thread()
 			std::fflush(bin);
 		}
 	}
-	for (FILE *f : {txt, chg, bin})
+	for (FILE *f : {txt, chg, bin, bin5, slg})
 		if (f != nullptr)
 			std::fclose(f);
 }
@@ -313,13 +443,14 @@ void writer_thread()
 std::string status()
 {
 	std::lock_guard<std::mutex> lock(mu);
-	char s[400];
+	char s[600];
 	std::snprintf(s, sizeof(s),
-	              "Light flag DA01.0C0D: %s\nCamera BAP 0B.17: %s\nndr reverse: %s, slog camera: %s\n"
-	              "ch4: %s, %u telegrams, %u gaps, %zu keys",
-	              light_now.c_str(), rvc_now.c_str(), ndr_now.c_str(),
-	              camera::active() ? "UP" : "off", ch4_state.c_str(), ch4_telegrams, ch4_gaps,
-	              w.keys());
+	              "Light flag DA01.0C0D: %s\nch5 RainSens: %s\nCamera BAP 0B.17: %s\n"
+	              "ndr reverse: %s, slog camera: %s\nslog: %s\n"
+	              "ch4: %s, %u telegrams, %u gaps; ch5: %s, %u records; %zu keys",
+	              light_now.c_str(), rain_now.c_str(), rvc_now.c_str(), ndr_now.c_str(),
+	              camera::active() ? "UP" : "off", slog_now.c_str(), ch4_state.c_str(),
+	              ch4_telegrams, ch4_gaps, ch5_state.c_str(), ch5_records, w.keys());
 	return s;
 }
 
@@ -360,8 +491,10 @@ const char kIntro[] =
 	"Parked in P, ignition on, light switch at 0. \"Click\" = turn the main knob ONE notch.\n"
 	"1. 20 s: touch nothing.\n"
 	"2. Headlights ON, click. Switch to 0, click. Twice.\n"
-	"3. R: when the camera is on, click. P: when it is gone (can take 1-2 min), click. Twice.\n"
-	"4. 20 s: touch nothing, then the results.\n"
+	"3. Switch to AUTO, click. Cover the light sensor (behind the mirror) until the headlights "
+	"come on + 10 s, click. Uncover until they go off, click. Twice.\n"
+	"4. R: when the camera is on, click. P: when it is gone (can take 1-2 min), click. Twice.\n"
+	"5. 20 s: touch nothing, then the results.\n"
 	"Each step is also shown on screen. Click to start.";
 
 // The whole test on one screen, until a click (or kIntroMs). false: stop requested.
@@ -373,7 +506,7 @@ bool intro()
 	for (;;) {
 		unsigned now = log_ms();
 		if (first || now - shown_at >= kScreenMs) {
-			screen("hello11: rear camera + lights (~5 min)", kIntro, false);
+			screen("hello11: rear camera, lights, light sensor (~10 min)", kIntro, false);
 			shown_at = now;
 			first = false;
 		}
@@ -433,6 +566,9 @@ std::vector<std::string> summary()
 	              "%u not MOST-shaped", ch4_state.c_str(), ch4_telegrams, ch4_gaps, ch4_missing,
 	              ch4_skipped, ch4_odd);
 	out.push_back(s);
+	std::snprintf(s, sizeof(s), "ch5: %s, %u reads, %u records, %u bytes skipped; slog: %u lines",
+	              ch5_state.c_str(), ch5_reads, ch5_records, ch5_skipped, slog_lines);
+	out.push_back(s);
 	for (const watch::Step &st : w.steps()) {
 		std::vector<std::string> keys = w.changed_in(st.begin_ms, st.end_ms);
 		std::string line = st.label + " (" + std::to_string((st.end_ms - st.begin_ms) / 1000) +
@@ -488,6 +624,15 @@ int main(int argc, char *argv[])
 	try {
 		threads.emplace_back(writer_thread);
 		threads.emplace_back(ndr_thread);
+		threads.emplace_back(slog_thread);
+		int fd5 = open(kCh5, O_RDONLY);
+		if (fd5 < 0) {
+			log_msg("ch5: open %s: %s", kCh5, std::strerror(errno));
+			ch5_state = "no open";
+		} else {
+			ch5_state = "reading";
+			std::thread(ch5_thread, fd5).detach();
+		}
 		int fd = open(kCh4, O_RDONLY);
 		if (fd < 0) {
 			log_msg("ch4: open %s: %s", kCh4, std::strerror(errno));

@@ -299,7 +299,12 @@ not from a light sensor or the clock:
    [unverified]. hello11 checks it on the car.
 
 The display's own dimming is a separate attribute, `Brightness` (slot
-`0x2c`); its source is not traced.
+`0x2c`). None of the `DA 01` handlers sets it (dispatch `0x83c5414`:
+`0x0C0A`, `0x0C0C`, `0x0C0D`, `0x0C0E`, `0x0C10`, `0x0C11`, `0x0C12`,
+`0x0C1D`, `0x0C36`; `D9 01`: `0x0531`, `0x0540`) [confirmed in code], so it
+arrives another way; its source is not traced. hello11 watches ch5
+(RainSens, tag `0x09`) and the slog's brightness lines with the light
+sensor covered.
 
 ## 6. What an app of ours can do
 

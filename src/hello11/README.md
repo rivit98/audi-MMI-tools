@@ -2,23 +2,27 @@
 
 Can a native app tell, without the Java HMI:
 
-1. that the **rear camera** is wanted, and
+1. that the **rear camera** is wanted,
 2. that the car's **lights are on**, which is what the HMI uses for its night
-   map ([docs/vehicle-data.md](../../docs/vehicle-data.md) §5.2), and what
-   Android Auto's night mode would follow?
+   map ([docs/vehicle-data.md](../../docs/vehicle-data.md) §5.2), and
+3. that it is **dark outside**: the light sensor, and the display's own
+   dimming, which is a separate value (`Brightness`, source not traced)?
 
-hello11 is **read only**. It opens three sources and writes nothing to any
+Night mode for Android Auto would follow 2 or 3.
+
+hello11 is **read only**. It opens four sources and writes nothing to any
 channel or device. Written in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 
 | Source | What it gives | Expected signal |
 |---|---|---|
 | `/dev/ipc/ch4` | the IOC's telegrams to MMI3GApplication's MOST subsystem: every function block's payload and every BAP function (`ipc4.h`, vehicle-data.md §5.1) | lights: `DA01.0C0D` first byte; camera: `BAP 0B.17` (`ff 01` request, `xx 00` end, rear-camera.md §3.1) |
+| `/dev/ipc/ch5` | the vehicle-signal records by tag and subtag (`sources.h`, vehicle-data.md §3); gyro, accelerometer and clock left out | light sensor: maybe `ch5 09.xx RainSens` |
 | `/dev/ndr/name/sensor/ReverseGear` | ndr's reverse flag, from ch5 (vehicle-data.md §4) | reverse gear |
-| `/dev/slog` | dev-videoctrl's lines (`common/camera`) | the HMI shows the camera: ground truth |
+| `/dev/slog` | dev-videoctrl's lines (`common/camera`); lines about brightness, dimming, day / night (`sources.h`), keyed with their numbers as `#` | the HMI shows the camera: ground truth; the display dims |
 
-**ch4 safety.** MMI3GApplication reads ch4 too. dev-ipc gives every reader
+**Channel safety.** MMI3GApplication reads ch4 too, ndr reads ch5. dev-ipc gives every reader
 its own copy ([vehicle-data.md §2.2](../../docs/vehicle-data.md)), so our
-reads take nothing from it, as long as we keep reading. As a guard, each
+reads take nothing from them, as long as we keep reading (both threads do nothing else). As a guard, each
 telegram has a running counter: more than one gap in five telegrams stops ch4
 reading for the rest of the run (`ch4: STOP` in the log).
 
@@ -34,9 +38,15 @@ without a click ends after its time limit (`TIMEOUT` in the log).
 | 1 | parked in P, ignition on, light switch at 0, touch nothing | quiet | 20 s |
 | 2, 4 | headlights on | lights on | 60 s |
 | 3, 5 | light switch to 0 | lights off | 60 s |
-| 6, 8 | R, until the camera picture is on | reverse | 150 s |
-| 7, 9 | P, until the camera picture is gone | camera off | 150 s |
-| 10 | touch nothing | quiet | 20 s |
+| 6 | light switch to AUTO (it is light: the headlights stay off) | switch AUTO | 60 s |
+| 7, 9 | light sensor covered until the headlights come on, +10 s | sensor covered | 120 s |
+| 8, 10 | sensor uncovered until the headlights go off | sensor free | 180 s |
+| 11, 13 | R, until the camera picture is on | reverse | 150 s |
+| 12, 14 | P, until the camera picture is gone | camera off | 150 s |
+| 15 | touch nothing | quiet | 20 s |
+
+Every step's instruction is on the screen while it runs, with the live
+values (light flag, RainSens, camera, the last brightness slog line).
 
 Our screen shows the step and the live values. It is hidden while the HMI
 shows the camera (never hide the camera) and comes back after it.
@@ -45,7 +55,8 @@ shows the camera (never hide the camera) and comes back after it.
 keys that changed in **every** step of that kind and in **no** quiet step,
 with their first change. "lights on: DA01.0C0D/C" with `[00 ..] -> [01 ..]`
 would confirm §5.2; "reverse: BAP 0B.17" that the camera request can be read
-natively.
+natively. A key under "sensor covered" that is not under "lights on" follows
+the sensor, not the headlights: the darkness signal.
 
 ## Output
 
@@ -55,9 +66,11 @@ natively.
 | `var/hello11/changes.txt` | every change of every key |
 | `var/hello11/ch4.txt` | every telegram, decoded |
 | `var/hello11/ch4.bin` | the raw bytes as read: `u32 ms, u32 length, bytes` per read |
+| `var/hello11/ch5.bin` | the same for ch5 (`tools/ch5dump.py` decodes the records after stripping the headers) |
+| `var/hello11/slog.txt` | the brightness / day-night slog lines, including those from before the start |
 
 ## State
 
-Built and host-tested (`tests/test_hello11.cpp`; the parser also decodes the
-system dump's ch4 capture with no gaps and no skipped bytes). Not yet run on
-the car.
+Built and host-tested (`tests/test_hello11.cpp`; the ch4 parser also decodes
+the system dump's ch4 capture with no gaps and no skipped bytes). Not yet run
+on the car.

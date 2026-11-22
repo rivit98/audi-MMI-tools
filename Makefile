@@ -163,9 +163,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # the 720 clip, the 800 clip with io-media's capture width patched in memory,
 # and the 720 clip again. It puts ~6 MB of test videos on the card.
 #
-# hello11 (src/hello11/README.md): read only. Which ch4 telegrams and BAP
-# functions change with the lights and with reverse, against ndr's reverse
-# flag and the camera's slog lines; about 5 minutes of driver steps.
+# hello11 (src/hello11/README.md): read only. Which ch4 telegrams, BAP
+# functions, ch5 records and slog lines change with the light switch, the
+# covered light sensor and reverse; about 10 minutes of driver steps.
 #
 # audi_stream_receiver runs until the SD card is pulled, so it is always
 # last: pulling the card ends it and the whole run (no final "done" screen;
@@ -252,9 +252,10 @@ build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $
     $(SWDEC) build/h264bsd-sh4/libh264bsd.a
 LIBS_hello10 := build/h264bsd-sh4/libh264bsd.a -lgf
 CXXFLAGS_hello10 := -Wno-ignored-attributes $(SWDEC_INC)
-# hello11: C++. Read only: ch4's telegrams (ipc4.cpp, pure), ndr's reverse
-# flag and the camera's slog lines, against steps the driver goes through
-# (watch.cpp, pure). Both pure parts: tests/test_hello11.cpp.
+# hello11: C++. Read only: ch4's telegrams (ipc4.cpp, pure), ch5's records
+# and the slog's brightness lines (sources.cpp, pure), ndr's reverse flag and
+# the camera's slog lines, against steps the driver goes through (watch.cpp,
+# pure). The pure parts: tests/test_hello11.cpp.
 build/hello11: $(wildcard src/hello11/*.cpp src/hello11/*.h) $(call commonxx,camera) src/common/camera_log.h \
     $(BASE) $(SCREEN) $(UI)
 LIBS_hello11 := -lgf
@@ -537,9 +538,9 @@ build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(
 	mkdir -p build
 	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common $(AA_INC) \
 	    -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^) -Lbuild/mbedtls-host -lmbedtls
-# hello11's ch4 telegram parser and step bookkeeping
+# hello11's ch4 telegram parser, ch5 / slog parsers and step bookkeeping
 build/test_hello11: tests/test_hello11.cpp tests/check.h src/hello11/ipc4.cpp src/hello11/ipc4.h \
-    src/hello11/watch.cpp src/hello11/watch.h
+    src/hello11/sources.cpp src/hello11/sources.h src/hello11/watch.cpp src/hello11/watch.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello11 -o $@ $(filter %.cpp,$^)
