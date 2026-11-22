@@ -59,6 +59,7 @@ constexpr unsigned kReshowMs = 1000;
 constexpr unsigned kWaitMs = 200;
 constexpr unsigned kKillGraceMs = 15000;   // run.sh's KILL_GRACE after a timeout
 constexpr unsigned kQuitGraceMs = 7000;    // quit.c ends us QUIT_HARD_S after a stop
+constexpr unsigned kStuckGraceMs = 5000;   // run.sh's STUCK_GRACE after the KILL
 constexpr unsigned kPostS = 60;            // the slog + core collection
 constexpr int kMargin = 20;
 constexpr int kRowH = 40;
@@ -221,14 +222,20 @@ void nap(unsigned ms)
 }
 
 // Wait for pid; TERM at timeout_s or when we are asked to stop, KILL (the
-// whole group) after the grace time. Returns the wait status.
-int await(pid_t pid, unsigned timeout_s, bool &timed_out, bool &stopped)
+// whole group) after the grace time. Returns the wait status. A process
+// REPLY-blocked on a channel that ignores unblock requests survives even
+// SIGKILL (docs/hbdsi.md section 6.1): kStuckGraceMs after the KILL it is
+// left behind and *stuck is set (the status is then meaningless).
+int await(pid_t pid, unsigned timeout_s, bool &timed_out, bool &stopped,
+          bool *stuck = nullptr)
 {
-	unsigned t0 = log_ms(), term_at = 0;
+	unsigned t0 = log_ms(), term_at = 0, kill_at = 0;
 	bool termed = false, killed = false;
 	int st = 0;
 
 	timed_out = stopped = false;
+	if (stuck)
+		*stuck = false;
 	for (;;) {
 		pid_t r = waitpid(pid, &st, WNOHANG);
 		if (r == pid)
@@ -255,6 +262,14 @@ int await(pid_t pid, unsigned timeout_s, bool &timed_out, bool &stopped)
 			kill(-pid, SIGKILL);
 			kill(pid, SIGKILL);
 			killed = true;
+			kill_at = now;
+		}
+		if (killed && now - kill_at >= kStuckGraceMs) {
+			log_msg("pid %d did not exit %u ms after KILL: left behind", (int)pid,
+			        kStuckGraceMs);
+			if (stuck)
+				*stuck = true;
+			return 0;
 		}
 		nap(kWaitMs);
 	}
@@ -423,21 +438,25 @@ bool run_item(Item &it)
 		copied = true;
 		pid = start(args, out_path, true);
 	}
-	bool timed_out = false, stopped = false;
+	bool timed_out = false, stopped = false, stuck = false;
 	int rc = 127;
 	if (copied && pid < 0) {
 		log_msg("FAIL spawn %s: %s", args[0].c_str(), std::strerror(errno));
 		append_file(out_path, "spawn " + args[0] + ": " + std::strerror(errno) + "\n");
 	} else if (pid >= 0) {
-		int st = await(pid, a.timeout_s, timed_out, stopped);
-		rc = WIFEXITED(st) ? WEXITSTATUS(st) : WIFSIGNALED(st) ? 128 + WTERMSIG(st) : 255;
+		int st = await(pid, a.timeout_s, timed_out, stopped, &stuck);
+		rc = stuck ? 128 + SIGKILL :
+		     WIFEXITED(st) ? WEXITSTATUS(st) : WIFSIGNALED(st) ? 128 + WTERMSIG(st) : 255;
 	}
 	unsigned secs = (log_ms() - t0 + 500) / 1000;
 	unsigned fails = runner::count_fail_lines(read_file(out_path));
 	const char *v = runner::verdict(pid >= 0, timed_out, rc, fails);
 
 	char detail[96], lines[256];
-	if (timed_out)
+	if (stuck)
+		std::snprintf(detail, sizeof(detail), "%s after %u s, left behind",
+		              timed_out ? "stopped" : "asked to stop", secs);
+	else if (timed_out)
 		std::snprintf(detail, sizeof(detail), "stopped after %u s", a.timeout_s);
 	else if (pid < 0)
 		std::snprintf(detail, sizeof(detail), "not started");

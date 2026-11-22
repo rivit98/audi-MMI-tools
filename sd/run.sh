@@ -37,6 +37,7 @@ APPS="@APPS@"
 PRE_S=@PRE_S@          # start screen
 POST_S=@POST_S@        # result screen after each app
 KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
+STUCK_GRACE=5          # after KILL: an app still there then is left behind
 SDPATH="${1:-${0%/*}}"
 case "${SDPATH}" in /*) ;; *) SDPATH=$(cd "${SDPATH}" && pwd) ;; esac   # we cd away
 VAR="${SDPATH}/var"
@@ -55,12 +56,21 @@ cd "${VAR}" || exit 1      # cwd of the apps and their tools
 # Runs cmd in the background with stdout + stderr appended to out_file. A
 # watcher sends TERM after <timeout> s (or when the card is pulled) and
 # KILL KILL_GRACE s later. Sets RC, SECS (wall time) and TIMED_OUT (0/1).
+# A process REPLY-blocked on a channel that ignores unblock requests
+# survives even KILL (docs/hbdsi.md section 6.1), and a plain `wait` would
+# hang the whole run on it. So if it is still there STUCK_GRACE s after the
+# KILL, the watcher sends us USR1, which ends the `wait`, and the app is
+# left behind (RC 137, "did not exit after KILL" in the log).
+GAVE_UP=0
+trap 'GAVE_UP=1' USR1
 run_limited() {
     _limit=$1; _out=$2; shift 2
     rm -f "${BIN}/timed_out"
+    GAVE_UP=0
     _t0=${SECONDS}
     "$@" >> "${_out}" 2>&1 &
     _pid=$!
+    _me=$$
     (
         t=0
         while [ $t -lt ${_limit} ] && [ -d "${SDPATH}" ]; do
@@ -71,11 +81,20 @@ run_limited() {
         : > "${BIN}/timed_out"                 # (QNX has no touch)
         echo "$1: stopped after ${_limit} s (TERM)"
         sleep ${KILL_GRACE}
-        kill -KILL ${_pid} 2>/dev/null && echo "$1: still running, sent KILL"
+        kill -KILL ${_pid} 2>/dev/null || exit 0
+        echo "$1: still running, sent KILL"
+        sleep ${STUCK_GRACE}
+        kill -0 ${_pid} 2>/dev/null || exit 0
+        echo "$1: did not exit ${STUCK_GRACE} s after KILL: left behind"
+        kill -USR1 ${_me}
     ) &
     _watch=$!
     wait ${_pid}
     RC=$?
+    if [ ${GAVE_UP} = 1 ]; then
+        RC=137
+        echo "=== $1 (pid ${_pid}) did not exit after KILL: left behind" >> "${_out}"
+    fi
     kill ${_watch} 2>/dev/null
     SECS=$((SECONDS - _t0))
     TIMED_OUT=0

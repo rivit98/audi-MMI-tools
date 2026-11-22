@@ -305,7 +305,8 @@ process keeps its displayable on top (the screen freezes on the app's
 last picture, the HMI underneath can't be reached), and `run.sh` waits
 on it forever, so no later app runs. Radio sound and the volume knob kept
 working, so MMI3GApplication's audio side was alive [confirmed on video].
-Before any more probing: send from a separate process that owns no
-screen (or give the screen back before the first send), and let run.sh
-move on when a killed app doesn't exit. Of MMI3GApplication's channels,
-only 14 (also used by the navigation) is untried.
+So step `d` sends from a helper process that owns no screen, with a
+deadline on each send (src/hello5/README.md), and run.sh and the runner
+leave behind an app that is still there 5 s after the KILL. Of the
+channels the navigation uses, only 14 is untried; step `d` sends to
+nothing else.

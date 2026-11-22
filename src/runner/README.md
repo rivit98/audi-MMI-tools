@@ -48,7 +48,9 @@ exec bit, the card can be pulled while it runs, and the apps look for the
 unit's tools next to themselves), starts it with `<sd_path>` and the
 `apps.conf` arguments, stdout + stderr into `var/<app>_out.log`, and waits.
 At the `apps.conf` timeout it sends TERM, and 15 s later KILL to the app's
-whole process group. Presses made while the app runs are dropped. Then the
+whole process group. An app still there 5 s after the KILL (REPLY-blocked
+on a channel that ignores unblock requests, docs/hbdsi.md §6.1) is left
+behind and the menu comes back. Presses made while the app runs are dropped. Then the
 same verdict as run.sh (`OK`, `WARN`: FAIL lines in the output, `FAIL`,
 `CRASH`, `TIMEOUT`, `MISSING`), the slog and core files are collected
 (`ksh -c`, as run.sh does), and the menu comes back with the verdict.
