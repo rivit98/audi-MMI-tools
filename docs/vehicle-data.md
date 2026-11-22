@@ -84,9 +84,11 @@ From the firmware's strings and the open files of the running unit
 | ch3 | MMI3GApplication `IPCD::init` (0x08803f60) | MOST subsystem control channel [confirmed] |
 | ch4 | MMI3GApplication `CHBIpcProtocol` (0x08806aa4) | MOST subsystem message channel: logical devices, BAP [confirmed, §5] |
 | ch5 | `ndr` reads (fd 9, `r-`), NavCore holds it write-only (fd 12, `-w`) | vehicle signals [confirmed, §3] |
-| ch6, ch7, ch10 | MMI3GMisc | [unknown] |
+| ch6 | MMI3GMisc (`CHBJobDU`, thread `SwdlIpcDUWorkerThread`) | software download: KWP diagnostic jobs to a download unit [confirmed: strings] |
+| ch7 | MMI3GMisc (`CHBJobIOCBase`, `CHBJobIOCErase`) | software download: erasing and flashing the IOC over KWP [confirmed: strings] |
 | ch8 | MMI3GApplication, MMI3GMedia, ejecthandler | knobs and buttons, platform-notes.md §8 [confirmed] |
-| ch9 | MMI3GApplication | [unknown] |
+| ch9 | MMI3GApplication (`CIOControllerPresCtrl`, thread `IOControllerIPCThread`) | IO controller requests and results, each with a domain, op type and id; which domains is [unknown] [confirmed: strings] |
+| ch10 | MMI3GMisc (`CKeyboardIPC`, `CSWDLKeyboardClient`) | software download for the control panel ("SWDLKeybd": keep-alive, progress bar, critical unlock) [confirmed: strings] |
 | ch11 | dev-irc | [unknown] (infrared?) |
 
 During the 3 s capture, ch2, ch4 and ch5 delivered data; the other channels

@@ -50,7 +50,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 1000;  // the steps' time limits add up to ~15 min
+constexpr unsigned kWatchdogS = 1100;  // the intro's and steps' time limits add up to ~17 min
 constexpr unsigned kQuietMs = 20000;
 constexpr unsigned kLightMs = 60000;    // a step's time limit
 constexpr unsigned kReverseMs = 150000; // the camera's follow-up time is up to ~90 s
@@ -324,7 +324,7 @@ std::string status()
 bool shown = false;
 
 // Our screen, unless the HMI shows the camera (never hide it).
-void screen(const std::string &title, const std::string &text)
+void screen(const std::string &title, const std::string &text, bool with_status = true)
 {
 	if (camera::active()) {
 		if (shown) {
@@ -336,7 +336,7 @@ void screen(const std::string &title, const std::string &text)
 	}
 	if (!camera::clear())
 		return;
-	ui::show(title.c_str(), text + "\n\n" + status(), kFooter);
+	ui::show(title.c_str(), with_status ? text + "\n\n" + status() : text, kFooter);
 	shown = true;
 }
 
@@ -352,6 +352,37 @@ void restore_screen()
 }
 
 // ---- steps ----
+
+constexpr unsigned kIntroMs = 90000;
+const char kIntro[] =
+	"Parked in P, ignition on, light switch at 0. \"Click\" = turn the main knob ONE notch.\n"
+	"1. 20 s: touch nothing.\n"
+	"2. Headlights ON, click. Switch to 0, click. Twice.\n"
+	"3. R: when the camera is on, click. P: when it is gone (can take 1-2 min), click. Twice.\n"
+	"4. 20 s: touch nothing, then the results.\n"
+	"Each step is also shown on screen. Click to start.";
+
+// The whole test on one screen, until a click (or kIntroMs). false: stop requested.
+bool intro()
+{
+	log_msg("== intro (until a knob click)");
+	unsigned t0 = log_ms(), c0 = clicks, shown_at = 0;
+	bool first = true;
+	for (;;) {
+		unsigned now = log_ms();
+		if (first || now - shown_at >= kScreenMs) {
+			screen("hello11: rear camera + lights (~5 min)", kIntro, false);
+			shown_at = now;
+			first = false;
+		}
+		if (clicks != c0 || now - t0 >= kIntroMs) {
+			log_msg("intro: %s after %u ms", clicks != c0 ? "click" : "timeout", now - t0);
+			return true;
+		}
+		if (sleep_quit(100))
+			return false;
+	}
+}
 
 // false: stop requested.
 bool run_step(int n, const StepDef &s)
@@ -469,9 +500,10 @@ int main(int argc, char *argv[])
 	}
 
 	int n = 0;
-	for (const StepDef &s : kSteps)
-		if (!run_step(++n, s))
-			break;
+	if (intro())
+		for (const StepDef &s : kSteps)
+			if (!run_step(++n, s))
+				break;
 
 	log_msg("== summary");
 	std::vector<std::string> sum = summary();

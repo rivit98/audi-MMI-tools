@@ -25,7 +25,9 @@ gaps, so a copy per reader is likely [inferred].
 
 ## Steps
 
-The driver turns the main knob **one click** at the end of each step. A step
+The first screen lists the whole test (the steps below, short) and waits for
+one knob click (90 s at most). The driver then turns the main knob **one
+click** at the end of each step. A step
 without a click ends after its time limit (`TIMEOUT` in the log).
 
 | # | Step | Kind | Limit |
