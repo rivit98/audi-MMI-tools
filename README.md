@@ -90,3 +90,4 @@ What is built but not yet confirmed is listed in each app's README and in
 | [vehicle-data.md](docs/vehicle-data.md) | what the unit reads from the car's buses |
 | [map-and-cluster.md](docs/map-and-cluster.md) | how the navigation map is drawn; how the cluster display is fed (DDP2, KOMO) |
 | [power-onoff.md](docs/power-onoff.md) | who reboots / powers off the unit |
+| [wifi-station-sd.md](docs/wifi-station-sd.md) | phone hotspot station from the SD card: telnet shell, file upload over inetd |
