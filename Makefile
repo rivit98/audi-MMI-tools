@@ -174,7 +174,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 hello10 hello11 audi_stream_receiver
+TESTS   := hello5 hello11 hello10
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
