@@ -1,15 +1,19 @@
 /*
- * hello7 - knob and button tester: every /dev/ipc/ch8 message, decoded
- * (keys.c), shown live and logged.
+ * hello7 - knob, button, steering wheel and touch pad tester: every
+ * /dev/ipc/ch8 message, decoded (keys.c: panel, tpad.c: wheel and pad),
+ * shown live and logged.
  *
  * Two modes:
  *
- *   guide (default)  one control at a time (guide.c): the screen says what
- *                    to press or turn, every message is put down for that
- *                    prompt, and the prompt moves on 2 s after the last
- *                    message (15 s with nothing: the car has no such
- *                    control). The summary names each control's bytes and
- *                    bits, and flags two prompts that got the same ones.
+ *   guide (default)  one open question at a time (guide.c): the steering
+ *                    wheel's volume roller, then the touch pad in the
+ *                    current screen, in every recognizer mode (hello7
+ *                    writes the HMI's "set mode" command to ch8) and on the
+ *                    HMI's radio, map and speller screens. A prompt moves
+ *                    on a few seconds after the last message it wants (15 s
+ *                    with nothing: the car has no such control). The
+ *                    summary names what each prompt got and flags two
+ *                    prompts that got the same.
  *   free <seconds>   no prompts: turn and press anything. A counter per
  *                    known control (the last one in yellow) and the latest
  *                    messages with their first 16 bytes. A bit no known
@@ -29,6 +33,8 @@
  * usage: hello7 <sd_path> [guide | <seconds>]   (default guide; a number:
  *        free mode for that long)
  */
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +51,7 @@
 #include "quit.h"
 #include "screen.h"
 #include "text.h"
+#include "tpad.h"
 #include "types.h"
 
 #define WATCHDOG_SLACK  20
@@ -53,6 +60,8 @@
 #define SUMMARY_MS      45000
 #define RECENT          8       /* messages kept on screen */
 #define MARGIN          20
+#define KEY_DEVICE      "/dev/ipc/ch8"
+#define HEX_MAX         40      /* bytes logged per message */
 
 #define C_BG     0xff101820u
 #define C_TEXT   0xffe8e8e8u
@@ -81,23 +90,38 @@ static char last_what[96];              /* the latest message, decoded */
 static int dirty = 1;
 static int guided;
 static struct guide g;
+static int last_echo = -1;              /* the last pad mode the pad echoed */
 
 static void on_key(const u8 *buf, int n, void *arg)
 {
 	struct key_hit hits[KEY_MAX_HITS];
-	char what[96], hex[32 * 3 + 1], gap_s[16], where[48] = "";
+	char what[96], hex[HEX_MAX * 3 + 1], gap_s[16], where[48] = "";
 	unsigned now = log_ms(), gap;
 	int nh, i;
 
 	(void)arg;
 	nh = key_decode(buf, n, hits, KEY_MAX_HITS);
 	key_describe(hits, nh, what, sizeof(what));
-	for (i = 0; i < n && i < 32; i++)
+	if (tpad_sub(buf, n) >= 0) {
+		tpad_describe(buf, n, what, sizeof(what));
+		nh = 0;                         /* not a panel release */
+	} else {
+		char wheel[96];
+
+		mfl_describe(buf, n, wheel, sizeof(wheel));
+		if (wheel[0]) {
+			snprintf(what, sizeof(what), "%s", wheel);
+			nh = 0;
+		}
+	}
+	for (i = 0; i < n && i < HEX_MAX; i++)
 		snprintf(hex + i * 3, 4, "%02x ", buf[i]);
 	hex[i * 3] = '\0';
 
 	pthread_mutex_lock(&lock);
 	gap = msgs ? now - last_ms : 0;
+	if (tpad_mode_echo(buf, n) >= 0)
+		last_echo = tpad_mode_echo(buf, n);
 	msgs++;
 	last_ms = now;
 	for (i = 0; i < nh; i++) {
@@ -111,6 +135,8 @@ static void on_key(const u8 *buf, int n, void *arg)
 	}
 	if (nh != 1 || hits[0].ctl != K_RELEASE)
 		snprintf(last_what, sizeof(last_what), "%s", what);
+	else if (n >= 27 && buf[16] == 3)
+		snprintf(what, sizeof(what), "wheel release");
 	/* the screen shows the first 16 bytes, the log all of them */
 	snprintf(gap_s, sizeof(gap_s), "+%u ms", gap);
 	snprintf(recent[nrecent % RECENT], sizeof(recent[0]),
@@ -129,10 +155,36 @@ static void nap(unsigned ms)
 	nanosleep(&ts, NULL);
 }
 
+/* Set the pad's recognizer mode the way the HMI does (MMI3GApplication
+ * 0x82288B8 -> 0x8228628): open ch8, write the 10-byte command, close. The
+ * pad echoes the mode back (subfunction C4). quit.c keeps reading ch8 on
+ * its own fd; this one is open for the write only, so it queues nothing. */
+static int pad_set_mode(int mode)
+{
+	u8 cmd[16];
+	int len = tpad_mode_cmd(mode, cmd, sizeof(cmd)), fd, w, err;
+
+	fd = open(KEY_DEVICE, O_RDWR);
+	if (fd < 0) {
+		log_msg("pad mode %d: open %s failed: %s", mode, KEY_DEVICE, strerror(errno));
+		return -1;
+	}
+	w = (int)write(fd, cmd, (usize)len);
+	err = errno;
+	close(fd);
+	if (w != len) {
+		log_msg("pad mode %d: write returned %d (%s)", mode, w, w < 0 ? strerror(err) : "short");
+		return -1;
+	}
+	log_msg("pad mode %d: sent 22 00 00 00 00 00 02 00 c4 %02x", mode, mode);
+	return 0;
+}
+
 /* ---- the screen, out of the rear camera's way ---- */
 
 static int ui;                          /* our displayable is up */
 static int cam_was;
+static int hmi_step;                    /* a step on the HMI's screens: no re-show */
 
 /* 1 if we may draw now. While the HMI shows the camera: no drawing and no
  * re-show; after it, ours comes back once the HMI has shown its own. */
@@ -153,8 +205,10 @@ static int screen_ok(void)
 		if (!cam_clear())
 			return 0;
 		log_msg("screen: the camera is gone, ours again");
-		screen_show_again();
-		screen_set_reshow(RESHOW_MS);
+		if (!hmi_step) {
+			screen_show_again();
+			screen_set_reshow(RESHOW_MS);
+		}
 		cam_was = 0;
 		dirty = 1;
 	}
@@ -236,7 +290,7 @@ static void draw_guide(void)
 	struct canvas *c = screen_canvas();
 	const struct guide_prompt *p;
 	const struct guide_result *r;
-	char line[200], sig[96];
+	char line[300], sig[160];
 	unsigned left;
 	int y;
 
@@ -298,20 +352,48 @@ static void draw_summary(void)
 static void log_result(int i)
 {
 	const struct guide_result *r = &g.res[i];
-	char sig[96];
+	char sig[160], presses[96];
 	int same = guide_same_as(&g, i);
 
 	guide_signature(r, sig, sizeof(sig));
-	log_msg("step %d %s: %s; %u messages, %u with a control, %u ms%s%s%s", i + 1,
+	guide_press_list(r, presses, sizeof(presses));
+	log_msg("step %d %s: %s; %u messages, %u it wants, %u ms%s%s%s%s%s", i + 1,
 	        guide_prompts[i].name, sig, r->msgs, r->presses, r->end_ms - r->begin_ms,
 	        r->idle ? ", nothing came" : r->capped ? ", ended by the time limit" : "",
-	        same >= 0 ? ", SAME as " : "", same >= 0 ? guide_prompts[same].name : "");
+	        same >= 0 ? ", SAME as " : "", same >= 0 ? guide_prompts[same].name : "",
+	        presses[0] ? "; finger down at " : "", presses);
 }
 
-static void log_prompt(void)
+/* forced: hello7 set a pad mode and no HMI screen has set its own since */
+static int forced = -1, mode_before = -1;
+
+static void start_prompt(void)
 {
-	log_msg("== step %d/%d: %s: \"%s\"", g.cur + 1, guide_nprompts,
-	        guide_prompts[g.cur].name, guide_prompts[g.cur].text);
+	const struct guide_prompt *p = &guide_prompts[g.cur];
+
+	log_msg("== step %d/%d: %s: \"%s\"", g.cur + 1, guide_nprompts, p->name, p->text);
+	if (p->set_mode > 0) {
+		if (forced < 0) {
+			pthread_mutex_lock(&lock);
+			mode_before = last_echo;
+			pthread_mutex_unlock(&lock);
+		}
+		pad_set_mode(p->set_mode);
+		forced = p->set_mode;
+	}
+	if (p->hmi) {
+		/* the HMI's screens stay up while this step runs; its screen
+		 * change sets the pad's mode again */
+		hmi_step = 1;
+		forced = -1;
+		screen_set_reshow(0);
+	} else if (hmi_step) {
+		hmi_step = 0;
+		if (ui && !cam_active()) {
+			screen_show_again();
+			screen_set_reshow(RESHOW_MS);
+		}
+	}
 }
 
 static void run_guide(void)
@@ -323,7 +405,7 @@ static void run_guide(void)
 	guide_start(&g, log_ms());
 	guided = 1;
 	pthread_mutex_unlock(&lock);
-	log_prompt();
+	start_prompt();
 	while (quit_poll() == QUIT_NONE) {
 		pthread_mutex_lock(&lock);
 		ended = guide_tick(&g, log_ms());
@@ -332,7 +414,7 @@ static void run_guide(void)
 			log_result(g.cur - 1);
 			if (guide_done(&g))
 				break;
-			log_prompt();
+			start_prompt();
 			dirty = 1;
 		}
 		left = guide_left_ms(&g, log_ms()) / 1000;
@@ -342,17 +424,35 @@ static void run_guide(void)
 		}
 		nap(REDRAW_MS);
 	}
+	if (hmi_step) {                 /* ours again for the summary */
+		hmi_step = 0;
+		if (ui && !cam_active()) {
+			screen_show_again();
+			screen_set_reshow(RESHOW_MS);
+		}
+	}
+	if (forced >= 0) {
+		if (mode_before >= 0) {
+			log_msg("pad: back to mode %d, the one it had before hello7 set any", mode_before);
+			pad_set_mode(mode_before);
+		} else {
+			log_msg("pad: left in mode %d; the HMI sets its own on the next screen change",
+			        forced);
+		}
+	}
 
 	for (i = 0, seen = 0; i < g.cur; i++)
 		seen += g.res[i].seen;
 	log_msg("RESULT %d of %d steps got something, %u messages", seen, guide_nprompts, msgs);
 	for (i = 0; i < g.cur; i++) {
-		char sig[96];
+		char sig[160], presses[96];
 		int same = guide_same_as(&g, i);
 
 		guide_signature(&g.res[i], sig, sizeof(sig));
-		log_msg("RESULT %-22s %s%s%s", guide_prompts[i].name, g.res[i].seen ? sig : "-",
-		        same >= 0 ? "  SAME as " : "", same >= 0 ? guide_prompts[same].name : "");
+		guide_press_list(&g.res[i], presses, sizeof(presses));
+		log_msg("RESULT %-22s %s%s%s%s%s", guide_prompts[i].name, g.res[i].seen ? sig : "-",
+		        same >= 0 ? "  SAME as " : "", same >= 0 ? guide_prompts[same].name : "",
+		        presses[0] ? "  down at " : "", presses);
 	}
 	end = log_ms() + SUMMARY_MS;
 	dirty = 1;
@@ -397,7 +497,7 @@ int main(int argc, char *argv[])
 	if (argc > 2 && atoi(argv[2]) > 0)
 		seconds = (unsigned)atoi(argv[2]);
 	watchdog = seconds ? seconds + WATCHDOG_SLACK
-	                   : (unsigned)guide_nprompts * GUIDE_MAX_MS / 1000 + SUMMARY_MS / 1000 +
+	                   : guide_total_ms() / 1000 + SUMMARY_MS / 1000 +
 	                     WATCHDOG_SLACK;
 	snprintf(logpath, sizeof(logpath), "%s/hello7.log", var_dir(argv[1]));
 	if (log_open(logpath) != 0)

@@ -5,8 +5,9 @@
  * A message is the state of the controls: knob bytes carry detents since
  * the last message (6/7 main knob right/left, 4/5 volume up/down), buttons
  * are bits in bytes 1 and 3 while pressed, and an all-zero message follows
- * a release. Bytes 14, 15 and 17 are always 01 02 .. 01. Any other set bit
- * is reported as unknown, with its byte and bits, so a new button can be
+ * a release. Only bytes 0-12 are controls: 13-26 are statuses, the
+ * steering wheel and the touch pad (tpad.h). Any other set bit in 0-12 is
+ * reported as unknown, with its byte and bits, so a new button can be
  * named from one press.
  */
 #ifndef HELLO7_KEYS_H
@@ -35,8 +36,8 @@ int key_decode(const u8 *buf, int n, struct key_hit *out, int max);
 
 const char *key_name(int ctl);
 
-/* The bits of buf[i] that can belong to a control: 0 for the unit-state
- * bytes 16-26 and past n, the always-set bits of bytes 14/15 removed. */
+/* The bits of buf[i] that can belong to a panel control: 0 for bytes 13
+ * on and past n. */
 int key_bits(const u8 *buf, int n, int i);
 
 /* "main knob right x2 + MENU" into buf. */

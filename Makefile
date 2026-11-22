@@ -141,8 +141,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # too (the SDK's std::mutex calls pthread_mutex_init/destroy), so hello8 is
 # not in the default run.
 #
-# hello7, the guided knob and button tester, has named every control on
-# ch8 (docs/platform-notes.md §8), so it is no longer in the default run.
+# hello7, the guided ch8 tester, has named every panel control; it now asks
+# only the open touch pad and steering wheel questions, and is run from the
+# runner's menu when needed, not by default.
 #
 # hello6 is not in the default run: its ten clips give the same answer
 # every time, and its main result, hardware H.264 on screen through VCAP 0
@@ -218,8 +219,9 @@ LIBS_hello5 := -lasound -lgf
 # CPU-drawn instruction screens, the unit's tools for video.
 build/hello6: $(wildcard src/hello6/*.c src/hello6/*.h) $(BASE) $(GL) $(SCREEN) $(PROC)
 LIBS_hello6 := -lGLES_CM -lgf
-# hello7: knob/button tester, ch8 decoding in keys.c, the guided run in
-# guide.c (both pure: tests/test_keys.c, tests/test_guide.c); CPU-drawn
+# hello7: ch8 tester, panel decoding in keys.c, steering wheel and touch
+# pad in tpad.c, the guided run in guide.c (all pure: tests/test_keys.c,
+# tests/test_tpad.c, tests/test_guide.c); CPU-drawn
 # screen. C, plus cam.cpp, a C wrapper of common/camera (stay out of the
 # rear camera's way), hence a C++ app.
 build/hello7: $(wildcard src/hello7/*.c src/hello7/*.cpp src/hello7/*.h) $(call commonxx,camera) \
@@ -469,7 +471,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -544,7 +546,9 @@ build/test_hbdsi:  tests/test_hbdsi.c tests/check.h src/common/hbdsi_wire.c src/
 build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/keys.h
 # hello7's guided run: prompt ends, signatures, duplicates
 build/test_guide:  tests/test_guide.c tests/check.h src/hello7/guide.c src/hello7/guide.h \
-                   src/hello7/keys.c src/hello7/keys.h
+                   src/hello7/keys.c src/hello7/keys.h src/hello7/tpad.c src/hello7/tpad.h
+# hello7's touch pad and steering wheel decoding (MMI3GApplication's KeyPanel layouts)
+build/test_tpad:   tests/test_tpad.c tests/check.h src/hello7/tpad.c src/hello7/tpad.h
 # hello8's checks with the host's own libstdc++ (C++, so its own rule)
 build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp src/hello8/gusa.cpp \
     src/hello8/checks.h

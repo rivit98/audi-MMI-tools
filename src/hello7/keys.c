@@ -7,9 +7,8 @@
 
 #include "keys.h"
 
-#define MSG_BYTES 32            /* ch8 messages are 27 */
-#define STATE_FIRST 16          /* bytes 16-26: state, not controls (below) */
-#define STATE_LAST  26
+#define MSG_BYTES 40            /* ch8 messages are 27, touch pad ones up to ~36 */
+#define STATE_FIRST 13          /* bytes 13-26: status, not controls (below) */
 
 /* The known controls: a knob takes the whole byte (its value = detents),
  * a button one bit. */
@@ -27,20 +26,15 @@ static const struct {
 };
 #define NKNOWN ((int)(sizeof(known) / sizeof(known[0])))
 
-/* bytes that are always set: anything else in them is news */
-static int constant(int i)
-{
-	return i == 14 ? 0x01 : i == 15 ? 0x02 : 0;
-}
-
-/* Bytes 16-26 hold some state of the unit, not controls [inferred]: byte
- * 16 is 0x00 in some sessions and 0x03 in every message of others, byte
- * 26 can sit at 0x11 for a whole session, and bytes 23/25 change with no
- * control touched. Decoding them as key bits makes every message
- * "unknown", so they are left to the raw log. */
+/* Bytes 13-26 are not panel controls (MMI3GApplication's KeyPanel,
+ * 0x822C038; src/common/buttons/README.md): 13 = tip display status,
+ * 14 = message kind (01 keys, 02 touch pad), 15 = turn mechanic (the
+ * motorised screen), 16 = source, 23-26 = steering wheel (tpad.c). The
+ * touch pad's bytes from 27 on are tpad.c's too. Decoding them as key bits
+ * makes every message "unknown", so they are left to tpad.c and the log. */
 static int is_state(int i)
 {
-	return i >= STATE_FIRST && i <= STATE_LAST;
+	return i >= STATE_FIRST;
 }
 
 static int add(struct key_hit *out, int n, int max, int ctl, int amount,
@@ -64,7 +58,7 @@ int key_decode(const u8 *buf, int n, struct key_hit *out, int max)
 	if (n > MSG_BYTES)
 		n = MSG_BYTES;
 	for (i = 0; i < n; i++)
-		left[i] = is_state(i) ? 0 : buf[i] ^ constant(i);
+		left[i] = is_state(i) ? 0 : buf[i];
 	for (i = 0; i < NKNOWN; i++) {
 		int b = known[i].byte, v = left[b] & known[i].mask;
 
@@ -85,7 +79,7 @@ int key_bits(const u8 *buf, int n, int i)
 {
 	if (i < 0 || i >= n || i >= MSG_BYTES || is_state(i))
 		return 0;
-	return buf[i] ^ constant(i);
+	return buf[i];
 }
 
 const char *key_name(int ctl)

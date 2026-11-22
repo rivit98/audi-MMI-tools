@@ -43,7 +43,7 @@ and what doesn't). Shared code is in [src/common/](src/common/); the knob and bu
 | [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark |
 | [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) |
 | [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode |
-| [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`): names one control at a time on screen, logs what each sends |
+| [hello7](src/hello7/README.md) | ch8 input tester: steering wheel and touch pad (every pad mode, set by writing the HMI's command), one step at a time; free mode decodes everything |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP |
 | [hello10](src/hello10/README.md) | 800×480 video: io-media capture-width probe, software H.264 decoding on the SH4 |

@@ -54,7 +54,7 @@ binary -m sh4 -EL --adjust-vma=0x8040000` in the `mmi-sdk` image).
 |---|---|
 | On/off key short or long press, display key | The IOC reports `SYSTEM_STATE_ONOFF_KEY_SP_REQ` / `..._LP_REQ` / `SYSTEM_STATE_DISPLAY_KEY_REQ` (strings at `0x088850b8`–`0x088851e0`) [confirmed]. The HMI goes to its off/standby state: screen dark, audio off. The SH4 keeps running [inferred]. |
 | MENU + knob press + top-right soft key, held | Reboots the unit. It brings the unit back after a GPU freeze (gpu-results.md §4.4) [confirmed]. Which side detects it (IOC or HMI) is [unknown]. A short or partial press only does what the single keys do. |
-| Ignition off, car locked | The unit runs on for minutes and then loses power. Seen just before: ch8 byte 15 `02 → 03 → 00` and HMI `OnOff new system state is 5`, with the unit still running [confirmed]. |
+| Ignition off, car locked | The unit runs on for minutes and then loses power. Seen just before: ch8 byte 15 `02 → 03 → 00` (the motorised screen retracting, src/common/buttons/README.md) and HMI `OnOff new system state is 5`, with the unit still running [confirmed]. |
 
 The run-on time is set by the timers on the GEM screen `OnOffTimer`
 (`engdefs/OnOffTimer.esd`): OFF 1 / OFF 2 delay (`per 3 0x00140102/3`),
@@ -202,6 +202,7 @@ mode (SWDL, transport) [unverified]. Before trying this:
 - Whether the reset key combination is decoded by the IOC or by
   MMI3GApplication (`SYSTEM_STATE_RESET_ON_REQ` is a candidate).
 - What ShutDownRequest 18 and 22 mean.
-- Whether ch8 byte 15 (`02 → 03 → 00` at ignition off) mirrors the IOC's
-  terminal/shutdown state that ch2 reports to MMI3GApplication
-  (`TerminalStatus`, `ShutDownRequest` in `COnOffDevCtrl::receivedIPCData`).
+- How the screen retracting (ch8 byte 15 `02 → 03 → 00`, the "turn
+  mechanic status") lines up with the IOC's terminal/shutdown state that
+  ch2 reports to MMI3GApplication (`TerminalStatus`, `ShutDownRequest` in
+  `COnOffDevCtrl::receivedIPCData`).

@@ -49,9 +49,11 @@ int main(void)
 	one(1, 0x40, K_B1_40, 1, "button b1 0x40");
 	one(-1, 0, K_RELEASE, 0, "release");
 	one(9, 0x10, K_UNKNOWN, 1, "unknown b9 0x10");
-	one(14, 0x03, K_UNKNOWN, 1, "unknown b14 0x02");  /* a constant changed */
+	one(12, 0x01, K_UNKNOWN, 1, "unknown b12 0x01");
+	one(14, 0x02, K_RELEASE, 0, "release");   /* the kind byte (02: touch pad) */
+	one(15, 0x03, K_RELEASE, 0, "release");   /* the screen motor's status */
 
-	/* state bytes 16 = 0x03, 26 = 0x11, 23/25 changing: no key */
+	/* steering wheel bytes 16 = 0x03, 26 = 0x11, 23/25: no panel key (tpad.c) */
 	msg(m, 6, 1);
 	m[16] = 0x03;
 	m[23] = 0x12;

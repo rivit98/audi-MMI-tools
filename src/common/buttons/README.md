@@ -78,10 +78,10 @@ by hello7's guided mode (A6 C7, MMI 3G+ with touch pad) [confirmed]:
 | 2 | `0x01` | volume knob **press** (mute and unmute alike) |
 | 3 | `0x04` | **MENU** (same second as the HMI's `OnOff new system state is 48`) |
 
-Not on ch8 at all: the main knob's four tilt directions (a joystick; none
-came in 15 s each, so this car's knob has none or they travel elsewhere)
-and the steering-wheel volume wheel and arrow keys (most likely the wheel
-reaches the unit as BAP/CAN on another channel [inferred]).
+Not on this car: the main knob's four tilt directions (none came in 15 s
+each [confirmed]). MMI3GApplication reads a joystick from bytes 8–9
+(`processJoystick`, 0x822B70C) and an older touch panel from bytes 10–12
+(`processTouchpanel`, 0x822B87C), for other cars [RE].
 
 ```
 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 02 00 01 ...  main knob 1 detent right
@@ -109,35 +109,107 @@ reaches the unit as BAP/CAN on another channel [inferred]).
   message on release, ~70–350 ms later [confirmed]. Every message carries
   the whole state, so the decoder compares each message's bits with the
   previous one: a new bit is a Press, a cleared bit a Release.
-- Bytes 16–26 are **state, not controls** [inferred]: byte 16 is constant
-  within a run but has been seen as `00` in one and `03` in another,
-  byte 26 as `11`, and bytes 23/25 change with no control touched. The
-  decoder ignores them.
+- Bytes 13–26 are not panel controls. MMI3GApplication's KeyPanel
+  (`CBitInterpreter`, dispatcher 0x822C038) reads them as [RE]:
 
-### Touch pad: the 29/30-byte messages
+  | byte | meaning |
+  |---|---|
+  | 13 | "tip display status" (0x822ACA0) |
+  | 14 | message kind: `01` panel and wheel, `02` touch pad (below) |
+  | 15 | "turn mechanic status" (0x822AC34): the motorised screen, below |
+  | 16 | source: `1`/`2` panel only, `3` steering wheel only, `0` both |
+  | 23–26 | steering wheel, below |
 
-Touch pad strokes come as messages with bytes 14–15 = `02 02` and 1–3
-extra bytes after byte 26 [confirmed]:
+  The decoder ignores bytes 16–26.
+
+### Steering wheel (MFL): bytes 16 and 23–26
+
+The multifunction steering wheel's keys arrive on ch8 as plain 27-byte
+messages, read by the KeyPanel's MFL handler (0x822B1B4) [RE]:
+
+| byte | meaning |
+|---|---|
+| 16 | `03`: a wheel message |
+| 23, 24 | key codes of up to two keys (`00` = none, `22` = NO_KEY) |
+| 25 | events: low nibble for byte 23, high nibble for byte 24 |
+| 26 | high nibble variant, low nibble brand (`11` = variant 1, brand 1) |
+
+Codes `06` and `12` are rollers (0x822B0FC): their event nibble is signed
+ticks, `1` = +1, `F` = −1. Codes `01`–`08`, `10`–`22` and `F0`/`F1` are keys,
+with the event nibble as press/hold/release. A message with code `00`
+follows each event as the release. The MMI maps each code to its own key id
+(0x822AFE0) and logs `KEY: 0x%x(MFL) -> 0x%x(DSI)` or `ROLLER: ...`.
+
+Logged on ch8 while the volume was changed [confirmed: the messages]:
 
 ```
-... 02 02 00 01 ... 00  ca 84 c6     finger down (first byte 0xCx)
-... 02 02 00 01 ... 00  3d 3c        moves: 0x3d/0x3e + one coordinate byte
-... 02 02 00 01 ... 00  3e 3a
-... 02 02 00 01 ... 00  cb           finger up
+.. 01 02 03 01 00 00 00 00 00 12 00 01 11    roller 12, +1
+.. 01 02 03 01 00 00 00 00 00 00 00 00 11    release
+.. 01 02 03 01 00 00 00 00 00 12 00 0f 11    roller 12, -1
 ```
 
-The same `02 02` + `c4 xx` pair also arrives ~0.6 s after a main-knob
-press or a soft key (`c4 06`, `c4 09`), with no hand on the pad. The pad's
-coordinate encoding (and what `c4 xx` is) is not decoded yet; the first
-extra byte looks like a type (`0xC4`/`0xCA`/`0xCB` events, `0x3D`/`0x3E`
-axis samples) [inferred]. Their control bytes are zero, so the decoder
-takes a `02` message as a Touch event only: it releases no held button.
+Roller `12` is most likely the wheel's volume roller, and `+1` louder
+[inferred]. In another run the wheel steps of hello7's guide got no ch8
+message at all [confirmed]; why is open (ignition, or the wheel not used).
+hello7's guide asks for both directions to settle it.
 
-### Byte 15: the unit's power state
+### Touch pad: byte 14 = `02`
 
-Byte 15 looks like the unit's power state [inferred]. It is `02` in normal
-operation. With nothing touched, ch8 sends a 29-byte message with bytes
-14–15 = `02 02`, then `01 03` 0.2–0.6 s later and `01 00` about 3 s after
+The pad recognises on its own and reports results, not raw samples. A pad
+message is a 27-byte header with byte 14 = `02`, a **subfunction** in
+byte 27 and its data from byte 28 on (28–36 bytes in all). The KeyPanel's
+handler (0x8227B5C) knows these [RE]:
+
+| byte 27 | data | meaning |
+|---|---|---|
+| `CA` | x, y | finger down at x, y (0–255) |
+| `CB` | | finger up |
+| `30` / `31` | key | virtual key pressed / released |
+| `3D` / `3E` | key | finger moved onto / off a virtual key |
+| `D3` | `00` / `01` | tap / double tap |
+| `38` | 1–8 | 2D scroll: N, NE, E, SE, S, SW, W, NW |
+| `48` | axis 1–4, signed step | 2D slider; axis 1 acts as the volume encoder, 2 as the main knob, 3/4 as encoders `4C`/`4D` |
+| `39` | 0–8 | border status: CENTER, N .. NW |
+| `C5` / `C6` | x, y | absolute / relative coordinates |
+| `C7` | begin, coding (`01` = UTF-8), text | a recognised handwritten character |
+| `C4` | mode | the recognizer mode now (the answer to a mode change) |
+| `C2` | 5 chars | the recognizer language |
+| `C1` / `C8` | setting, 32-bit value | a generic setting |
+
+Virtual keys (0x82279A0): `37` KEY1, `3D` KEY2, `39` KEY3, `3A` KEY4, `3B`
+KEY5, `3C` KEY6 (the radio presets), `50`–`58` CENTER, N .. NW.
+
+**The HMI chooses what the pad reports.** It sets a recognizer mode per
+screen by writing to ch8 itself (0x82288B8, `KeyPanel:
+requestSetRecognizerMode`):
+
+```
+22 00 00 00 00 00 02 00 C4 <mode>        10 bytes, open/write/close per command
+```
+
+The pad answers with subfunction `C4 <mode>`. MMI3GApplication passes on
+modes 6, 9, 10, 11, 12, 13, 16, 17 and 18 (0x8226994); every other value
+becomes 0. The HMI's mode names (lsd.jxe) include `RECOGNIZERMODE_OFF`,
+`_RADIO`, `_RADIO_AND_MAP`, `_MAP_PANNING`, `_NAV`, `_TEL`, `_FREETEXT`,
+`_TP_ENCODER_XY`, `_TP_ENCODER_FADER` and `_TP_ENCODER_DVD`; which number is
+which is open. The language is set the same way with `C2` and 5 bytes. The
+panel's key lights use the same header with byte 6 = `01` (0x8228AF4).
+
+Logged on ch8 [confirmed], read with the table above: a finger drawn
+across the pad on the radio screen gives `CA 84 C6` (down at 132, 198),
+then `3D`/`3E` pairs as it crosses preset zones (KEY6, KEY4, KEY2, KEY1,
+...), then `CB`. A main-knob press or a soft key changes the HMI's screen,
+and ~0.6 s later the pad answers `C4 00` and `C4 06` / `C4 09`: the HMI
+switched the mode off and to the new screen's [inferred].
+
+
+
+### Byte 15: the motorised screen
+
+MMI3GApplication logs byte 15 as the "turn mechanic status" (0x822AC34)
+[RE]: the motor that moves the screen out of and into the dashboard. It is
+`02` in normal operation. With nothing touched, ch8 sends a 29-byte touch pad message (bytes
+14–15 = `02 02`), then `01 03` 0.2–0.6 s later and `01 00` about 3 s after
 that. This sequence has been seen twice:
 
 - Once the run ended there: the app's log, `run.log` and the next app all
@@ -151,10 +223,12 @@ that. This sequence has been seen twice:
   `19` with `AMFMTuner disconnected` 2 min later. The states seen while
   running normally are `14`, after `49 20 35 4 6` at boot.
 
-So byte 15 `03`/`00` is a power state on the way down, with the unit
-possibly still running for minutes [inferred]. If that holds, ch8 gives an
-app a few seconds' warning to save its state (the decoder's Power event).
-To confirm: switch the ignition off on purpose during a run and compare.
+So `03` is the screen moving and `00` the screen retracted [inferred]: the
+"motor running down" tone is the screen folding away at ignition off, and
+the unit can run on for minutes after it. The decoder's Power event still
+gives an app a few seconds' warning that the car is being switched off.
+To confirm: switch the ignition off on purpose during a run and watch the
+screen.
 
 ### Several readers
 
@@ -180,4 +254,5 @@ SD removal or the watchdog, so a stray press during a test cannot cut it
 short. `quit.c` reads ch8, logs the first messages raw and offers the
 bytes to an app observer (`quit_init_ex`): the hub, or a plain callback
 (hello5 counts volume detents that way). **hello7** is the input tester:
-its guided mode named the table above, one control per step.
+its guided mode named the table above, one control per step, and now
+asks the open touch pad and steering wheel questions.

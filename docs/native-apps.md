@@ -683,8 +683,8 @@ phone-app bugs and MMI bugs can be told apart without the car.
   to the background and back.
 - Live PCM audio, rather than files.
 - Latency floor of live H.264 through io-media (measured: steady ~0.5 s, §10).
-- Confirm ch8 byte 15 as a power-state warning (turn the ignition off
-  during `hello7`) and name the remaining button bits.
+- Confirm ch8 byte 15 as the motorised screen's status (turn the ignition
+  off during `hello7` and watch the screen).
 - How the HMI shows the rear camera: answered in [rear-camera.md](rear-camera.md). Still open: how an app can tell the camera is active before it touches VP1.
 - Reading CAN data from an app.
 - Layer manager details beyond what qnx-audi used: register flags `2`

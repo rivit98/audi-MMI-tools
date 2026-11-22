@@ -5,7 +5,7 @@
 // detents turned since the last message, buttons are bits that stay set while
 // held. Decoder keeps the previous button state and turns each message into
 // events: Press / Release per button bit, Turn per knob byte, Touch for the
-// touch pad's messages, Power when byte 15 changes.
+// touch pad's messages, Power when byte 15 (the motorised screen) changes.
 //
 // Pure (no car APIs), tested on the host (tests/test_buttons.cpp). hub.h
 // hands the events to any number of observers.
@@ -46,7 +46,7 @@ enum class Action : u8 {
 	Release,
 	Turn,           // detents (signed)
 	Touch,          // the touch pad's raw bytes (not decoded yet)
-	Power,          // byte 15 changed: 02 = running, 03 / 00 = on the way down
+	Power,          // byte 15 changed: the motorised screen, 02 = out, 03 / 00 = folding away (ignition off)
 };
 
 constexpr int kTouchMax = 6;

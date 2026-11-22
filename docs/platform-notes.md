@@ -258,8 +258,9 @@ untried route to a clean offscreen capture. **[unverified]**
 
 ## 8. Input: `/dev/ipc/ch8`
 
-The knob and button protocol (the byte table, knob counts, touch pad
-messages, byte 15 as power state, the HMI keeping the input) is in
+The knob, button, steering wheel and touch pad protocol (the byte table,
+knob counts, the wheel's bytes 23–26, the pad's subfunctions and modes,
+byte 15 as the motorised screen, the HMI keeping the input) is in
 [src/common/buttons/README.md](../src/common/buttons/README.md), next to the library that
 decodes it.
 
