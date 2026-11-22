@@ -25,7 +25,11 @@
 // The driver turns the knob once when the moving picture appears and films
 // the screen (the bands are only on video).
 //
-// The default run is seq: three plays in a row. (1) c3, 720x480, as the unit
+// sw      software decoding (soft.h, common/swdec.c over h264bsd) of c12,
+//          800x480: decode only for 20 s, then on screen through
+//          gf_draw_image as BGRA (15 s) and as YUV (10 s), timed per frame
+//
+// The default run is seq, then sw. seq: three plays in a row. (1) c3, 720x480, as the unit
 // plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
 // MP4) played, width put back. (3) c3 again. The crop tests above are answered
 // and run only by name.
@@ -43,7 +47,7 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: seq)
+// usage: hello10 <sd_path> [test,test,...]   (default: seq,sw)
 #include "types.h"
 
 extern "C" {
@@ -58,6 +62,7 @@ extern "C" {
 #include "h264.h"
 #include "hw_stream.h"
 #include "player.h"
+#include "soft.h"
 #include "ui.h"
 #include "vout.h"
 
@@ -78,7 +83,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 300;    // ~2.5 min run
+constexpr unsigned kWatchdogS = 360;    // ~3 min run
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -90,7 +95,7 @@ constexpr const char *kLivePath = "/dev/hello10/live.mp4";
 constexpr const char *kRawClip = "c12_h264_800.h264";
 constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
 
-enum class Kind { File, Live, Probe, Patched, Sequence };
+enum class Kind { File, Live, Probe, Patched, Sequence, Soft };
 
 struct Test {
 	const char *name;
@@ -132,6 +137,10 @@ const std::vector<Test> kTests = {
 	{"seq", "Normal, 800 wide, normal (about 1 min)",
 	 "Three videos in a row. Turn the main knob ONE click whenever the moving picture appears.",
 	 Kind::Sequence, nullptr, 0, 0, 0, 0},
+	{"sw", "Software decoder, 800x480 (about 1 min)",
+	 "The MMI decodes an 800x480 video itself, without the video chip: first without a "
+	 "picture, then on the screen twice. Film the screen; nothing else to do.",
+	 Kind::Soft, nullptr, 0, 0, 0, 0},
 };
 
 // The steps of seq: the 800-wide capture is set only for step 2.
@@ -677,7 +686,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 	char title[96];
 	std::snprintf(title, sizeof(title), "Test %d/%d: %s", n, total, t.title);
 	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title,
-	        t.kind == Kind::Live ? kRawClip : (t.clip ? t.clip : "no clip"));
+	        t.kind == Kind::Live || t.kind == Kind::Soft ? kRawClip : (t.clip ? t.clip : "no clip"));
 	if (t.kind == Kind::Sequence)
 		return run_sequence(t);
 
@@ -687,12 +696,18 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 		summary.push_back(std::string(t.name) + ": clip missing");
 		return true;
 	}
-	if (t.kind == Kind::Live && clip == nullptr) {
+	if ((t.kind == Kind::Live || t.kind == Kind::Soft) && clip == nullptr) {
 		log_msg("FAIL %s: %s", t.name, clip_err.c_str());
 		summary.push_back(std::string(t.name) + ": " + clip_err);
 		return true;
 	}
 
+	if (t.kind == Kind::Soft) {   // its own screens, no knob
+		ui::show(title, t.what, kFooter);
+		if (sleep_quit(kLabelMs))
+			return false;
+		return soft::run(clip->data.data(), clip->frames, summary);
+	}
 	ui::show(title, std::string(t.what) + kSeen, kFooter);
 	if (sleep_quit(kLabelMs))
 		return false;
@@ -711,7 +726,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)
-		return t.kind == Kind::Sequence;   // the default run
+		return t.kind == Kind::Sequence || t.kind == Kind::Soft;   // the default run
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }
@@ -758,7 +773,7 @@ int main(int argc, char *argv[])
 	for (const Test &t : kTests)
 		if (selected(only, t)) {
 			run.push_back(&t);
-			live = live || t.kind == Kind::Live;
+			live = live || t.kind == Kind::Live || t.kind == Kind::Soft;
 		}
 
 	Clip clip;
@@ -781,7 +796,7 @@ int main(int argc, char *argv[])
 	              "moving test picture.\n\nIf the radio or the screen stops working afterwards, "
 	              "restart the MMI (MENU + main knob + top-right key).",
 	              run.size());
-	ui::show("hello10: 720, 800 wide, 720 (about 1 min)", intro, kFooter);
+	ui::show("hello10: capture width, software decoder (about 3 min)", intro, kFooter);
 	if (!sleep_quit(kIntroMs)) {
 		int n = 0;
 		for (const Test *t : run)

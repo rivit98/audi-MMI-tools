@@ -18,7 +18,9 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `cropnav` | c12 cropped to 720×416, 20 s | Is the **blue band** at the bottom gone, and is the picture stretched to the full height? (cutting Android Auto's bottom bar) |
 | `slow` | as `crop`, frames at 15 fps, gap fill to 25, 20 s | Skip frames on an 800-wide coded picture: what a paced phone sends |
 
-The default is all four, about 2.5 minutes.
+| `sw` | c12 (800×480) decoded in **software** on the SH4: 20 s decode only, then on screen through `gf_draw_image` as BGRA (15 s) and as YUV (10 s) | How many frames a second the SH4 decodes, and how many reach the screen. Section "Software decoder" |
+
+The default is `seq` (the capture width test) and then `sw`, about 3 minutes.
 
 How each piece works:
 
@@ -45,6 +47,40 @@ How each piece works:
 fires, sound or video may stay dead until the MMI restarts (MENU + main
 knob + top-right key). hello10 says so on its first screen; the control
 runs first.
+
+## Software decoder (`sw`)
+
+The DM642 path can't show 800 wide. Decoding in software on the SH4 has no
+width limit, and the two costs are measured separately:
+
+- **Decoding:** `common/swdec.c` over h264bsd (Android's Baseline decoder,
+  Apache-2.0, fetched by the Makefile at a pinned commit). The wrapper adds
+  an access unit delimiter to each frame, so every picture comes out of its
+  own access unit with no frame of delay. `tests/test_swdec.cpp` checks it
+  against ffmpeg, byte for byte, single and multi-slice, with cropping.
+- **Getting the picture on screen:** CPU writes into the VFB are slow,
+  ~10 MB/s, so a full 800×480 BGRA copy is ~160 ms
+  ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §2.4). `sw`
+  hands the picture to libgf's `gf_draw_image` instead, so the 2D engine
+  copies it from RAM into the VFB. A wired CarPlay project on a K0742 unit
+  uses this to draw a 320×192 displayable [unverified on P1001]. The
+  `yuv` step tries `GF_FORMAT_PLANAR_YUV_420` straight from the decoder,
+  then UYVY packed by the CPU (half of BGRA's bytes). Either way the
+  graphics chip converts the colours, not the CPU.
+
+That project's quoted 31 fps for 800×480 is decode only, on short clips.
+Its picture reaches the screen at 320×192.
+
+The log has a line every 5 s and one `RESULT sw_decode` / `sw_bgra` /
+`sw_yuv` line each: fps, and min/median/p90/max ms for decode, convert,
+draw (`gf_draw_image` + `gf_draw_finish`) and flip (`updateVfb` +
+`getVfb`). `sw_yuv`'s `format=` says which YUV format libgf took.
+
+| Seen in `sw` | Meaning |
+|---|---|
+| the c12 picture (counter, red band right, blue band bottom), normal colours | `gf_draw_image` works from RAM |
+| `bgra` picture fine, `yuv` wrong colours / striped | the 2D engine takes the format but reads it differently (the format's layout is a guess) |
+| black, `gf_draw_image` ≠ 0 in the log | libgf refuses that format or size |
 
 ## Running
 
@@ -73,4 +109,5 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 
 ## State
 
-Built, host-tested (the SPS rewrite); not yet run on the car.
+Built, host-tested (the SPS rewrite, the software decoder against ffmpeg);
+not yet run on the car.

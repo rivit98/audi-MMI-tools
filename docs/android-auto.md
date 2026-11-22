@@ -19,7 +19,8 @@ two places that the existing `audi_stream_receiver` work cannot answer:
    mirroring uses. Cropping the SPS of an 800x480 stream to 720 stays
    black (section 4.1). The way around it is on the phone: the phone app's
    Android Auto mode decodes Android Auto's video and sends the MMI a
-   720x432 stream (section 4.3). Software decode on the SH4 is unmeasured.
+   720x432 stream (section 4.3). Software decode on the SH4 is unmeasured
+   (hello10's `sw` test measures it).
 2. **Live PCM audio out.** The only audible path found is file-based [repo].
 
 Do the two de-risking experiments (section 5, steps 1-3) before writing any
