@@ -31,6 +31,9 @@
 #   make clips           hello6's, hello9's, hello10's test videos (build/clips/, ffmpeg
 #                        in the mmi-media image; make sd does it when needed)
 #   make shell           interactive shell in the SDK container
+#   make gccrs           the mmi-gccrs image (gccrs for SH4, ~25 min, once)
+#   make hello1_rust     hello in Rust via gccrs: build/hello1_rust; once
+#                        built, make sd puts it in apps/ (docs/rust-gccrs.md)
 
 REPO   := $(abspath $(CURDIR)/../..)
 OQ     := $(CURDIR)/third_party/openqnx/trunk
@@ -194,7 +197,7 @@ SD_APPS ?= runner
 PRE_S   := 3
 POST_S  := 3
 
-.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan aa-sources
+.PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan aa-sources gccrs hello1_rust
 all: $(addprefix build/,$(APPS) $(TOOLS))
 
 build/hello:  $(wildcard src/hello/*.c)
@@ -432,6 +435,7 @@ sd: $(addprefix build/,$(APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clip
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/apps build/sd/var
 	cp -p $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
 	cp -p $(addprefix build/,$(SD_MENU)) build/sd/apps/
+	$(if $(wildcard build/hello1_rust),cp -p build/hello1_rust build/sd/apps/)
 	cp -p sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp -p $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	mkdir -p build/sd/aa && cp -p $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/
@@ -610,6 +614,14 @@ gusa-scan: $(addprefix build/,$(APPS))
 	    sh4-linux-gnu-objdump -d --no-show-raw-insn build/$$a | awk -f tools/gusa-scan.awk | \
 	        sort | uniq -c | sed "s/^/    /"; \
 	done' | c++filt
+
+# hello1_rust: Rust via gccrs, its own image and Makefile (src/hello1_rust/).
+# Not in APPS: the image takes ~25 min to build. make sd takes the binary
+# when it exists.
+gccrs:
+	$(MAKE) -C src/hello1_rust image
+hello1_rust:
+	$(MAKE) -C src/hello1_rust
 
 # Android sender: its own Makefile (android/Makefile), everything in Docker.
 # Its Android Auto mode needs mbedTLS and the head unit certificate:

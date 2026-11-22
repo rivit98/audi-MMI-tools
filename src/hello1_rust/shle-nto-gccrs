@@ -1,0 +1,44 @@
+#!/bin/sh
+# shle-nto-gccrs - gccrs (/opt/gccrs) as a QNX 6.3 SH4 (shle) Rust compiler.
+#
+# Usage:  shle-nto-gccrs -O2 -o app main.rs [more objects / -l libs]
+#
+# Compiles the crate root to an object with the same code generation as
+# shle-nto-gcc (SH-4A, little endian, LL/SC atomics, non-PIE), then links it
+# with shle-nto-gcc, so the QNX link line (crt objects, stub libc.so.2,
+# libgcc, qnx-elf-fix.py) is exactly the C apps' one.
+# -c only compiles. Everything else goes to both steps (gccrs ignores -l).
+
+GCCRS=/opt/gccrs/bin/sh4-linux-gnu-gccrs
+RSFLAGS="-frust-incomplete-and-experimental-compiler-do-not-use
+         -m4a -ml -matomic-model=hard-llcs -Wa,--isa=sh4a
+         -fno-pie -fno-stack-protector"
+
+rs=
+out=a.out
+link=1
+prev=
+rest=
+for a in "$@"; do
+    case "$prev" in -o) out="$a"; prev=; continue ;; esac
+    case "$a" in
+        -o) ;;
+        -o?*) out="${a#-o}" ;;
+        -c) link=0 ;;
+        *.rs) rs="$a" ;;
+        *) rest="$rest $a" ;;
+    esac
+    prev="$a"
+done
+[ -n "$rs" ] || { echo "shle-nto-gccrs: no .rs file" >&2; exit 1; }
+
+if [ $link = 0 ]; then
+    exec $GCCRS $RSFLAGS -c $(echo $rest | tr ' ' '\n' | grep -v '^-l') -o "$out" "$rs"
+fi
+
+obj="$out.rs.o"
+$GCCRS $RSFLAGS -c $(echo $rest | tr ' ' '\n' | grep -v '^-l') -o "$obj" "$rs" || exit
+shle-nto-gcc -o "$out" "$obj" $rest
+st=$?
+rm -f "$obj"
+exit $st
