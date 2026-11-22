@@ -16,12 +16,11 @@ channel or device. Written in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `/dev/ndr/name/sensor/ReverseGear` | ndr's reverse flag, from ch5 (vehicle-data.md §4) | reverse gear |
 | `/dev/slog` | dev-videoctrl's lines (`common/camera`) | the HMI shows the camera: ground truth |
 
-**ch4 safety.** MMI3GApplication reads ch4 too. If dev-ipc shares the
-telegrams between readers instead of giving each reader a copy, we would take
-some away from it. Each telegram has a running counter, so hello11 sees that
-at once: more than one gap in five telegrams stops ch4 reading for the rest of
-the run (`ch4: STOP` in the log). The system dump's 3 s `cat` of ch4 saw no
-gaps, so a copy per reader is likely [inferred].
+**ch4 safety.** MMI3GApplication reads ch4 too. dev-ipc gives every reader
+its own copy ([vehicle-data.md §2.2](../../docs/vehicle-data.md)), so our
+reads take nothing from it, as long as we keep reading. As a guard, each
+telegram has a running counter: more than one gap in five telegrams stops ch4
+reading for the rest of the run (`ch4: STOP` in the log).
 
 ## Steps
 

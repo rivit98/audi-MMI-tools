@@ -94,6 +94,28 @@ From the firmware's strings and the open files of the running unit
 During the 3 s capture, ch2, ch4 and ch5 delivered data; the other channels
 gave nothing (no button was pressed, so ch8 was quiet too).
 
+### 2.2 Several readers on one channel
+
+dev-ipc gives **every reader its own copy** of each incoming message
+[confirmed in code: dev-ipc rev `51`]:
+
+- Each channel has a receive queue of 32 messages of up to 256 bytes,
+  with room for 20 readers (`sub_8047D60(20, 0x100, 32)`, called per
+  channel from `0x80485c0`).
+- Every reader has its own cursor (12-byte slots at queue+0x18).
+  `sub_80481A0` peeks at reader N's next message, and `sub_8048220`
+  advances only reader N's cursor after `MsgReply` (`0x8049d20`,
+  "resmgrSendReadReply"). Our `read()` takes nothing away from
+  MMI3GApplication, ndr or anyone else.
+- The free space of the queue is the **minimum over all open readers**
+  (`sub_80482A0`). A reader that keeps the channel open but stops reading
+  fills the queue after 32 messages, and then new messages are lost for
+  every reader ("queueGetWritePtrExt:queueGetFreeElements = 0",
+  `0x8048360`) [inferred: the writer's side of the full queue is not
+  traced further]. **An app must read continuously, or close the channel.**
+- Opening and closing a channel changes its client count ("Client count
+  changed (ch:%u, old:%u, new:%u)", `0x8049020`).
+
 ## 3. ch5: the vehicle-signal stream
 
 ### 3.1 Record format
@@ -284,10 +306,10 @@ The display's own dimming is a separate attribute, `Brightness` (slot
 | Route | Gets | Effort | Risk |
 |---|---|---|---|
 | **A. `read()` `/dev/ndr/debug/name/sensor/…`** (or `/dev/navi/…`) | reverse gear, wheel counters, temperature, internal gyro/accel | a shell `cat`, or `open`/`read` in C | low; ndr serves several clients [inferred] |
-| **B. `read()` `/dev/ipc/ch5`**, parsed as §3.1 | everything in §3.2 the car sends | small parser (`tools/ch5dump.py` shows it) | **[unknown] whether a second reader takes records away from ndr.** On ch8 every reader gets every message (platform-notes.md §8), and sysinfo's 3 s read on ch5 did no visible harm, so a copy per reader is likely [inferred]. Losing records would hurt the navigation's dead reckoning. |
+| **B. `read()` `/dev/ipc/ch5`**, parsed as §3.1 | everything in §3.2 the car sends | small parser (`tools/ch5dump.py` shows it) | low: every reader gets a copy (§2.2). Only a reader that stops reading with the channel open would starve ndr, which would hurt the navigation's dead reckoning. |
 | **C. NavCore's `/dev/ndr/cmd`/`notify` devctl** | everything ndr decodes, with change notifications | decode the devctl protocol from NavCore's `CLibResMgr` | low once decoded |
 | **D. Java: DSI persistence** (`per 3` namespace) | values the IOC maps into per 3, e.g. battery voltage (`research/ARCHITECTURE.md`) | OSGi bundle, see `modules/per3-reader` | low |
-| **E. ch4 / BAP** | car function states (doors, climate, parking aid) | decode the MOST telegrams first | high: MMI3GApplication owns the protocol (frame counters, acks), so a writer would break it. Reading is [unknown] like ch5 |
+| **E. ch4 / BAP** | car function states (doors, climate, parking aid) | decode the MOST telegrams first | high: MMI3GApplication owns the protocol (frame counters, acks), so a writer would break it. Reading is safe like ch5 (§2.2) |
 | **F. Other CAN messages** (RPM, coolant, …) | anything on the buses | patch and reflash `V850app.bin` | very high: a bad IOC image can leave the unit without power control |
 
 For a first app, **A then B** is the practical order: A needs no
@@ -295,17 +317,11 @@ protocol work and B adds speed, steering and gear.
 
 ## 7. Open questions
 
-- Does reading `/dev/ipc/ch5` alongside ndr give each reader every record?
-  Test: read ch5 for a minute while driving, with the map in dead-reckoning
-  view (or a tunnel), and compare with `ndr`'s own counters.
 - The `/dev/ndr/name/…` tree: is it really there, are the nodes readable,
   and what does `debug/` print?
 - Which tags appear with the ignition on, the engine running, while
   driving, reversing and steering. Units and scaling of STR_ANGLE,
   SpeedoPulse, GearPosition, OutsideTemp and TIMEDATE.
-- Whether reading ch4 disturbs MMI3GApplication: does dev-ipc give every
-  reader a copy? hello11 stops reading as soon as its telegram counters
-  show gaps.
 - Whether `DA 01` / `0x0C0D` follows the light switch (§5.2), and whether
   the camera's BAP request (LSG 0x0B fid 0x17) arrives on ch4 (hello11).
 - Which buses the unit is wired to (§2).

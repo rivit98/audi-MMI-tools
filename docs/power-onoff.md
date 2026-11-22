@@ -192,9 +192,8 @@ mode (SWDL, transport) [unverified]. Before trying this:
 1. Capture real frames. `sendIPCData` logs all fields ("COnOffDevCtrl::sendIPCData
    [%i]: Interfaceversion …") through the HB trace; if that level reaches
    the slog, a normal power cycle shows the values [unverified].
-2. Find out whether reading ch2 steals the IOC's messages from
-   MMI3GApplication or copies them to every reader (for ch8 both sides see
-   every message) [unknown for ch2].
+2. Reading ch2 is safe: dev-ipc gives every reader its own copy
+   (vehicle-data.md §2.2).
 
 ## 7. Open questions
 
