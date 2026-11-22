@@ -14,6 +14,14 @@
 
 static int lm_fd = -1;
 
+static int arm_timeout(void)
+{
+	u64 timeout = LM_TIMEOUT_NS;
+
+	return TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
+	                    NULL, &timeout, NULL) == -1 ? errno : 0;
+}
+
 /* devctl() returns EOK or an errno value; the HMI retries on EINTR.
  * TimerTimeout() arms a timeout for the next blocking kernel call, which is
  * devctl's MsgSendv: a hung layer manager gives ETIMEDOUT, not a hang. */
@@ -22,11 +30,9 @@ static int lm_devctl(unsigned dcmd, void *data, usize nbytes)
 	int tries = 10, rc;
 
 	do {
-		u64 timeout = LM_TIMEOUT_NS;
-
-		if (TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
-		                 NULL, &timeout, NULL) == -1)
-			return errno;
+		rc = arm_timeout();
+		if (rc)
+			return rc;
 		rc = devctl(lm_fd, (int)dcmd, data, nbytes, NULL);
 	} while (rc == EINTR && --tries > 0);
 	return rc;
@@ -114,4 +120,38 @@ int lm_text_command(const char *cmd)
 	if (n < 0)
 		return errno;
 	return n == len ? 0 : EIO;
+}
+
+int lm_read_state(char *buf, usize size, usize *len, isize *second)
+{
+	char scratch[256];
+	isize n;
+	int fd, rc;
+
+	*len = 0;
+	if (size < 2)
+		return EINVAL;
+	buf[0] = 0;
+	fd = open(LM_PATH, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return errno;
+	rc = arm_timeout();
+	if (rc == 0) {
+		n = read(fd, buf, size - 1);
+		if (n < 0) {
+			rc = errno;
+		} else {
+			buf[n] = 0;
+			*len = (usize)n;
+			if ((usize)n == size - 1)
+				rc = EOVERFLOW;
+		}
+	}
+	if (second != NULL) {
+		*second = -1;
+		if (rc == 0 && arm_timeout() == 0)
+			*second = read(fd, scratch, sizeof(scratch));
+	}
+	close(fd);
+	return rc;
 }

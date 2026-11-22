@@ -22,6 +22,8 @@
 #ifndef COMMON_LMGR_H
 #define COMMON_LMGR_H
 
+#include "types.h"
+
 /* devctl codes: __DIOT/__DIOTF(class 5, cmd, payload size) */
 #define LM_DCMD_REGISTER_DISPLAYABLE   0xC0140500u /* cid,w,h,flags -> ok   */
 #define LM_DCMD_UNREGISTER_DISPLAYABLE 0x80040501u /* cid (qnx-audi: "unknown") */
@@ -56,5 +58,14 @@ int  lm_show_displayables(int display, const int *cids, int n);
  *   "d-shot <displayable> <file>"  screenshot of one displayable's VFB
  * The file type follows the extension (img_codec_{png,bmp,jpg,gif}). */
 int  lm_text_command(const char *cmd);
+
+/* State dump: one read() of /dev/layermanager (its own fd) returns
+ * CGraphicsManager::dumpCurrentState as text (parse it with lmstate.h).
+ * buf gets the text, NUL-terminated; *len its length. Returns 0, an errno
+ * value, or EOVERFLOW if the dump filled buf (truncated). If second is not
+ * NULL, a second read() follows on the same fd and *second gets its byte
+ * count (0 = the server keeps the file offset; -1 = it failed). Both reads
+ * get the 20 s send+reply timeout. */
+int  lm_read_state(char *buf, usize size, usize *len, isize *second);
 
 #endif

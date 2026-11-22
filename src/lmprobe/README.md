@@ -2,10 +2,13 @@
 
 Layer manager test without OpenGL: replays DrGER's `showScreen` call for
 call, but draws eight colour bars straight into the VFB for 5 s and logs
-every raw devctl status. Not in the default run (`make sd SD_APPS="lmprobe ..."`).
+every raw devctl status. It also saves the layer manager's state dump
+(`read()` of `/dev/layermanager`, [docs/platform-notes.md §3.1](../../docs/platform-notes.md))
+before, during and after the bars. In the default run.
 
 - **Run:** `lmprobe <sd_path> [seconds]` (default 5)
-- **Output:** `var/lmprobe.log`, `lmprobe_dshot.png`, `lmprobe_sshot.png`
+- **Output:** `var/lmprobe.log`, `lmprobe_dshot.png`, `lmprobe_sshot.png`,
+  `lmprobe_state_{before,shown,after}.txt`
 
 ![The eight colour bars drawn straight into the VFB](img/colour-bars.jpg)
 
@@ -26,8 +29,12 @@ every raw devctl status. Not in the default run (`make sd SD_APPS="lmprobe ..."`
 **Expected, not errors**
 - Unregister before register returns `EINVAL`: check the register `result`, not just the devctl return.
 
-**Not covered**
-- The VFB is double-buffered (its `sid` changes on every `updateVfb`);
-  lmprobe updates once, so it never sees it.
+**Built, not yet run on the car**
+- The state dump: the files, then in the log the layer lines, the
+  displayables with their front/back sids, the foreground (layer 0) cid,
+  `second read` (0 = the server keeps the file offset), and `foreground
+  before X, after Y: restored`.
+- `lm_get_vfb ... after update`: the sid should change (the VFB is
+  double-buffered).
 
 Details: [docs/platform-notes.md §3](../../docs/platform-notes.md).

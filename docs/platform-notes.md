@@ -94,8 +94,32 @@ surface is the "noise over the map" in the GL apps' `s-shot`s (§7).
 `src/common/screen.c` re-fetches the VFB after each update and keeps both
 surfaces attached.
 
-Because this is settled, `lmprobe` is not in the default `TESTS` — it is
-still built (`make sd SD_APPS=lmprobe` puts it on the card).
+This is settled. `lmprobe` stays in the default `TESTS` for the layer
+manager's state dump (§3.1).
+
+### 3.1 The state dump: `read()` of `/dev/layermanager`
+
+A plain `read()` of `/dev/layermanager` returns layermanagerV2's
+`CGraphicsManager::dumpCurrentState` as text. The format strings are in the
+P1001 binary [confirmed in the binary, not yet read on the car]:
+
+```
+Displayable id: %d
+Visible on layer with gf index %d of display %d
+Front surface uid: %d, sid: %d
+Back surface uid: %d, sid: %d
+Layer %d -> gf index: %d, state: attached to displayable: %d
+Layer %d -> gf index: %d, state: not attached
+The displays are not locked
+```
+
+It tells a client which displayable the HMI is showing on layer 0 (gf
+index 7), so it can put exactly that one back on exit instead of assuming
+`{16, 19}`. A wired CarPlay project on a K0742 unit uses it for this
+[unverified on P1001]. `lm_read_state()` (`src/common/lmgr.c`) reads it.
+`src/common/lmstate.c` parses it (pure, `tests/test_lmstate.c`). lmprobe
+saves a dump before, during and after its bars, and logs a second `read()`
+on the same fd to show whether the server honours the file offset.
 
 ## 4. Display and layers
 

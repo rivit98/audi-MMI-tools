@@ -92,7 +92,7 @@ CXXFLAGS := $(CFLAGS)
 #                 into third_party/ and built as build/mbedtls-*/ (below)
 common = $(foreach f,$(1),src/common/$(f).c src/common/$(f).h)
 commonxx = $(foreach f,$(1),src/common/$(f).cpp src/common/$(f).h)
-BASE   := $(call common,log quit lmgr)
+BASE   := $(call common,log quit lmgr lmstate)
 TEXT   := $(call common,text) build/gen/font_big.h build/gen/font_small.h
 SCREEN := $(call common,screen vfbcopy) $(TEXT)
 IMG    := $(call common,img) src/common/stb_image_write.h
@@ -110,11 +110,11 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # default, in this order (settings: sd/apps.conf). `make sd` builds and
 # puts on the card only SD_APPS (default TESTS) and what they need.
 #
-# hello and lmprobe are still built but no longer run: both have
-# answered their question on the car. hello proved the toolchain produces
-# binaries the MMI runs; lmprobe proved the layer-manager / VFB sequence,
-# and its d-shot is byte-identical between runs (docs/platform-notes.md).
-# Run either with `make sd SD_APPS="lmprobe ..."`.
+# hello is still built but no longer run: it proved the toolchain produces
+# binaries the MMI runs. Run it with `make sd SD_APPS="hello ..."`.
+# lmprobe proved the layer-manager / VFB sequence (docs/platform-notes.md)
+# and is back in the default run for the layer manager's state dump: which
+# displayables exist, which layer shows which, and their surfaces.
 # hello2 and hello3 joined them: both pass, and what they measured is
 # written up in docs/gpu-results.md.
 #
@@ -174,7 +174,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 hello11 hello10
+TESTS   := lmprobe hello5 hello11 hello10
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
@@ -418,7 +418,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
+           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -464,6 +464,8 @@ build/test_layout: tests/test_layout.c tests/check.h src/pngondemand/layout.c \
                    build/gen/font_big.h build/gen/font_small.h
 # screen.c's full / changed-span VFB copy
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
+# the layer manager's state dump (common/lmstate.c), lmprobe logs it
+build/test_lmstate: tests/test_lmstate.c tests/check.h src/common/lmstate.c src/common/lmstate.h
 # hello5's ping train and WAV header
 build/test_pulse:  tests/test_pulse.c tests/check.h src/hello5/pulse.c src/hello5/pulse.h
 # hello5's server-id guesses (src/hello5/svcid.c)

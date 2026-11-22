@@ -12,8 +12,15 @@
  *   wait      <seconds>
  *   cleanup   as above
  *
- * Writes <sd>/lmprobe.log, lmprobe_dshot.png (our VFB) and
- * lmprobe_sshot.png (whole display).
+ * Around those steps it reads the layer manager's state dump (a read() of
+ * /dev/layermanager, lmstate.h): before, while the bars are shown, and
+ * after. Each dump goes to a file, its layers and displayables to the log,
+ * and the foreground (layer 0) displayable after must be the one before.
+ * After updateVfb it asks getVfb again: the VFB is double-buffered, so the
+ * sid should change.
+ *
+ * Writes <sd>/var/lmprobe.log, lmprobe_dshot.png (our VFB),
+ * lmprobe_sshot.png (whole display) and lmprobe_state_<when>.txt.
  *
  * usage: lmprobe <sd_path> [seconds]
  */
@@ -27,6 +34,7 @@
 #include <gf/gf.h>
 
 #include "lmgr.h"
+#include "lmstate.h"
 #include "log.h"
 #include "quit.h"
 
@@ -37,6 +45,48 @@
 
 static const char *sd_path;
 static const char *out_dir;    /* <sd_path>/var: everything written */
+
+#define STATE_SIZE  65536
+#define STATE_MAX   64          /* layers / displayables logged */
+static char state[STATE_SIZE];
+
+/* Reads the state dump, saves it as lmprobe_state_<when>.txt and logs what
+ * it says. Returns the foreground (layer 0) cid, or -1. */
+static int dump_state(const char *when)
+{
+	struct lm_state_layer layers[STATE_MAX];
+	struct lm_state_displayable ds[STATE_MAX];
+	char path[300];
+	usize len;
+	isize second;
+	int rc, nl, nd, i, fg;
+	FILE *f;
+
+	rc = lm_read_state(state, sizeof(state), &len, &second);
+	log_msg("state (%s): read rc=%d %s, %u bytes, second read %d",
+	        when, rc, rc ? strerror(rc) : "ok", (unsigned)len, (int)second);
+	if (len == 0)
+		return -1;
+	snprintf(path, sizeof(path), "%s/lmprobe_state_%s.txt", out_dir, when);
+	f = fopen(path, "w");
+	if (f != NULL) {
+		fwrite(state, 1, len, f);
+		fclose(f);
+	}
+	nl = lm_state_layers(state, layers, STATE_MAX);
+	nd = lm_state_displayables(state, ds, STATE_MAX);
+	fg = lm_state_layer_cid(state, 0);
+	log_msg("  %s, %d layer lines, %d displayables, foreground (layer 0) cid %d",
+	        lm_state_unlocked(state) ? "unlocked" : "LOCKED or no lock line", nl, nd, fg);
+	for (i = 0; i < nl && i < STATE_MAX; i++)
+		log_msg("  layer %d gf %d -> cid %d", layers[i].layer, layers[i].gf_index,
+		        layers[i].cid);
+	for (i = 0; i < nd && i < STATE_MAX; i++)
+		log_msg("  cid %d: front uid %d sid %d, back uid %d sid %d, visible gf %d display %d",
+		        ds[i].cid, ds[i].front_uid, ds[i].front_sid, ds[i].back_uid,
+		        ds[i].back_sid, ds[i].visible_gf_index, ds[i].visible_display);
+	return fg;
+}
 
 static void lm_connect(void)
 {
@@ -162,6 +212,13 @@ static int setup(gf_dev_t *dev, gf_display_t *display, gf_surface_t *surface)
 
 	rc = lm_update_vfb(CID);
 	log_msg("  lm_update_vfb(%d): rc=%d %s", CID, rc, rc ? strerror(rc) : "ok");
+	{
+		struct lm_vfb next;
+		int rc2 = lm_get_vfb(CID, &next);
+
+		log_msg("  lm_get_vfb(%d) after update: rc=%d sid=%u (was %u: %s)", CID, rc2,
+		        next.sid, vfb.sid, next.sid != vfb.sid ? "double-buffered" : "same");
+	}
 	show_cid_and_hmi();
 	screenshots();
 	lm_close();
@@ -175,7 +232,7 @@ int main(int argc, char *argv[])
 	gf_surface_t surface = NULL;
 	unsigned seconds = RUN_SECONDS, start;
 	char path[256];
-	int shown;
+	int shown, fg_before, fg_after;
 
 	if (argc < 2) {
 		fprintf(stderr, "usage: %s <sd_path> [seconds]\n", argv[0]);
@@ -192,8 +249,10 @@ int main(int argc, char *argv[])
 	log_msg("lmprobe start, pid=%d, show=%u s", getpid(), seconds);
 	quit_init(sd_path, seconds + WATCHDOG_SLACK);
 
+	fg_before = dump_state("before");
 	cleanup("before");
 	shown = setup(&dev, &display, &surface) == 0;
+	dump_state("shown");
 	if (shown) {
 		log_msg("bars shown, waiting %u s", seconds);
 		start = log_ms();
@@ -204,6 +263,9 @@ int main(int argc, char *argv[])
 		}
 	}
 	cleanup("after");
+	fg_after = dump_state("after");
+	log_msg("foreground before %d, after %d: %s", fg_before, fg_after,
+	        fg_before == fg_after ? "restored" : "CHANGED");
 
 	if (surface != NULL)
 		gf_surface_free(surface);
