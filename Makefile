@@ -152,10 +152,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # driver watching for about 4.5 minutes and puts ~70 MB of test videos on
 # the card.
 #
-# hello10 asks whether the DM642 shows an 800-wide stream whose SPS says
-# 720 (Android Auto's 800x480 with a width margin, docs/android-auto.md
-# 4.1). Answered on the car (it doesn't: the screen stays black), so it is
-# no longer in the default run. It puts ~5 MB of test videos on the card.
+# hello10 (docs/phone-mirroring.md 7.14): one 800-wide capture test. Three plays:
+# the 720 clip, the 800 clip with io-media's capture width patched in memory,
+# and the 720 clip again. It puts ~6 MB of test videos on the card.
 #
 # audi_stream_receiver runs until the SD card is pulled, so it is always
 # last: pulling the card ends it and the whole run (no final "done" screen;
@@ -171,7 +170,7 @@ APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9
 CXX_APPS := hello8 hello9 hello10 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 audi_stream_receiver
+TESTS   := hello5 hello10 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
@@ -348,7 +347,7 @@ check: build/$(APP)
 CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
 CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
-CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264 c3_h264_480.mp4
+CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264 c3_h264_480.mp4 c4_h264_800.mp4
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
 FWTOOLS_hello9 := testapp-cmdline

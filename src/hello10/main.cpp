@@ -25,6 +25,11 @@
 // The driver turns the knob once when the moving picture appears and films
 // the screen (the bands are only on video).
 //
+// The default run is seq: three plays in a row. (1) c3, 720x480, as the unit
+// plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
+// MP4) played, width put back. (3) c3 again. The crop tests above are answered
+// and run only by name.
+//
 // Not in the default run (name them to run them):
 //
 //   probe    reads io-media's three capture-width words through
@@ -38,7 +43,7 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: c5,crop,cropnav,slow)
+// usage: hello10 <sd_path> [test,test,...]   (default: seq)
 extern "C" {
 #include "log.h"
 #include "proc.h"
@@ -83,7 +88,7 @@ constexpr const char *kLivePath = "/dev/hello10/live.mp4";
 constexpr const char *kRawClip = "c12_h264_800.h264";
 constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
 
-enum class Kind { File, Live, Probe, Patched };
+enum class Kind { File, Live, Probe, Patched, Sequence };
 
 struct Test {
 	const char *name;
@@ -122,13 +127,26 @@ const std::vector<Test> kTests = {
 	 "io-media's capture width is 800 for this test. Is the RIGHT edge of the picture black "
 	 "or frozen? Or garbled or slanted?",
 	 Kind::Patched, "c3_h264_480.mp4", 30000, 0, 0, 0},
+	{"seq", "Normal, 800 wide, normal (about 1 min)",
+	 "Three videos in a row. Turn the main knob ONE click whenever the moving picture appears.",
+	 Kind::Sequence, nullptr, 0, 0, 0, 0},
 };
 
-// Not run unless named: they touch io-media's memory or only read it.
-bool is_experiment(const Test &t)
-{
-	return t.kind == Kind::Probe || t.kind == Kind::Patched;
-}
+// The steps of seq: the 800-wide capture is set only for step 2.
+struct SeqStep {
+	const char *name;
+	const char *clip;
+	bool patch;
+	const char *what;
+};
+const SeqStep kSeq[] = {
+	{"seq1", "c3_h264_480.mp4", false,
+	 "1 of 3: 720x480, the unit's own capture width (720)."},
+	{"seq2", "c4_h264_800.mp4", true,
+	 "2 of 3: 800x480, with io-media's capture width set to 800 in its memory."},
+	{"seq3", "c3_h264_480.mp4", false,
+	 "3 of 3: 720x480 again, the capture width put back to 720."},
+};
 
 const char *sd_path;
 char bin_dir[200];
@@ -613,6 +631,44 @@ bool run_patched(const Test &t, const std::string &graph)
 	return go;
 }
 
+// seq: play, play at 800 with the capture patched in memory, play again.
+// Each step gets its own screen; the patch is put back after step 2 whatever
+// happened.
+bool run_sequence(const Test &t)
+{
+	static unsigned seqs;
+	bool go = true;
+	for (const SeqStep &s : kSeq) {
+		if (access(clip_path(s.clip).c_str(), R_OK) != 0) {
+			log_msg("FAIL %s: %s missing", s.name, clip_path(s.clip).c_str());
+			summary.push_back(std::string(s.name) + ": clip missing");
+			continue;
+		}
+		ui::show(s.name, std::string(s.what) + kSeen, kFooter);
+		if (sleep_quit(kLabelMs / 2))
+			return false;
+		ui::hide();
+
+		Test step = t;
+		step.name = s.name;
+		step.title = s.what;
+		step.kind = Kind::File;
+		step.clip = s.clip;
+		step.watch_ms = 8000;
+
+		char gname[48];
+		std::snprintf(gname, sizeof(gname), "hello10_%d_seq%u", (int)getpid(), ++seqs);
+		if (!s.patch) {
+			go = run_file(step, gname);
+		} else {
+			go = run_patched(step, gname);
+		}
+		if (!go)
+			return false;
+	}
+	return go;
+}
+
 bool run_test(int n, int total, const Test &t, const Clip *clip, const std::string &clip_err)
 {
 	static unsigned graphs;
@@ -620,6 +676,8 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 	std::snprintf(title, sizeof(title), "Test %d/%d: %s", n, total, t.title);
 	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title,
 	        t.kind == Kind::Live ? kRawClip : (t.clip ? t.clip : "no clip"));
+	if (t.kind == Kind::Sequence)
+		return run_sequence(t);
 
 	if ((t.kind == Kind::File || t.kind == Kind::Patched) &&
 	    access(clip_path(t.clip).c_str(), R_OK) != 0) {
@@ -651,7 +709,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)
-		return !is_experiment(t);
+		return t.kind == Kind::Sequence;   // the default run
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }
@@ -721,7 +779,7 @@ int main(int argc, char *argv[])
 	              "moving test picture.\n\nIf the radio or the screen stops working afterwards, "
 	              "restart the MMI (MENU + main knob + top-right key).",
 	              run.size());
-	ui::show("hello10: 800 wide, cropped to 720 (~2.5 min)", intro, kFooter);
+	ui::show("hello10: 720, 800 wide, 720 (about 1 min)", intro, kFooter);
 	if (!sleep_quit(kIntroMs)) {
 		int n = 0;
 		for (const Test *t : run)
