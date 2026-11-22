@@ -1,0 +1,29 @@
+// cam.cpp - common/camera (C++) for hello7's C code: is the HMI showing the
+// rear camera (dev-videoctrl's slog lines, docs/rear-camera.md §9)?
+#include "cam.h"
+
+#include "camera.h"
+
+extern "C" {
+
+void cam_start(void)
+{
+	camera::start();
+}
+
+void cam_stop(void)
+{
+	camera::stop();
+}
+
+int cam_active(void)
+{
+	return camera::active();
+}
+
+int cam_clear(void)
+{
+	return camera::clear();
+}
+
+}

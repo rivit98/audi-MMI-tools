@@ -128,10 +128,10 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # too (the SDK's std::mutex calls pthread_mutex_init/destroy), so hello8 is
 # not in the default run.
 #
-# hello7 is a tool, not a test: a live knob and button tester, run when
-# needed (`make sd SD_APPS="hello7 ..."`). It is not in the default run:
-# the MMI reacts to every button as well, and MENU or BACK brings its own
-# screens up over hello7's for the rest of the run.
+# hello7 is a tool, not a test: a guided knob and button tester (one
+# control at a time, logged), run when needed (`make sd SD_APPS="hello7 ..."`).
+# It is not in the default run: the MMI reacts to every button as well
+# (hello7 shows its screen again every second when MENU or BACK covers it).
 #
 # hello6 is not in the default run: its ten clips give the same answer
 # every time, and its main result, hardware H.264 on screen through VCAP 0
@@ -171,7 +171,7 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
            audi_stream_receiver android_auto
-CXX_APPS := hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
+CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
 TESTS   := hello5 hello10 hello11 audi_stream_receiver
@@ -205,8 +205,12 @@ LIBS_hello5 := -lasound -lgf
 # CPU-drawn instruction screens, the unit's tools for video.
 build/hello6: $(wildcard src/hello6/*.c src/hello6/*.h) $(BASE) $(GL) $(SCREEN) $(PROC)
 LIBS_hello6 := -lGLES_CM -lgf
-# hello7: knob/button tester, ch8 decoding in keys.c; CPU-drawn screen.
-build/hello7: $(wildcard src/hello7/*.c src/hello7/*.h) $(BASE) $(SCREEN)
+# hello7: knob/button tester, ch8 decoding in keys.c, the guided run in
+# guide.c (both pure: tests/test_keys.c, tests/test_guide.c); CPU-drawn
+# screen. C, plus cam.cpp, a C wrapper of common/camera (stay out of the
+# rear camera's way), hence a C++ app.
+build/hello7: $(wildcard src/hello7/*.c src/hello7/*.cpp src/hello7/*.h) $(call commonxx,camera) \
+    src/common/camera_log.h $(BASE) $(SCREEN)
 LIBS_hello7 := -lgf
 # hello8: C++. checks.cpp is plain C++ (also run on the build host by
 # tests/test_hello8.cpp); main.cpp shows the results on a CPU-drawn screen.
@@ -413,7 +417,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
+           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_guide build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -468,6 +472,9 @@ build/test_pidscan: tests/test_pidscan.c tests/check.h src/hello5/pidscan.c src/
 build/test_hbdsi:  tests/test_hbdsi.c tests/check.h src/common/hbdsi_wire.c src/common/hbdsi_wire.h
 # hello7's ch8 decoding, on messages logged from the car
 build/test_keys:   tests/test_keys.c tests/check.h src/hello7/keys.c src/hello7/keys.h
+# hello7's guided run: prompt ends, signatures, duplicates
+build/test_guide:  tests/test_guide.c tests/check.h src/hello7/guide.c src/hello7/guide.h \
+                   src/hello7/keys.c src/hello7/keys.h
 # hello8's checks with the host's own libstdc++ (C++, so its own rule)
 build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src/hello8/llcs.cpp src/hello8/gusa.cpp \
     src/hello8/checks.h

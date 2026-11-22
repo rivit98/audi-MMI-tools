@@ -37,7 +37,7 @@ and what doesn't). Shared code is in [src/common/](src/common/).
 | [hello4](src/hello4/README.md) | 3D pipeline probes, scenes, triangle-rate benchmark |
 | [hello5](src/hello5/README.md) | sound from an app through io-media; step `d`: sound over a lowered radio (nav voice channel over HBDSI) |
 | [hello6](src/hello6/README.md) | phone-mirroring checks: benchmarks, DM642 video decode |
-| [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`) |
+| [hello7](src/hello7/README.md) | knob and button tester (`/dev/ipc/ch8`): names one control at a time on screen, logs what each sends |
 | [hello8](src/hello8/README.md) | C++ runtime and standard library checks |
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP |
 | [hello11](src/hello11/README.md) | read only: rear-camera and light (night map) signals on `/dev/ipc/ch4`, ndr and slog |

@@ -80,6 +80,13 @@ int key_decode(const unsigned char *buf, int n, struct key_hit *out, int max)
 	return hits;
 }
 
+int key_bits(const unsigned char *buf, int n, int i)
+{
+	if (i < 0 || i >= n || i >= MSG_BYTES || is_state(i))
+		return 0;
+	return buf[i] ^ constant(i);
+}
+
 const char *key_name(int ctl)
 {
 	static const char *const names[K_NCTL] = {
