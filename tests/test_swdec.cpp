@@ -13,6 +13,7 @@
 
 #include "check.h"
 #include "h264.h"
+#include "readback.h"
 #include "swdec.h"
 
 namespace {
@@ -80,6 +81,55 @@ int bgra_error(const swdec_pic &p)
 	return worst;
 }
 
+// swdec_to_rgba / swdec_to_rgb565 / swdec_pixel_bgra against swdec_to_bgra:
+// the same colours, packed differently. Returns the number of pixels that differ.
+usize packing_errors(const swdec_pic &p)
+{
+	usize n = (usize)p.crop_w * p.crop_h, bad = 0;
+	std::vector<u32> bgra(n), rgba(n);
+	std::vector<u16> rgb565(n);
+	swdec_to_bgra(&p, bgra.data(), p.crop_w);
+	swdec_to_rgba(&p, rgba.data(), p.crop_w);
+	swdec_to_rgb565(&p, rgb565.data(), p.crop_w);
+	for (int y = 0; y < p.crop_h; y++)
+		for (int x = 0; x < p.crop_w; x++) {
+			usize i = (usize)y * p.crop_w + x;
+			u32 b = bgra[i], r = rgba[i];
+			u32 swapped = (r & 0xff00ff00u) | (r & 0xff) << 16 | (r >> 16 & 0xff);
+			u16 want565 = (u16)((b >> 19 & 0x1f) << 11 | (b >> 10 & 0x3f) << 5 | (b >> 3 & 0x1f));
+			if (swapped != b || rgb565[i] != want565 || swdec_pixel_bgra(&p, x, y) != b ||
+			    swdec_rgb_diff(b, b) != 0)
+				bad++;
+		}
+	return bad;
+}
+
+// readback::check: a perfect copy passes, a shifted or blank one fails.
+void check_readback(const swdec_pic &p)
+{
+	readback::Result same, off, blank, close;
+	readback::check(p, 0, [&](int x, int y) { return swdec_pixel_bgra(&p, x, y); }, same);
+	CHECK_EQ(same.bad, 0);
+	CHECK_EQ(same.points, readback::kGrid * readback::kGrid);
+	CHECK(std::string(readback::verdict(same)) == "ok");
+	readback::check(p, 0, [&](int x, int y) { return swdec_pixel_bgra(&p, x, y) ^ 0x404040u; }, off);
+	CHECK_EQ(off.bad, off.points);
+	CHECK(std::string(readback::verdict(off)) == "wrong");
+	CHECK(readback::str(off).find("first_bad=") != std::string::npos);
+	readback::check(p, 8, [&](int x, int y) {
+		u32 v = swdec_pixel_bgra(&p, x, y);
+		return (v & 0xff) >= 8 ? v - 8 : v + 8;   // blue off by 8: within 8
+	}, close);
+	CHECK_EQ(close.bad, 0);
+	CHECK_EQ(close.worst, 8);
+	readback::check(p, 0, [](int, int) { return 0u; }, blank);
+	CHECK(blank.bad > 0);   // a black screen isn't our picture
+	readback::Result none;
+	CHECK(std::string(readback::verdict(none)) == "-");
+	// the grid stays inside the picture
+	CHECK(readback::coord(0, p.crop_w) >= 0 && readback::coord(readback::kGrid - 1, p.crop_w) < p.crop_w);
+}
+
 void check_clip(const std::string &dir, const char *name, int w, int h, int coded_w, int coded_h)
 {
 	std::vector<u8> es = slurp(dir + "/" + name + ".h264");
@@ -111,6 +161,8 @@ void check_clip(const std::string &dir, const char *name, int w, int h, int code
 			CHECK_EQ(p.crop_h, h);
 			CHECK_EQ(p.idr, 1);
 			worst_bgra = bgra_error(p);
+			CHECK_EQ(packing_errors(p), 0);
+			check_readback(p);
 		}
 		std::vector<u8> v = visible(p);
 		if ((pics + 1) * frame > ref.size() || std::memcmp(v.data(), ref.data() + pics * frame, frame))
@@ -142,5 +194,10 @@ int main(int argc, char *argv[])
 	swdec_pic p;
 	CHECK(swdec_decode(d, junk, sizeof(junk), &p) != 1);
 	swdec_close(d);
+
+	// colour difference: alpha ignored, largest channel
+	CHECK_EQ(swdec_rgb_diff(0xff102030u, 0x00102030u), 0);
+	CHECK_EQ(swdec_rgb_diff(0xff102030u, 0xff0f2045u), 21);
+	CHECK_EQ(swdec_rgb_diff(0x00ff0000u, 0x00000000u), 255);
 	CHECK_DONE();
 }

@@ -163,9 +163,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # driver watching for about 4.5 minutes and puts ~70 MB of test videos on
 # the card.
 #
-# hello10 (docs/phone-mirroring.md 7.14): one 800-wide capture test. Three plays:
-# the 720 clip, the 800 clip with io-media's capture width patched in memory,
-# and the 720 clip again. It puts ~6 MB of test videos on the card.
+# hello10 (docs/phone-mirroring.md 7.14): the capture-width probe (read only)
+# and the software decoder's drawing paths (src/hello10/README.md). The
+# capture tests run by name. It puts ~6 MB of test videos on the card.
 #
 # hello11 (src/hello11/README.md): read only. Which ch4 telegrams, BAP
 # functions, ch5 records and slog lines change with the light switch, the
@@ -253,10 +253,11 @@ LIBS_hello9 := -lgf
 CXXFLAGS_hello9 := -Wno-ignored-attributes
 # hello10: C++. 800x480 cropped to 720 in the SPS (h264::crop_sps), pushed
 # through LIVE's HwStream like hello9's live tests. Its sw test decodes in
-# software (SWDEC: common/swdec.c over h264bsd, built as a library).
+# software (SWDEC: common/swdec.c over h264bsd, built as a library) and draws
+# the picture every way we have: CPU, gf 2D (draw image, blit) and GL.
 build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE) \
-    $(SWDEC) build/h264bsd-sh4/libh264bsd.a
-LIBS_hello10 := build/h264bsd-sh4/libh264bsd.a -lgf
+    $(GL) $(SWDEC) build/h264bsd-sh4/libh264bsd.a
+LIBS_hello10 := build/h264bsd-sh4/libh264bsd.a -lGLES_CM -lgf
 CXXFLAGS_hello10 := -Wno-ignored-attributes $(SWDEC_INC)
 # hello11: C++. Read only: ch4's telegrams (ipc4.cpp, pure), ch5's records
 # and the slog's brightness lines (sources.cpp, pure), ndr's reverse flag and
@@ -519,10 +520,11 @@ build/test_layout: tests/test_layout.c tests/check.h src/pngondemand/layout.c \
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
 # common/swdec.c (h264bsd) against ffmpeg's decode of the same clips
 # (tests/swdec_clips.sh, in the mmi-media image, before the tests run)
+# + hello10's screen read-back check (src/hello10/readback.h)
 build/test_swdec: tests/test_swdec.cpp tests/check.h $(SWDEC) $(call commonxx,h264) \
-    build/h264bsd-host/libh264bsd.a
+    src/hello10/readback.h build/h264bsd-host/libh264bsd.a
 	mkdir -p build
-	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common $(SWDEC_INC) \
+	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common -Isrc/hello10 $(SWDEC_INC) \
 	    -o $@ -x c src/common/swdec.c -x none tests/test_swdec.cpp src/common/h264.cpp \
 	    build/h264bsd-host/libh264bsd.a
 # the layer manager's state dump (common/lmstate.c), lmprobe logs it

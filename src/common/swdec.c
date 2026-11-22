@@ -111,29 +111,83 @@ static u8 clip8(int v)
 	return v < 0 ? 0 : v > 255 ? 255 : (u8)v;
 }
 
-void swdec_to_bgra(const struct swdec_pic *pic, u32 *out, int stride)
+/* BT.601 limited range, 8-bit fixed point: r/g/b of luma y with the chroma
+ * terms of its sample. */
+#define SWDEC_RGB(yv, rv, guv, bu, r, g, b) do { \
+	int c_ = 298 * ((int)(yv) - 16) + 128;     \
+	r = clip8((c_ + (rv)) >> 8);               \
+	g = clip8((c_ + (guv)) >> 8);              \
+	b = clip8((c_ + (bu)) >> 8);               \
+} while (0)
+
+/* One converter per output format: the chroma terms once per chroma sample
+ * (two pixels), PACK(r, g, b) makes the output pixel. */
+#define SWDEC_CONVERT(fn, T, PACK)                                              \
+void fn(const struct swdec_pic *pic, T *out, int stride)                        \
+{                                                                               \
+	const int cw = pic->width / 2;                                          \
+	const u8 *Y = pic->i420;                                                \
+	const u8 *U = Y + (usize)pic->width * pic->height;                      \
+	const u8 *V = U + (usize)cw * (pic->height / 2);                        \
+	int x, y;                                                               \
+                                                                                \
+	for (y = 0; y < pic->crop_h; y++) {                                     \
+		int sy = pic->crop_top + y;                                     \
+		const u8 *yr = Y + (usize)sy * pic->width + pic->crop_left;     \
+		const u8 *ur = U + (usize)(sy / 2) * cw;                        \
+		const u8 *vr = V + (usize)(sy / 2) * cw;                        \
+		T *o = out + (usize)y * stride;                                 \
+                                                                                \
+		for (x = 0; x < pic->crop_w;) {                                 \
+			int sx = (pic->crop_left + x) >> 1;                     \
+			int d = ur[sx] - 128, e = vr[sx] - 128;                 \
+			int rv = 409 * e, guv = -100 * d - 208 * e, bu = 516 * d; \
+			int n = ((pic->crop_left + x) & 1) ? 1 : 2;             \
+			u8 r, g, b;                                             \
+                                                                                \
+			if (x + n > pic->crop_w)                                \
+				n = pic->crop_w - x;                            \
+			while (n-- > 0) {                                       \
+				SWDEC_RGB(yr[x], rv, guv, bu, r, g, b);         \
+				o[x] = PACK(r, g, b);                           \
+				x++;                                            \
+			}                                                       \
+		}                                                               \
+	}                                                                       \
+}
+
+#define PACK_BGRA(r, g, b)   (0xff000000u | (u32)(r) << 16 | (u32)(g) << 8 | (u32)(b))
+#define PACK_RGBA(r, g, b)   (0xff000000u | (u32)(b) << 16 | (u32)(g) << 8 | (u32)(r))
+#define PACK_RGB565(r, g, b) ((u16)(((r) >> 3) << 11 | ((g) >> 2) << 5 | (b) >> 3))
+
+SWDEC_CONVERT(swdec_to_bgra, u32, PACK_BGRA)
+SWDEC_CONVERT(swdec_to_rgba, u32, PACK_RGBA)
+SWDEC_CONVERT(swdec_to_rgb565, u16, PACK_RGB565)
+
+u32 swdec_pixel_bgra(const struct swdec_pic *pic, int x, int y)
 {
 	const int cw = pic->width / 2;
 	const u8 *Y = pic->i420;
 	const u8 *U = Y + (usize)pic->width * pic->height;
 	const u8 *V = U + (usize)cw * (pic->height / 2);
-	int x, y;
+	int sx = pic->crop_left + x, sy = pic->crop_top + y;
+	int ci = (sy / 2) * cw + sx / 2;
+	int d = U[ci] - 128, e = V[ci] - 128;
+	u8 r, g, b;
 
-	for (y = 0; y < pic->crop_h; y++) {
-		int sy = pic->crop_top + y;
-		const u8 *yr = Y + (usize)sy * pic->width + pic->crop_left;
-		const u8 *ur = U + (usize)(sy / 2) * cw;
-		const u8 *vr = V + (usize)(sy / 2) * cw;
-		u32 *o = out + (usize)y * stride;
+	SWDEC_RGB(Y[(usize)sy * pic->width + sx], 409 * e, -100 * d - 208 * e, 516 * d, r, g, b);
+	return PACK_BGRA(r, g, b);
+}
 
-		for (x = 0; x < pic->crop_w; x++) {
-			int sx = (pic->crop_left + x) / 2;
-			int c = 298 * (yr[x] - 16) + 128;
-			int d = ur[sx] - 128, e = vr[sx] - 128;
+int swdec_rgb_diff(u32 a, u32 b)
+{
+	int worst = 0, k;
 
-			o[x] = 0xff000000u | (u32)clip8((c + 409 * e) >> 8) << 16 |
-			       (u32)clip8((c - 100 * d - 208 * e) >> 8) << 8 |
-			       (u32)clip8((c + 516 * d) >> 8);
-		}
+	for (k = 0; k < 3; k++) {
+		int d = (int)((a >> (8 * k)) & 0xff) - (int)((b >> (8 * k)) & 0xff);
+
+		d = d < 0 ? -d : d;
+		worst = d > worst ? d : worst;
 	}
+	return worst;
 }

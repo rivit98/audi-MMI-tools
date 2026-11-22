@@ -20,9 +20,9 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `probe` | read only: io-media-nvidia's three capture-width words through `/proc/<pid>/as`; its `pidin arg` / `env`; its segment list (`DCMD_PROC_MAPINFO`, flags named by `mapinfo.cpp`); the width word's page mapped `MAP_SHARED` from `/mnt/efs-system/sbin/io-media-nvidia` in our own process and its `posix_mem_offset64` | Are the addresses right? How is io-media's code mapped, and is that page RAM or flash (phone-mirroring §7.14)? |
 | `cap800` | c3 (720×480) with io-media's capture width written to 800 in memory, 30 s | Does the media port capture an 800-sample line? (phone-mirroring §7.14) |
 | `seq` | c3 at 720, `cap800`, c3 at 720 again | The same, with a control before and after |
-| `sw` | c12 (800×480) decoded in **software** on the SH4: 20 s decode only, then on screen through `gf_draw_image` as BGRA (15 s) and as YUV (10 s) | How many frames a second the SH4 decodes, and how many reach the screen. Section "Software decoder" |
+| `sw` | c12 (800×480) decoded in **software** on the SH4: 15 s decode only (`swdec`), then 8 s on screen through each drawing path (`swcpu`, `swimage`, `swimage565`, `swyuv`, `swblit`, `swgl`, `swgl565`), each also runnable alone | How many frames a second the SH4 decodes, which drawing path gets the picture on screen, and how fast. Section "Software decoder" |
 
-The default is `probe`, `seq` (the capture width test) and then `sw`, about 3 minutes.
+The default is `probe` and then `sw`, about 3.5 minutes. `seq` runs by name.
 
 How each piece works:
 
@@ -53,36 +53,59 @@ runs first.
 ## Software decoder (`sw`)
 
 The DM642 path can't show 800 wide. Decoding in software on the SH4 has no
-width limit, and the two costs are measured separately:
+width limit. Decoding and getting the picture on screen are measured
+separately.
 
-- **Decoding:** `common/swdec.c` over h264bsd (Android's Baseline decoder,
-  Apache-2.0, fetched by the Makefile at a pinned commit). The wrapper adds
-  an access unit delimiter to each frame, so every picture comes out of its
-  own access unit with no frame of delay. `tests/test_swdec.cpp` checks it
-  against ffmpeg, byte for byte, single and multi-slice, with cropping.
-- **Getting the picture on screen:** CPU writes into the VFB are slow,
-  ~10 MB/s, so a full 800×480 BGRA copy is ~160 ms
-  ([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §2.4). `sw`
-  hands the picture to libgf's `gf_draw_image` instead, so the 2D engine
-  copies it from RAM into the VFB. A wired CarPlay project on a K0742 unit
-  uses this to draw a 320×192 displayable [unverified on P1001]. The
-  `yuv` step tries `GF_FORMAT_PLANAR_YUV_420` straight from the decoder,
-  then UYVY packed by the CPU (half of BGRA's bytes). Either way the
-  graphics chip converts the colours, not the CPU.
+**Decoding:** `common/swdec.c` over h264bsd (Android's Baseline decoder,
+Apache-2.0, fetched by the Makefile at a pinned commit). The wrapper adds
+an access unit delimiter to each frame, so every picture comes out of its
+own access unit with no frame of delay. `tests/test_swdec.cpp` checks it
+against ffmpeg, byte for byte, single and multi-slice, with cropping. It
+also checks the colour converters (`swdec_to_bgra`, `_rgba`, `_rgb565`),
+which work out the chroma terms once per two pixels.
 
-That project's quoted 31 fps for 800×480 is decode only, on short clips.
-Its picture reaches the screen at 320×192.
+**Drawing:** CPU writes into the VFB are slow, ~9 MB/s, so a full 800×480
+BGRA picture costs ~160 ms ([docs/gpu-results.md](../../docs/gpu-results.md)
+§7). Each sub-test tries another way to the screen:
 
-The log has a line every 5 s and one `RESULT sw_decode` / `sw_bgra` /
-`sw_yuv` line each: fps, and min/median/p90/max ms for decode, convert,
-draw (`gf_draw_image` + `gf_draw_finish`) and flip (`updateVfb` +
-`getVfb`). `sw_yuv`'s `format=` says which YUV format libgf took.
+| Sub-test | Path | CPU work per picture |
+|---|---|---|
+| `swdec` | decode only, no picture | decode |
+| `swcpu` | I420 → BGRA by the CPU straight into the VFB's CPU mapping, `updateVfb`: the path the text screens use | decode + 1.5 MB into the VFB |
+| `swimage` | BGRA in RAM, `gf_draw_image` copies it into the VFB | decode + convert |
+| `swimage565` | as `swimage`, RGB565 (half the bytes) | decode + convert |
+| `swyuv` | `gf_draw_image` of the decoder's planar I420 (the 2D engine converts the colour); UYVY packed by the CPU if I420 is refused | decode (+ pack) |
+| `swblit` | BGRA in RAM wrapped as a gf surface (`gf_surface_attach`), `gf_draw_blit2` into the VFB. This is how layermanagerV2 copies a RAM picture into a surface (`CImageLoader`, P1001 `0x08053ed8`). The CPU cache is written back (`msync MS_CACHE_ONLY`) before each blit | decode + convert |
+| `swgl` | GL: `glTexSubImage2D` RGBA into a 1024×512 texture, `glFinish`, a textured quad, swap. GL draws on hardware layer 7, outside the layer manager | decode + convert + upload |
+| `swgl565` | as `swgl`, an RGB565 texture (half the bytes) | decode + convert + upload |
 
-| Seen in `sw` | Meaning |
+`glFinish` follows every upload: queued uploads froze the whole unit
+(gpu-results §6). An RGB565 texture has only ever been uploaded in the loop
+that froze, so `swgl565` runs last.
+
+**Did the picture get there?** Every 25th picture each screen sub-test
+reads 16 sample pixels back from the surface it drew: the VFB through its
+CPU mapping, or `glReadPixels` for GL (`readback.h`, host-tested). It
+compares them with what the decoder made, within a tolerance per format (2
+for BGRA, 12 for RGB565, 24 for colour converted by the 2D engine). After
+the timed part it saves the layer manager's state dump to
+`var/hello10/lm_<sub-test>.txt` and logs which cid layer 0 shows and cid
+40's sids. For the layer-manager paths it also saves a `d-shot` of cid 40
+(`dshot_<sub-test>.png`, ~3 s). A d-shot of a CPU-written VFB is exact; a
+d-shot of a GL displayable is noise (gpu-results §2).
+
+The log has a line every 5 s and one `RESULT sw_<sub-test>` line each:
+fps (without the read-back time), min/median/p90/max ms for decode,
+convert, draw and flip, and `readback=ok|partly|wrong|-` with the first
+wrong pixel. `swyuv`'s `format=` says which YUV format libgf took.
+
+| Seen | Meaning |
 |---|---|
-| the c12 picture (counter, red band right, blue band bottom), normal colours | `gf_draw_image` works from RAM |
-| `bgra` picture fine, `yuv` wrong colours / striped | the 2D engine takes the format but reads it differently (the format's layout is a guess) |
-| black, `gf_draw_image` ≠ 0 in the log | libgf refuses that format or size |
+| picture on screen, `readback=ok` | the path works; its fps is what the screen gets |
+| black or old screen, `readback=ok` | the surface holds our picture but isn't what the screen shows (the d-shot and the state dump say which surface is shown) |
+| black or old screen, `readback=wrong` | the drawing call returns 0 but writes elsewhere or nothing |
+| wrong colours or stripes, `readback=wrong` only for `swyuv` | the 2D engine takes the format but reads it differently (the layout is a guess) |
+| `FAIL draw/flip failed: <code>` | libgf or GL refuses that format or size |
 
 ## Running
 
@@ -136,9 +159,12 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 
 ## State
 
-Run on the car (`seq` + `sw`). The extended `probe` (mappings, physical
-address, io-media's arguments and environment) is built and host-tested
-(`tests/test_hello10_mapinfo.cpp`), not yet run on the car. Open: why
+Run on the car (`seq` + `sw` with `gf_draw_image` only). The extended `probe`
+(mappings, physical address, io-media's arguments and environment) is built
+and host-tested (`tests/test_hello10_mapinfo.cpp`), not yet run on the car.
+The `sw` sub-tests (CPU, draw image BGRA/RGB565/YUV, blit, GL RGBA/RGB565,
+each with read-back, state dump and d-shot) are built and host-tested, not
+yet run on the car. Open: which drawing path shows the picture, and why
 `gf_draw_image` output stays invisible; the capture-width probe needs a
 patched io-media copy (or a RAM page patch, if `probe` finds one) instead of
 the `/proc` write.

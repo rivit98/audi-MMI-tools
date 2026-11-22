@@ -35,9 +35,22 @@ void swdec_close(struct swdec *d);
  * decoder can't conceal (the next IDR recovers). */
 int swdec_decode(struct swdec *d, const u8 *au, usize n, struct swdec_pic *pic);
 
-/* The visible part of pic as BGRA8888 (0xAARRGGBB words), BT.601 limited
- * range, into out (stride in pixels). */
+/* The visible part of pic in RGB, BT.601 limited range, into out (stride in
+ * pixels, alpha 0xff):
+ *   bgra    0xAARRGGBB words (bytes B, G, R, A: the VFB's BGRA8888)
+ *   rgba    0xAABBGGRR words (bytes R, G, B, A: GL_RGBA / GL_UNSIGNED_BYTE)
+ *   rgb565  R in the top 5 bits (GL_UNSIGNED_SHORT_5_6_5, gf PACK_RGB565) */
 void swdec_to_bgra(const struct swdec_pic *pic, u32 *out, int stride);
+void swdec_to_rgba(const struct swdec_pic *pic, u32 *out, int stride);
+void swdec_to_rgb565(const struct swdec_pic *pic, u16 *out, int stride);
+
+/* One pixel of the visible part (x, y from its top left), as swdec_to_bgra
+ * makes it: what a read-back of the screen should find there. */
+u32 swdec_pixel_bgra(const struct swdec_pic *pic, int x, int y);
+
+/* Largest difference of the three colour bytes of two 0x..RRGGBB words
+ * (alpha ignored). */
+int swdec_rgb_diff(u32 a, u32 b);
 
 #ifdef __cplusplus
 }
