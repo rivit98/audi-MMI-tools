@@ -38,6 +38,13 @@ int id = hub.subscribe([](const buttons::Event &e) { ... });   // or a callback
 - `unsubscribe` returns once no callback of that id is running.
 - `EventQueue` drops the oldest event when full (`dropped()`), and
   `clear()` forgets what came while the app was busy.
+- The hub logs every event with the subscribers it went to
+  (`buttons: BACK press -> runner, #2`; `-> nobody` without any), every
+  subscribe / unsubscribe, and an `EventQueue`'s drops (at 1, 2, 4, 8, ...).
+  Name a subscriber with `subscribe(cb, "name")` / `EventQueue(hub, cap,
+  "name")` (a literal; unnamed ones log as `#<id>`). Lines are written after
+  the hub's lock is released, so subscribers don't wait for the SD card.
+  `set_logging(false)` silences it.
 - `describe(e)` gives a log line: `main knob turn +2`, `BACK press`,
   `unknown b9 0x10 press`, `touch pad ca 84 c6`, `power 03`.
 

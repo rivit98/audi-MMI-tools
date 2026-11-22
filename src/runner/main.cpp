@@ -526,7 +526,7 @@ int main(int argc, char *argv[])
 	items.push_back(Item{});    // "Leave the menu"
 
 	runner::Menu menu((int)items.size(), kRows);
-	buttons::EventQueue q(hub);
+	buttons::EventQueue q(hub, 64, "runner");
 	open_screen();
 
 	while (quit_poll() == QUIT_NONE) {

@@ -6,8 +6,14 @@
 #include "buttons.h"
 #include "hub.h"
 
+#include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
+
+extern "C" {
+#include "log.h"
+}
 
 using namespace buttons;
 
@@ -293,6 +299,49 @@ void test_queue()
 
 } // namespace
 
+// The hub's log lines, without the "[   N ms] " stamp.
+std::vector<std::string> g_lines;
+
+void tap(const char *line)
+{
+	const char *p = std::strstr(line, "] ");
+	g_lines.push_back(p ? p + 2 : line);
+}
+
+void test_log()
+{
+	Hub hub;
+	g_lines.clear();
+	log_set_tap(tap);
+	feed(hub, msg(1, 0x40));                        // nobody listens
+	int id = hub.subscribe([](const Event &) {});
+	{
+		EventQueue q(hub, 1, "menu");
+		feed(hub, msg());                           // BACK release
+		feed(hub, msg(6, 1));                       // queue full: drops the release
+	}
+	hub.unsubscribe(id);
+	hub.unsubscribe(777);
+	hub.set_logging(false);
+	feed(hub, msg(6, 1));
+	log_set_tap(nullptr);
+
+	const char *want[] = {
+		"buttons: BACK press -> nobody",
+		"buttons: subscribe #1 (id 1, 1 subscribers)",
+		"buttons: subscribe menu (id 2, 2 subscribers)",
+		"buttons: BACK release -> #1, menu",
+		"buttons: menu full (1), dropped BACK release (1 dropped so far)",
+		"buttons: main knob turn +1 -> #1, menu",
+		"buttons: unsubscribe menu (id 2, 1 subscribers)",
+		"buttons: unsubscribe #1 (id 1, 0 subscribers)",
+		"buttons: unsubscribe id 777: no such subscriber",
+	};
+	CHECK_EQ(g_lines.size(), sizeof(want) / sizeof(want[0]));
+	for (usize i = 0; i < g_lines.size() && i < sizeof(want) / sizeof(want[0]); i++)
+		CHECK_STR(g_lines[i].c_str(), want[i]);
+}
+
 int main()
 {
 	test_table();
@@ -302,5 +351,6 @@ int main()
 	test_power();
 	test_hub();
 	test_queue();
+	test_log();
 	CHECK_DONE();
 }
