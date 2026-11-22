@@ -1,6 +1,7 @@
 // conf.cpp - see conf.h.
 #include "conf.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace runner {
@@ -78,6 +79,49 @@ std::vector<AppConf> parse_conf(const std::string &text)
 			apps.push_back(a);
 	}
 	return apps;
+}
+
+bool valid_name(const std::string &name)
+{
+	if (name.empty() || name.size() > 64 || name[0] == '.')
+		return false;
+	for (char c : name)
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		      c == '_' || c == '.' || c == '-'))
+			return false;
+	return true;
+}
+
+bool is_elf(const u8 *head, usize n)
+{
+	return n >= 4 && head[0] == 0x7f && head[1] == 'E' && head[2] == 'L' && head[3] == 'F';
+}
+
+std::vector<AppConf> menu_apps(const std::vector<std::string> &files,
+                               const std::vector<AppConf> &conf)
+{
+	std::vector<AppConf> out;
+	std::vector<std::string> rest;
+
+	for (const AppConf &c : conf)
+		if (std::find(files.begin(), files.end(), c.name) != files.end())
+			out.push_back(c);
+	for (const std::string &f : files) {
+		bool known = false;
+		for (const AppConf &a : out)
+			known = known || a.name == f;
+		if (!known && std::find(rest.begin(), rest.end(), f) == rest.end())
+			rest.push_back(f);
+	}
+	std::sort(rest.begin(), rest.end());
+	for (const std::string &f : rest) {
+		AppConf a;
+		a.name = f;
+		a.title = f;
+		a.timeout_s = kDefaultTimeoutS;
+		out.push_back(a);
+	}
+	return out;
 }
 
 const char *verdict(bool started, bool timed_out, int rc, unsigned fail_lines)

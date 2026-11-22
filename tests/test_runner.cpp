@@ -73,6 +73,47 @@ void test_verdict()
 	CHECK_EQ(count_fail_lines("fail\nFAILED\n"), 1);
 }
 
+void test_discovery()
+{
+	CHECK(valid_name("hello7"));
+	CHECK(valid_name("my_app-2.1"));
+	CHECK(!valid_name(""));
+	CHECK(!valid_name(".hidden"));
+	CHECK(!valid_name("._hello7"));               // macOS resource fork files
+	CHECK(!valid_name("two words"));
+	CHECK(!valid_name("x;rm"));
+	CHECK(!valid_name("it's"));
+	CHECK(!valid_name(std::string(65, 'a')));
+	CHECK(valid_name(std::string(64, 'a')));
+
+	const u8 elf[] = {0x7f, 'E', 'L', 'F', 1};
+	const u8 txt[] = {'#', '!', '/', 'b'};
+	CHECK(is_elf(elf, sizeof(elf)));
+	CHECK(!is_elf(elf, 3));
+	CHECK(!is_elf(txt, sizeof(txt)));
+
+	std::vector<AppConf> conf = parse_conf(
+		"hello5|540|pd|MMI connections|text\n"
+		"hello7|940||Knob tester|text\n"
+		"hello11|1860||Camera|text\n");
+	// found on the card: two described, two not (any order from readdir)
+	std::vector<AppConf> m = menu_apps({"zeta", "hello11", "alpha", "hello5", "alpha"}, conf);
+	CHECK_EQ(m.size(), 4);
+	CHECK_STR(m[0].name.c_str(), "hello5");     // apps.conf's order first
+	CHECK_STR(m[0].args[0].c_str(), "pd");
+	CHECK_EQ(m[0].timeout_s, 540);
+	CHECK_STR(m[1].name.c_str(), "hello11");
+	CHECK_STR(m[1].title.c_str(), "Camera");
+	CHECK_STR(m[2].name.c_str(), "alpha");      // then the rest by name, once
+	CHECK_STR(m[2].title.c_str(), "alpha");
+	CHECK_EQ(m[2].timeout_s, kDefaultTimeoutS);
+	CHECK_EQ(m[2].args.size(), 0);
+	CHECK_STR(m[3].name.c_str(), "zeta");
+	// hello7 is described but not on the card: not listed
+	CHECK_EQ(menu_apps({}, conf).size(), 0);
+	CHECK_EQ(menu_apps({"x"}, {}).size(), 1);
+}
+
 buttons::Event turn(int detents)
 {
 	buttons::Event e;
@@ -140,6 +181,7 @@ int main()
 {
 	test_conf();
 	test_verdict();
+	test_discovery();
 	test_menu();
 	CHECK_DONE();
 }

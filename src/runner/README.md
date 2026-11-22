@@ -5,9 +5,12 @@ it to run it. Each app runs as it would under run.sh, and its verdict shows
 in the menu afterwards. Input comes from the [buttons](../common/buttons/README.md)
 library.
 
+- **Installing an app:** copy its binary into `apps/` on the card. That's
+  all: the runner lists every ELF file there.
 - **Card:** `make sd SD_APPS=runner MENU_APPS="hello7 hello11"`. run.sh
-  starts only the runner; the MENU_APPS go on the card with their clips,
-  tools and files. Default MENU_APPS: hello7 and the Makefile's TESTS.
+  starts only the runner; the MENU_APPS go into `apps/`, their clips, tools
+  and files where they always go. Default MENU_APPS: hello7 and the
+  Makefile's TESTS.
 - **Run:** `runner <sd_path>` (run.sh does it, timeout 24 h)
 - **Output:** `var/runner.log` (the menu, every key, every start and
   result), and per app what run.sh writes: `var/<app>_out.log` with its
@@ -16,10 +19,14 @@ library.
 
 ## The menu
 
-- Lists every app in `apps.conf` whose binary is in the runner's own
-  directory (run.sh copies the card's `bin/` to `/tmp/mmi_apps`), in
-  `apps.conf` order, by title. Seven lines at a time; the list scrolls with
-  the selection.
+- Lists every ELF file in the card's `apps/` (read once, at start). Files
+  that are not ELF (READMEs, macOS `._*` files) and names outside
+  `[A-Za-z0-9_.-]` are skipped, with a line in `runner.log`.
+- An `apps.conf` line is optional. It gives the app a title, its text,
+  arguments and timeout, and puts it in `apps.conf`'s order. Apps without
+  one follow by name: the file name as title, no arguments, a 1 h timeout
+  (apps end themselves; quit.c's watchdog).
+- Seven lines at a time; the list scrolls with the selection.
 - Under the list: the selected app's name, its last verdict and its
   `apps.conf` text (what to do).
 - Main knob clockwise moves down, anticlockwise up, by the detents turned;
@@ -36,7 +43,9 @@ library.
 
 ## Running an app
 
-The runner closes its screen, starts the app with `<sd_path>` and the
+The runner closes its screen, copies the app from `apps/` to
+`/tmp/mmi_apps/apps/` with mode 755 (FAT has no exec bit, and the card can
+be pulled while it runs, as run.sh does for `bin/`), starts it with `<sd_path>` and the
 `apps.conf` arguments, stdout + stderr into `var/<app>_out.log`, and waits.
 At the `apps.conf` timeout it sends TERM, and 15 s later KILL to the app's
 whole process group. Presses made while the app runs are dropped. Then the
@@ -62,5 +71,5 @@ that is shell work (globs, redirections), copied from run.sh.
 ## State
 
 Built and host-tested (`tests/test_runner.cpp`: `apps.conf` parsing as
-ksh's `IFS='|' read` does it, run.sh's verdicts, the menu's movement and
-scrolling). Not yet run on the car.
+ksh's `IFS='|' read` does it, finding apps (ELF check, names, order),
+run.sh's verdicts, the menu's movement and scrolling). Not yet run on the car.

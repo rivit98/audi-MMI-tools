@@ -4,9 +4,12 @@
 // files); then the menu comes back with its verdict. "Leave the menu" ends
 // the runner, and with it run.sh's run.
 //
-// The menu lists every app in apps.conf whose binary is in the runner's own
-// directory (run.sh copies the card's bin/ to /tmp/mmi_apps), in apps.conf's
-// order. Input: src/common/buttons (Hub fed by quit.c's ch8 thread, EventQueue).
+// The menu lists every ELF file in <sd>/apps/: putting a binary there
+// installs it, nothing else to configure. Its apps.conf line, if any, adds a
+// title, text, arguments and timeout, and puts it in apps.conf's order (the
+// others follow by name, with no arguments and a 1 h timeout). A started
+// app is copied to /tmp/mmi_apps/apps/ first (FAT has no exec bit, and the
+// card may be pulled while it runs). Input: src/common/buttons (Hub fed by quit.c's ch8 thread, EventQueue).
 //
 // Apps are started with QNX's spawn(), not fork + exec, system() or ksh
 // (README.md: why). The runner closes its screen first and opens it again
@@ -39,6 +42,7 @@ extern "C" {
 #include <string>
 #include <vector>
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
@@ -106,10 +110,72 @@ void append_file(const std::string &path, const std::string &text)
 	std::fclose(f);
 }
 
-bool executable(const std::string &path)
+// The ELF files in dir whose names valid_name() accepts.
+std::vector<std::string> find_apps(const std::string &dir)
 {
-	struct stat st;
-	return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+	std::vector<std::string> names;
+	DIR *d = opendir(dir.c_str());
+	if (!d) {
+		log_msg("apps: %s: %s", dir.c_str(), std::strerror(errno));
+		return names;
+	}
+	while (struct dirent *de = readdir(d)) {
+		std::string name = de->d_name, path = dir + "/" + name;
+		struct stat st;
+		if (name == "." || name == ".." || stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+			continue;
+		u8 head[4] = {};
+		FILE *f = std::fopen(path.c_str(), "rb");
+		usize n = f ? std::fread(head, 1, sizeof(head), f) : 0;
+		if (f)
+			std::fclose(f);
+		if (!runner::is_elf(head, n)) {
+			log_msg("apps: %s: not an ELF file, skipped", name.c_str());
+			continue;
+		}
+		if (!runner::valid_name(name)) {
+			log_msg("apps: %s: name not [A-Za-z0-9_.-], skipped", name.c_str());
+			continue;
+		}
+		names.push_back(name);
+	}
+	closedir(d);
+	return names;
+}
+
+// Copy an app from the card to dst, mode 755. false (errno set) if it failed.
+bool copy_app(const std::string &src, const std::string &dst)
+{
+	int in = open(src.c_str(), O_RDONLY);
+	if (in < 0)
+		return false;
+	int out = open(dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755);
+	if (out < 0) {
+		int err = errno;
+		close(in);
+		errno = err;
+		return false;
+	}
+	char buf[16384];
+	bool ok = true;
+	for (;;) {
+		isize n = read(in, buf, sizeof(buf));
+		if (n == 0)
+			break;
+		if (n < 0 || write(out, buf, (usize)n) != n) {
+			ok = false;
+			break;
+		}
+	}
+	int err = errno;
+	close(in);
+	if (close(out) != 0)
+		ok = false;
+	if (ok)
+		chmod(dst.c_str(), 0755);
+	else
+		errno = err ? err : EIO;
+	return ok;
 }
 
 // ---- starting an app ----
@@ -332,7 +398,8 @@ bool run_item(Item &it)
 {
 	const runner::AppConf &a = it.app;
 	std::string out_path = var + "/" + a.name + "_out.log";
-	std::vector<std::string> args = {bin + "/" + a.name, sd};
+	std::string exe = bin + "/" + runner::kAppsDir + "/" + a.name;
+	std::vector<std::string> args = {exe, sd};
 	args.insert(args.end(), a.args.begin(), a.args.end());
 
 	std::string cmdline;
@@ -342,13 +409,23 @@ bool run_item(Item &it)
 
 	close_screen();
 	unsigned t0 = log_ms();
-	pid_t pid = start(args, out_path, true);
+	mkdir((bin + "/" + runner::kAppsDir).c_str(), 0755);
+	pid_t pid = -1;
+	bool copied = false;
+	std::string src = sd + "/" + runner::kAppsDir + "/" + a.name;
+	if (!copy_app(src, exe)) {
+		log_msg("FAIL copy %s -> %s: %s", src.c_str(), exe.c_str(), std::strerror(errno));
+		append_file(out_path, "copy " + src + ": " + std::strerror(errno) + "\n");
+	} else {
+		copied = true;
+		pid = start(args, out_path, true);
+	}
 	bool timed_out = false, stopped = false;
 	int rc = 127;
-	if (pid < 0) {
+	if (copied && pid < 0) {
 		log_msg("FAIL spawn %s: %s", args[0].c_str(), std::strerror(errno));
 		append_file(out_path, "spawn " + args[0] + ": " + std::strerror(errno) + "\n");
-	} else {
+	} else if (pid >= 0) {
 		int st = await(pid, a.timeout_s, timed_out, stopped);
 		rc = WIFEXITED(st) ? WEXITSTATUS(st) : WIFSIGNALED(st) ? 128 + WTERMSIG(st) : 255;
 	}
@@ -410,16 +487,20 @@ int main(int argc, char *argv[])
 	quit_init_ex(argv[1], 0, buttons::Hub::quit_cb, &hub);
 	camera::start();
 
-	for (const runner::AppConf &a : runner::parse_conf(read_file(sd + "/apps.conf"))) {
+	std::vector<std::string> found = find_apps(sd + "/" + runner::kAppsDir);
+	std::vector<runner::AppConf> conf = runner::parse_conf(read_file(sd + "/apps.conf"));
+	for (const runner::AppConf &a : runner::menu_apps(found, conf)) {
 		if (a.name == kSelf)
 			continue;
-		if (!executable(bin + "/" + a.name))
-			continue;
 		items.push_back(Item{a, "", ""});
-		log_msg("menu: %s (timeout %u s)", a.name.c_str(), a.timeout_s);
+		bool described = false;
+		for (const runner::AppConf &c : conf)
+			described = described || c.name == a.name;
+		log_msg("menu: %s (timeout %u s%s)", a.name.c_str(), a.timeout_s,
+		        described ? "" : ", not in apps.conf");
 	}
 	if (items.empty())
-		status = "No apps on the card (bin/ + apps.conf). Press to leave.";
+		status = "No apps: put the binaries in apps/ on the card. Press to leave.";
 	items.push_back(Item{});    // "Leave the menu"
 
 	runner::Menu menu((int)items.size(), kRows);

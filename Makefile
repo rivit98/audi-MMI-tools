@@ -10,7 +10,8 @@
 #                        the same with only those apps (in that order)
 #   make sd SD_APPS=runner MENU_APPS="hello7 hello11"
 #                        a knob-driven menu instead: run.sh starts only the
-#                        runner, which offers the MENU_APPS (src/runner/README.md)
+#                        runner, which offers every binary in the card's apps/
+#                        (here the MENU_APPS; src/runner/README.md)
 #   make test            host-side unit tests (tests/) in the SDK container
 #   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
@@ -179,8 +180,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
 #
 # runner (src/runner/README.md) is a menu of apps, chosen with the main knob:
-# `make sd SD_APPS=runner MENU_APPS="..."` puts the MENU_APPS on the card
-# (with what they need) and run.sh starts only the runner.
+# `make sd SD_APPS=runner MENU_APPS="..."` puts the MENU_APPS in the card's
+# apps/ (and what they need elsewhere) and run.sh starts only the runner,
+# which lists whatever binary is in apps/.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
            audi_stream_receiver android_auto runner
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto runner
@@ -417,7 +419,8 @@ $(error SD_APPS / MENU_APPS: not an app: $(filter-out $(APPS),$(SD_APPS) $(MENU_
 endif
 endif
 # What goes on the card: the SD_APPS, and with the runner its MENU_APPS.
-SD_ALL    := $(SD_APPS) $(if $(filter runner,$(SD_APPS)),$(filter-out $(SD_APPS),$(MENU_APPS)))
+SD_MENU   := $(if $(filter runner,$(SD_APPS)),$(filter-out $(SD_APPS),$(MENU_APPS)))
+SD_ALL    := $(SD_APPS) $(SD_MENU)
 per_app   = $(sort $(foreach a,$(SD_ALL),$($(1)_$(a))))
 SD_CLIPS  := $(call per_app,CLIPS)
 SD_FWTOOLS := $(wildcard $(addprefix $(FWEFS)/bin/,$(call per_app,FWTOOLS)))
@@ -427,7 +430,8 @@ SD_FILES  := $(call per_app,FILES)
 # run.sh's own tools (TOOLS, showScreen). Anything else: add it to SD_APPS.
 sd: $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/var
-	cp $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	$(if $(SD_MENU),mkdir -p build/sd/apps && cp $(addprefix build/,$(SD_MENU)) build/sd/apps/)
 	cp sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	$(if $(filter android_auto,$(SD_ALL)),mkdir -p build/sd/aa && cp $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/)
@@ -437,7 +441,7 @@ sd: $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/cl
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root"
 	@echo "  apps (run by run.sh): $(SD_APPS)"
-	$(if $(filter runner,$(SD_APPS)),@echo "  in the runner's menu: $(filter-out runner,$(SD_ALL))")
+	$(if $(filter runner,$(SD_APPS)),@echo "  in apps/ (the runner's menu): $(SD_MENU)")
 	@echo "  clips: $(or $(SD_CLIPS),none)"
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
 	@du -sh build/sd | sed 's/\t.*/ on the card/; s/^/  /'

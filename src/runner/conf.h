@@ -24,6 +24,26 @@ struct AppConf {
 // A name listed twice: the later line wins, at the first line's place.
 std::vector<AppConf> parse_conf(const std::string &text);
 
+// Apps found on the card: every ELF file in <sd>/apps/ is one. An apps.conf
+// line is optional and only describes it.
+constexpr const char *kAppsDir = "apps";
+// Timeout of an app with no apps.conf line. The apps stop themselves (quit.c's
+// watchdog); this only catches one that hangs.
+constexpr unsigned kDefaultTimeoutS = 3600;
+
+// A file name the runner accepts as an app name: [A-Za-z0-9_.-], not
+// starting with '.', at most 64 characters (it ends up in log names and in
+// the ksh command that collects core files).
+bool valid_name(const std::string &name);
+// An ELF file starts with 7f 'E' 'L' 'F'.
+bool is_elf(const u8 *head, usize n);
+
+// The menu: the apps found (files), described by their apps.conf line when
+// there is one (timeout, arguments, title, text), else name only with
+// kDefaultTimeoutS. apps.conf's order first, then the rest by name.
+std::vector<AppConf> menu_apps(const std::vector<std::string> &files,
+                               const std::vector<AppConf> &conf);
+
 // run.sh's verdicts. rc: the exit code, or 128 + the signal.
 //   MISSING  not started      TIMEOUT  stopped at its timeout
 //   CRASH    rc > 128         FAIL     rc != 0
