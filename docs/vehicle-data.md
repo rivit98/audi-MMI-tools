@@ -210,7 +210,7 @@ network of logical devices:
   the counter and a `0xFADE` end marker [confirmed: strings, code].
 - The ch4 bytes captured on the car match this: `cnt u8 | 01 | len u16 |
   len−1 bytes | FA DE`, with counters 0xe6, 0xe7, 0xe8 … [confirmed:
-  `ipc/ch4.bin`]. The telegrams inside were not decoded.
+  `ipc/ch4.bin`].
 - BAP (the VAG protocol carried over CAN between control units) reaches
   the car code as a stream per control unit ("LSG"):
   `CBapCommDevCtrl::processStream` (0x081da084) reads `lsg u8`, then
@@ -220,7 +220,62 @@ network of logical devices:
   door locking, interior and exterior light, cluster settings
   (`BAP - sendSetLanguage`, `sendInspectionReset`, …). Each handler logs
   "LSG 0x%02x: CanBus is up/down!" [confirmed: strings].
-- Which telegrams on ch4 carry BAP, and in what framing, is [unknown].
+
+### 5.1 Inside a ch4 telegram
+
+Every telegram in the capture parses as one MOST-style message
+[confirmed: all 13 telegrams of `ipc/ch4.bin`, no bytes left over;
+parser `src/hello11/ipc4.h`]:
+
+```
+ 00 | fblock u8 | inst u8 | fct u16 BE | op u16 LE | plen u16 LE | FF | payload[plen]
+```
+
+`op` was always `0x0C` (MOST's Status op type). The function blocks seen:
+
+| fblock.inst / fct | Payload | Meaning |
+|---|---|---|
+| `D8 01` / `0x0500` | a BAP stream: `lsg u8`, then `{fid u8, len u16 LE, payload}` | the BAP carrier: what `CBapCommDevCtrl::processStream` parses [confirmed: the streams parse exactly] |
+| `DA 01` / `0x0C0A` | 12 bytes | car service: ClampEnergyState (handler `FUN_083c2e40`) |
+| `FB 01` / `0x0D06`, `0x0D11` | 1–2 bytes | [unknown] |
+
+Two BAP control units were talking during the capture: LSG 0x0F fid 0x2A
+(a counter, `01 3d 23` → `01 bf 24` in 3 s) and **LSG 0x11 fid 0x11, the
+car's clock** (`0a 0f 07`, `0a 0f 08`, `0a 0f 09`: hh mm ss, one per
+second) [confirmed: capture].
+
+MMI3GApplication's car-service controller (`CCarServicePresCtrl`) takes
+fblock `DA 01` (group `0xDA01`, dispatch `FUN_083c5414` / `FUN_083c5588`)
+and passes the values to the HMI through the `SPHCarService` DSI stub.
+Its functions [confirmed: dispatch compares; stub slots matched to the
+attribute name table at `0x864bcf4`, the order the stub's vtable uses]:
+
+| fct | Handler | DSI attribute (stub vtable slot) |
+|---|---|---|
+| `0x0C0A` | ClampEnergyState `FUN_083c2e40` | SwitchOffState, BatteryChargeState, ClampSignal (`0x10`, `0x14`, `0x28`) |
+| `0x0C0C` | ExteriorLight `FUN_083c2de8` | none (sets a "received" flag only) |
+| **`0x0C0D`** | **InteriorLight `FUN_083c2d54`** | **externLightActive (`0x50`)**, from the record's first byte |
+| `0x0C0E` | SoundInfo_1 `FUN_083c3174` | Revolution, AudioParkingSystemActive (`0x3c`, `0x40`) |
+| `0x0C13` | trailer `FUN_083c2cb4` | TrailerHitched (`0x80`) |
+| `0x0C36` | CrashIntensity `FUN_083c3374` | crashIntensity (`0x68`) |
+
+### 5.2 The HMI's night map
+
+The stock MMI switches its map to night from the car's **light state**,
+not from a light sensor or the clock:
+
+1. `DA 01` / `0x0C0D` (InteriorLight) arrives. Its first byte becomes the
+   DSI attribute `externLightActive` (§5.1) [confirmed in code].
+2. The Java HMI gets `ATTR_EXTERNLIGHTACTIVE` and calls
+   `MapInterface#externLightActive(%1)`. The map's Day / Night / **Auto**
+   setting (`Context#setSetupDayNightView`) then calls `setDayView()` or
+   `setNightView()`, and MMI3GNavigation logs `updateDayNightView(%d)`
+   [inferred: `lsd.jxe` strings; the bytecode is not decompiled].
+3. That the byte is 1 with the headlights on (terminal 58) is
+   [unverified]. hello11 checks it on the car.
+
+The display's own dimming is a separate attribute, `Brightness` (slot
+`0x2c`); its source is not traced.
 
 ## 6. What an app of ours can do
 
@@ -246,8 +301,11 @@ protocol work and B adds speed, steering and gear.
 - Which tags appear with the ignition on, the engine running, while
   driving, reversing and steering. Units and scaling of STR_ANGLE,
   SpeedoPulse, GearPosition, OutsideTemp and TIMEDATE.
-- Which telegrams on ch4 carry BAP, and whether reading ch4 disturbs
-  MMI3GApplication.
+- Whether reading ch4 disturbs MMI3GApplication: does dev-ipc give every
+  reader a copy? hello11 stops reading as soon as its telegram counters
+  show gaps.
+- Whether `DA 01` / `0x0C0D` follows the light switch (§5.2), and whether
+  the camera's BAP request (LSG 0x0B fid 0x17) arrives on ch4 (hello11).
 - Which buses the unit is wired to (§2).
 
 A shell script on the SD card answers most of these, no app needed:

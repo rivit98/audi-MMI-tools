@@ -231,8 +231,9 @@ README) [built, not yet confirmed on the car].
   and the phone would send Android Auto rotary and D-pad key events (the
   session already advertises the keycodes). The phone then stays in the
   pocket.
-- **Night mode** from the MMI's day/night state (BAP or the light sensor
-  on ch5 [repo]) instead of always day.
+- **Night mode** from the car's light state, as the HMI's night map does
+  (`DA 01` / `0x0C0D` on ch4, docs/vehicle-data.md §5.2 [repo]; hello11
+  checks it), instead of always day.
 - **Older Android Auto (17.3 and earlier):** open-headunit's legacy route
   starts Android Auto's `WirelessStartupActivity` with host 127.0.0.1 and
   port 5288 and listens there. Not built: the user's phone needs only the

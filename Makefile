@@ -156,6 +156,10 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # the 720 clip, the 800 clip with io-media's capture width patched in memory,
 # and the 720 clip again. It puts ~6 MB of test videos on the card.
 #
+# hello11 (src/hello11/README.md): read only. Which ch4 telegrams and BAP
+# functions change with the lights and with reverse, against ndr's reverse
+# flag and the camera's slog lines; about 5 minutes of driver steps.
+#
 # audi_stream_receiver runs until the SD card is pulled, so it is always
 # last: pulling the card ends it and the whole run (no final "done" screen;
 # everything before it is already on the card).
@@ -165,12 +169,12 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # receives video but can't show it (the DM642 refuses 800 wide), so it is
 # no longer in the default run: the phone app's Android Auto mode streams
 # through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
-APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 \
+APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
            audi_stream_receiver android_auto
-CXX_APPS := hello8 hello9 hello10 audi_stream_receiver android_auto
+CXX_APPS := hello8 hello9 hello10 hello11 audi_stream_receiver android_auto
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 hello10 audi_stream_receiver
+TESTS   := hello5 hello10 hello11 audi_stream_receiver
 SD_APPS ?= $(TESTS)
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
@@ -235,6 +239,13 @@ CXXFLAGS_hello9 := -Wno-ignored-attributes
 build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE)
 LIBS_hello10 := -lgf
 CXXFLAGS_hello10 := -Wno-ignored-attributes
+# hello11: C++. Read only: ch4's telegrams (ipc4.cpp, pure), ndr's reverse
+# flag and the camera's slog lines, against steps the driver goes through
+# (watch.cpp, pure). Both pure parts: tests/test_hello11.cpp.
+build/hello11: $(wildcard src/hello11/*.cpp src/hello11/*.h) $(call commonxx,camera) src/common/camera_log.h \
+    $(BASE) $(SCREEN) $(UI)
+LIBS_hello11 := -lgf
+CXXFLAGS_hello11 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
 # phone's pictures are JPEGs, decoded on the CPU, or an
 # H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
@@ -402,7 +413,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan.
 TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto
+           build/test_pulse build/test_svcid build/test_pidscan build/test_keys build/test_hbdsi build/test_vfbcopy build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
 # decodes the stream with a filled gap test_live writes afterwards.
@@ -480,13 +491,19 @@ build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(
 	mkdir -p build
 	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common $(AA_INC) \
 	    -o $@ -x c src/common/log.c -x none $(filter %.cpp,$^) -Lbuild/mbedtls-host -lmbedtls
+# hello11's ch4 telegram parser and step bookkeeping
+build/test_hello11: tests/test_hello11.cpp tests/check.h src/hello11/ipc4.cpp src/hello11/ipc4.h \
+    src/hello11/watch.cpp src/hello11/watch.h
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/hello11 -o $@ $(filter %.cpp,$^)
 # the HMI's rear camera, from dev-videoctrl's slog lines
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
 build/test_proto build/test_config_gate build/test_pacer build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello11 build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
