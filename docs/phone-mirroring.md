@@ -2,8 +2,7 @@
 
 How an Android phone's screen (Redmi Note 8 Pro, 1080×2340) reaches this
 unit's 800×480 display: over an Android Open Accessory (AOA) bulk link to
-`audi_stream_receiver`, as JPEG pictures or as hardware-decoded H.264. The
-H.264 path is landscape only.
+`audi_stream_receiver`, as hardware-decoded H.264. It is landscape only.
 
 Every claim is labelled:
 
@@ -24,8 +23,7 @@ Two paths are built and work on the car, both in `audi_stream_receiver`
 
 | Path | How | On the car |
 |---|---|---|
-| **H.264 (default)** | The phone encodes 720×432 Baseline; the MMI serves it to `io-media-nvidia` as a live constant-sample-size MP4 (CS-MP4) through its own resource manager; the DM642 DSP decodes it onto VCAP 0 input 1 | ~25 fps, sharp text, lag ~0.5 s, MMI CPU ~30 % (§7.10–7.13) |
-| **JPEG (fallback)** | The phone sends JPEG pictures (k× capture + box average for sharp text); the MMI decodes on the CPU | 2–4 fps, MMI ~30 % busy, ~10 fps ceiling |
+| **H.264** | The phone encodes 720×432 Baseline; the MMI serves it to `io-media-nvidia` as a live constant-sample-size MP4 (CS-MP4) through its own resource manager; the DM642 DSP decodes it onto VCAP 0 input 1 | ~25 fps, sharp text, lag ~0.5 s, MMI CPU ~30 % (§7.10–7.13) |
 
 The phone app's Android Auto mode uses the H.264 path: the phone runs the
 Android Auto session itself and sends the MMI a 720×432 stream
@@ -212,8 +210,8 @@ These let us test the decoder without writing any io-media client code.
 
 `io-usb -d ehci -d ohci`: the host controller supports high speed
 **[confirmed]**. Bulk throughput through `libusbdi` on this CPU is
-**[unverified]**; my guess is 5–20 MB/s. H.264 and JPEG need well under
-1 MB/s, so this doesn't limit them.
+**[unverified]**; my guess is 5–20 MB/s. H.264 needs well under
+1 MB/s, so this doesn't limit it.
 
 ---
 
@@ -222,7 +220,6 @@ These let us test the decoder without writing any io-media client code.
 | Piece | How | Feasibility |
 |---|---|---|
 | Capture | MediaProjection → VirtualDisplay. One consent dialog per session, no root. Needs a foreground service. | High: standard API since Android 5 |
-| JPEG | VirtualDisplay → `ImageReader` at k× → k:1 box average → JPEG q90 | Confirmed on the car |
 | H.264 | VirtualDisplay → `MediaCodec` encoder surface, Baseline Level 3. Built and working on the car (§7.12, §7.13). | Confirmed on this phone |
 | Transport | AOA bulk link, `audi_stream_receiver`'s protocol | Confirmed working |
 | Input (not built) | **AOA v2 HID**: the accessory registers a HID device with the phone over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57 `SEND_HID_EVENT`). This is what scrcpy's OTG mode uses. The knob from `/dev/ipc/ch8` maps to keyboard D-pad, Enter and Back, or to a mouse. No adb, no root. | High. The MMI side reuses the existing `usbd_setup_vendor` path. |
@@ -732,7 +729,7 @@ only. The test list: [src/hello9/README.md](../src/hello9/README.md).
   clock runs on through a pause, so its TIME positions are no use for
   measuring after one.
 - **Cost:** the unit's CPU (the MMI's own slog `CPU:` line) is 20–23 %
-  during `live` against 12–13 % idle. The JPEG path uses ~27 % at 3 fps.
+  during `live` against 12–13 % idle.
 - **Growing files are out:** io-media reads ahead of the writer and gets
   EIO. Only a resource manager can make reads wait.
 
@@ -898,7 +895,7 @@ well in use: 720×432 Baseline, POC type 0, sharp text.
   over a long session would be on the phone side and needs the whole-delay
   photo (§7.12) to see.
 - **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
-  160 KB, against ~45 % for JPEG).
+  160 KB).
 
 **Restarts cost a short break in the picture.** An `H264_CONFIG` with other
 contents restarts the graph. Keeping them rare [confirmed]:
@@ -922,8 +919,8 @@ contents restarts the graph. Keeping them rare [confirmed]:
 **Direct capture at the old 2.5 Mbit/s blurs text.** With the virtual display
 drawing straight into the encoder at 720×432, Android scales the 2340×1080
 screen 3.25:1 in one bilinear step (2×2 taps per output pixel out of ~3×3
-covered: thin strokes are hit or missed). That is the same blur the
-JPEG pictures' k× capture fixes. Smaller parts: the letterbox (the
+covered: thin strokes are hit or missed). A k× capture box-averaged
+k:1 fixes it. Smaller parts: the letterbox (the
 screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
 frame at 25 fps) and the VCAP's ×1.11 to 800×480.
 
@@ -958,13 +955,12 @@ fills only a narrow strip of the MMI (table below) with unreadable text. While
 the phone is portrait the GPU step draws a "Turn the phone to landscape" card
 (`Notice.kt`) into the same stream instead, so the MMI doesn't restart, and
 the screen comes back on turning the phone. The direct path can't draw it:
-its picture stops (the MMI holds the last frame). JPEG still follows the
-rotation.
+its picture stops (the MMI holds the last frame).
 
 **The navigation bar stays off the MMI [confirmed]**
 (`ScreenCrop.kt`, checkbox *Hide navigation buttons*, default on, Android 11+):
 the bar's edge comes from `WindowMetrics` (it follows the rotation), and only
-the rest of the capture reaches the picture, in both H.264 and JPEG. A rotation
+the rest of the capture reaches the picture. A rotation
 or a change of the switches resizes the capture under the same encoder, so the
 MMI doesn't restart. Without the GPU step (GL failed) the bar stays. The picture
 limits don't change: 720×432 is still sent, more of it is content. With a
@@ -1184,6 +1180,15 @@ How to get the patches onto a running unit (efs-system stays untouched):
   stays broken until a reboot [inferred]. A patched copy is the file with
   `d0 02` → `20 03` at file offsets 0x14a190, 0x14a26e, 0x14ad20, run from
   the card with the same arguments and environment.
+
+  **Beside the original instead** [inferred, not yet run]: the config's
+  `global-options` `mountpoint` replaces `/dev/io-media` (option parsing
+  at `0x080892b0`), and `-B` keeps io-media in the foreground (otherwise
+  `procmgr_daemon`). io-media doesn't load the DSP: NvElfLoader does that
+  once at boot, and io-media is a client of `devg-NVTS` (`/dev/nvdsprm0`).
+  So a copy with its own mountpoint can run without slaying the original;
+  whether `devg-NVTS` serves two clients is open. hello10 `iomcopy` does
+  this (src/hello10/README.md).
 - **DSP:** NvElfLoader must load the patched image. Options: a procnto
   path-space link (`ln -sP <sd>/NvDspCodecs.elf /etc/NvDspCodecs.elf`)
   plus a DSP reload (io-media has crash recovery that runs NvElfLoader

@@ -1,12 +1,7 @@
-// ui.cpp - the audi_stream_receiver screen (see ui.h). Three layouts:
-//
-//   no picture  status bar coloured by link state, its detail line, what
-//               to do next on the phone (large, word-wrapped), and a
-//               footer: the status panel, full width.
-//   landscape   the picture centred on the whole screen, alone (state
-//   picture     and video stats are in the log).
-//   portrait    the picture on the left, full height; the status panel in
-//   picture     the rest of the width, with the video stats as its body.
+// ui.cpp - the audi_stream_receiver screen (see ui.h): a status bar
+// coloured by link state, its detail line, what to do next on the phone
+// (large, word-wrapped), and a footer. While the H.264 stream plays the
+// screen is the video's (main.cpp) and this is not shown.
 //
 // (There are no text messages from the phone: the phone's screen is what
 // the app is for.)
@@ -14,7 +9,6 @@
 #include "types.h"
 
 #include <cstdio>
-#include <cstring>
 
 extern "C" {
 #include "cpumon.h"
@@ -24,7 +18,6 @@ extern "C" {
 }
 
 #include "model.h"
-#include "video.h"
 
 using model::LinkState;
 
@@ -44,7 +37,6 @@ constexpr u32 kText = 0xFFE8E8E8u;
 constexpr u32 kDim = 0xFF8A929Eu;
 constexpr u32 kFooterBg = 0xFF1C2836u;
 constexpr u32 kRule = 0xFF2A3644u;
-constexpr u32 kVideoBg = 0xFF000000u;
 
 u32 state_colour(LinkState s)
 {
@@ -70,7 +62,7 @@ const char *state_title(LinkState s)
 	return "?";
 }
 
-// What to do next, for the screen without a picture.
+// What to do next.
 const char *state_hint(LinkState s)
 {
 	switch (s) {
@@ -134,49 +126,9 @@ void cpu_text(char *out, usize cap)
 		std::snprintf(out, cap, "cpu %d%% unit %d%%%s", self, unit, high ? " HIGH" : "");
 }
 
-// The video stats one per line, for the portrait panel.
-void draw_video_lines(canvas *c, int x0, int y, const video::View *v)
-{
-	char line[80];
-
-	std::snprintf(line, sizeof(line), "picture %dx%d, %u KB %s", v->frame.w, v->frame.h,
-	              (v->bytes + 512) / 1024, proto::fmt_name(v->format));
-	text_draw(c, &font_small, x0 + kMargin, y, line, -1, kText);
-	y += font_small.h + 4;
-	std::snprintf(line, sizeof(line), "%u.%u pictures a second", v->fps_x10 / 10,
-	              v->fps_x10 % 10);
-	text_draw(c, &font_small, x0 + kMargin, y, line, -1, kText);
-	y += font_small.h + 4;
-	std::snprintf(line, sizeof(line), "decode %u ms, on screen %u ms", v->decode_ms,
-	              v->present_ms);
-	text_draw(c, &font_small, x0 + kMargin, y, line, -1, kText);
-	y += font_small.h + 4;
-	std::snprintf(line, sizeof(line), "shown %u, bad %u, dropped %u", v->shown, v->bad,
-	              v->dropped);
-	text_draw(c, &font_small, x0 + kMargin, y, line, -1, kDim);
-}
-
-// Copy the picture with its top-left at x,y; clipped to the canvas.
-void blit(canvas *c, const canvas *src, int x, int y)
-{
-	int x0 = x < 0 ? -x : 0, w = src->w - x0;
-
-	if (x + x0 + w > c->w)
-		w = c->w - x - x0;
-	if (w <= 0)
-		return;
-	for (int row = 0; row < src->h; row++) {
-		if (y + row < 0 || y + row >= c->h)
-			continue;
-		std::memcpy(c->px + (y + row) * c->stride + x + x0,
-		            src->px + row * src->stride + x0, (usize)w * 4);
-	}
-}
-
-// The status panel in [x0, x0 + pw): status bar, detail, body, footer.
-// The body is the video stats with a picture, else what to do next.
-void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *out_dir,
-                const video::View *v)
+// The status panel in [x0, x0 + pw): status bar, detail, what to do next,
+// footer.
+void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *out_dir)
 {
 	char line[160], cpu[48];
 	unsigned up = log_ms() / 1000;
@@ -187,56 +139,27 @@ void draw_panel(canvas *c, const model::Model &m, int x0, int pw, const char *ou
 	text_draw(c, &font_small, x0 + kMargin, kDetailY, m.detail.c_str(), -1, kDim);
 	canvas_fill(c, x0, kBodyTop - 4, pw, 1, kRule);
 
-	if (v != nullptr)
-		draw_video_lines(c, x0, kBodyTop + 8, v);
-	else
-		draw_wrapped(c, &font_big, x0, pw, kBodyTop + 24, c->h - kFooterH - 8,
-		             state_hint(m.state), kText);
+	draw_wrapped(c, &font_big, x0, pw, kBodyTop + 24, c->h - kFooterH - 8,
+	             state_hint(m.state), kText);
 
 	// footer
 	canvas_fill(c, x0, c->h - kFooterH, pw, kFooterH, kFooterBg);
 	cpu_text(cpu, sizeof(cpu));
-	if (v != nullptr)
-		std::snprintf(line, sizeof(line), "up %02u:%02u:%02u  %s  pull SD to exit",
-		              up / 3600, up / 60 % 60, up % 60, cpu);
-	else
-		std::snprintf(line, sizeof(line), "up %02u:%02u:%02u  %s  log "
-		              "%s/audi_stream_receiver.log  pull SD to exit", up / 3600,
-		              up / 60 % 60, up % 60, cpu, out_dir);
+	std::snprintf(line, sizeof(line), "up %02u:%02u:%02u  %s  log "
+	              "%s/audi_stream_receiver.log  pull SD to exit", up / 3600,
+	              up / 60 % 60, up % 60, cpu, out_dir);
 	text_draw(c, &font_small, x0 + kMargin,
 	          c->h - kFooterH + (kFooterH - font_small.h) / 2, line, -1, kDim);
-}
-
-void render_landscape(canvas *c, const video::View *v)
-{
-	canvas_fill(c, 0, 0, c->w, c->h, kVideoBg);
-	blit(c, &v->frame, (c->w - v->frame.w) / 2, (c->h - v->frame.h) / 2);
-}
-
-void render_portrait(canvas *c, const model::Model &m, const char *out_dir, const video::View *v)
-{
-	int col = v->frame.w;
-
-	canvas_fill(c, 0, 0, col, c->h, kVideoBg);
-	blit(c, &v->frame, 0, (c->h - v->frame.h) / 2);
-	canvas_fill(c, col, 0, 1, c->h, kRule);
-	draw_panel(c, m, col + 1, c->w - col - 1, out_dir, v);
 }
 
 } // namespace
 
 void render(canvas *c, const char *out_dir)
 {
-	const video::View *v = video::view();
 	model::Model m = model::get();
 
 	canvas_fill(c, 0, 0, c->w, c->h, kBg);
-	if (v == nullptr)
-		draw_panel(c, m, 0, c->w, out_dir, nullptr);
-	else if (v->portrait)
-		render_portrait(c, m, out_dir, v);
-	else
-		render_landscape(c, v);
+	draw_panel(c, m, 0, c->w, out_dir);
 }
 
 } // namespace ui

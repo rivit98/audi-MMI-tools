@@ -1,6 +1,6 @@
 // rate_limit.h - a warning logged at most once per period, with a count of
 // the ones held back meanwhile. Pure (no locking: one thread per limiter, the
-// time passed in), tests/test_pacer.cpp.
+// time passed in), tests/test_rate_limit.cpp.
 //
 //   static RateLimit warn(10000);
 //   unsigned held;

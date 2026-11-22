@@ -1,4 +1,3 @@
-import io
 from fractions import Fraction
 
 import aoa_screen
@@ -15,14 +14,6 @@ def target():
     pygame.display.init()
     pygame.font.init()
     return pygame.Surface((aoa_screen.SCREEN_W, aoa_screen.SCREEN_H))
-
-
-def jpeg(w, h, colour=RED):
-    surface = pygame.Surface((w, h))
-    surface.fill(colour)
-    out = io.BytesIO()
-    pygame.image.save(surface, out, "x.jpg")
-    return out.getvalue()
 
 
 def h264_stream(w=720, h=432, count=5):
@@ -69,49 +60,23 @@ def test_a_new_h264_stream_is_black_until_its_first_frame(target):
     assert target.get_at((400, 240))[:3] == aoa_screen.C_VIDEO_BG
 
 
-@pytest.mark.parametrize("size", [(220, 480), (800, 368)])
-def test_a_stream_after_a_jpeg_shows_the_panel_until_its_first_frame(target, size):
+def test_the_first_stream_shows_the_panel_until_its_first_frame(target):
     model = ScreenModel()
-    model.apply({"kind": "jpeg"}, jpeg(*size))
     model.apply({"kind": "h264_config"}, b"")
     Painter(target).paint(model.snapshot(), 0)
     assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
 
 
-def test_landscape_jpeg_is_centred_on_black(target):
-    model = ScreenModel()
-    model.apply({"kind": "jpeg"}, jpeg(800, 368))
-    Painter(target).paint(model.snapshot(), 0)
-    assert target.get_at((400, 20))[:3] == aoa_screen.C_VIDEO_BG
-    assert near(target.get_at((400, 240)), RED)
-
-
-def test_portrait_jpeg_goes_left_with_the_panel_beside_it(target):
-    model = ScreenModel()
-    model.apply({"kind": "jpeg"}, jpeg(220, 480))
-    state = model.snapshot()
-    Painter(target).paint(state, 0)
-    assert near(target.get_at((100, 240)), RED)
-    assert target.get_at((220, 240))[:3] == aoa_screen.C_RULE
-    assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
-
-
 def test_a_stop_goes_back_to_the_panel(target):
     model = ScreenModel()
-    model.apply({"kind": "jpeg"}, jpeg(800, 480))
+    model.apply({"kind": "h264_config"}, b"")
+    for data in h264_stream():
+        model.apply({"kind": "h264"}, data)
     model.apply({"kind": "stop", "why": "ended by VIDEO_STOP"}, b"")
     state = model.snapshot()
     assert state.mode is None
     Painter(target).paint(state, 0)
     assert target.get_at((790, 5))[:3] == aoa_screen.LINKS["waiting"][0]
-
-
-def test_a_picture_that_does_not_decode_leaves_the_old_one_up():
-    model = ScreenModel()
-    model.apply({"kind": "jpeg"}, jpeg(800, 480))
-    before = model.snapshot().picture
-    model.apply({"kind": "jpeg"}, b"not a jpeg")
-    assert model.snapshot().picture is before
 
 
 def test_wrap_keeps_lines_within_the_width(target):

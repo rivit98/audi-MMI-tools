@@ -184,7 +184,7 @@ static void test_vasm_whole_picture(void)
 	u8 p[64];
 	unsigned n;
 
-	n = start(p, 7, 640, 360, kFmtJpeg, 10);
+	n = start(p, 7, 640, 360, kFmtH264, 10);
 	Assembler::Result r = a.start(p, n);
 	CHECK(r.rx == Assembler::Rx::Ok);
 	CHECK_EQ(r.cut_short, -1);
@@ -213,26 +213,28 @@ static void test_vasm_refusals(void)
 	u8 p[64];
 	unsigned n;
 
-	n = start(p, 1, 640, 360, kFmtJpeg, 101);    // over max_bytes
+	n = start(p, 1, 640, 360, kFmtH264, 101);    // over max_bytes
 	Assembler::Result r = a.start(p, n);
 	CHECK(r.rx == Assembler::Rx::Bad);
 	CHECK_EQ(r.id, 1);
-	n = start(p, 2, 640, 360, kFmtJpeg, 0);
+	n = start(p, 2, 640, 360, kFmtH264, 0);
 	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
 	n = start(p, 3, 640, 360, 9, 10);            // unknown format
+	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
+	n = start(p, 3, 640, 360, 1, 10);            // JPEG, retired
 	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
 	n = start(p, 3, 640, 360, 2, 10);            // PNG, retired
 	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
 	n = start(p, 3, 640, 360, 0, 10);
 	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
-	n = start(p, 4, 0, 360, kFmtJpeg, 10);
+	n = start(p, 4, 0, 360, kFmtH264, 10);
 	CHECK(a.start(p, n).rx == Assembler::Rx::Bad);
 	r = a.start(p, 5);                           // short
 	CHECK(r.rx == Assembler::Rx::Bad);
 	CHECK_EQ(r.id, 4);
 
 	// overflow: more data than announced drops the picture
-	n = start(p, 5, 10, 10, kFmtJpeg, 3);
+	n = start(p, 5, 10, 10, kFmtH264, 3);
 	CHECK(a.start(p, n).rx == Assembler::Rx::Ok);
 	n = data(p, 5, "abcd", 4);
 	r = a.data(p, n);
@@ -241,31 +243,22 @@ static void test_vasm_refusals(void)
 	CHECK(!a.active());
 }
 
-// phone_ms: absent in an 11-byte START (old phone app), read from a 13-byte
-// one, extra bytes after it ignored.
-static void test_vasm_phone_ms(void)
+// phone_ms (13-byte START) and anything after it: ignored.
+static void test_vasm_extra_bytes(void)
 {
 	Assembler a(100);
 	u8 p[64];
 	unsigned n;
 
-	n = start(p, 20, 800, 368, kFmtJpeg, 2);
-	CHECK(a.start(p, n).rx == Assembler::Rx::Ok);
-	n = data(p, 20, "ok", 2);
-	CHECK(a.data(p, n).rx == Assembler::Rx::Done);
-	Picture pic = a.take();
-	CHECK_EQ(pic.format, kFmtJpeg);
-	CHECK_EQ(pic.phone_ms, 0);
-
-	n = start(p, 21, 800, 368, kFmtJpeg, 1);
+	n = start(p, 21, 720, 432, kFmtH264, 1);
 	put_u16(p + n, 345);
 	p[n + 2] = 0x77;
 	CHECK(a.start(p, n + 3).rx == Assembler::Rx::Ok);
 	n = data(p, 21, "j", 1);
 	CHECK(a.data(p, n).rx == Assembler::Rx::Done);
-	pic = a.take();
-	CHECK_EQ(pic.format, kFmtJpeg);
-	CHECK_EQ(pic.phone_ms, 345);
+	Picture pic = a.take();
+	CHECK_EQ(pic.id, 21);
+	CHECK_EQ(pic.size, 1);
 }
 
 static void test_vasm_cut_short(void)
@@ -274,11 +267,11 @@ static void test_vasm_cut_short(void)
 	u8 p[64];
 	unsigned n;
 
-	n = start(p, 10, 10, 20, kFmtJpeg, 4);
+	n = start(p, 10, 10, 20, kFmtH264, 4);
 	CHECK(a.start(p, n).rx == Assembler::Rx::Ok);
 	n = data(p, 10, "ab", 2);
 	CHECK(a.data(p, n).rx == Assembler::Rx::Ok);
-	n = start(p, 11, 10, 20, kFmtJpeg, 2);
+	n = start(p, 11, 10, 20, kFmtH264, 2);
 	Assembler::Result r = a.start(p, n);
 	CHECK(r.rx == Assembler::Rx::Ok);
 	CHECK_EQ(r.cut_short, 10);
@@ -307,7 +300,6 @@ static void test_h264(void)
 	CHECK(a.data(p, n).rx == Assembler::Rx::Done);
 	Picture pic = a.take();
 	CHECK_EQ(pic.format, kFmtH264);
-	CHECK_STR(fmt_name(kFmtH264), "H.264");
 
 	auto c = parse_h264_config(cfg, sizeof(cfg));
 	CHECK(c.has_value());
@@ -402,7 +394,7 @@ int main(void)
 	test_vasm_whole_picture();
 	test_vasm_refusals();
 	test_vasm_cut_short();
-	test_vasm_phone_ms();
+	test_vasm_extra_bytes();
 	test_encode();
 	test_whole_frames();
 	test_byte_by_byte();

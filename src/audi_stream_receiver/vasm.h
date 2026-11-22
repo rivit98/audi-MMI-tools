@@ -1,5 +1,5 @@
 // vasm.h - reassembles one VIDEO_START + VIDEO_DATA... sequence (proto.h)
-// into a complete picture. Pure: no threads, no USB; the link owns one and
+// into a complete H.264 frame (a "picture" on the wire). Pure: no threads, no USB; the link owns one and
 // feeds it from its frame callback. tests/test_proto.cpp.
 //
 // One picture is assembled at a time. A VIDEO_START while one is still
@@ -19,9 +19,7 @@
 struct Picture {
 	std::unique_ptr<u8[]> data;
 	u32 size = 0;
-	unsigned id = 0, w = 0, h = 0, format = 0;     // format: proto::kFmt*
-	unsigned phone_ms = 0;                         // the phone's scale + encode, 0 = not sent
-	unsigned rx_start_us = 0, rx_done_us = 0;      // log_us(), set by the link (perf)
+	unsigned id = 0, w = 0, h = 0, format = 0;     // format: proto::kFmtH264
 };
 
 class Assembler {
@@ -40,7 +38,8 @@ public:
 
 	explicit Assembler(u32 max_bytes) : max_bytes_(max_bytes) {}
 
-	// VIDEO_START payload. Bad: size 0 / over max_bytes, unknown format,
+	// VIDEO_START payload (a phone_ms after it is ignored). Bad: size 0 /
+	// over max_bytes, a format other than H.264,
 	// zero width or height, out of memory.
 	Result start(const u8 *p, unsigned n)
 	{
@@ -58,10 +57,9 @@ public:
 		pic.h = proto::get_u16(p + 4);
 		pic.format = p[6];
 		pic.size = proto::get_u32(p + 7);
-		pic.phone_ms = n >= proto::kVideoStartLen + 2 ? proto::get_u16(p + 11) : 0;
 		r.id = (int)pic.id;
 		if (pic.size == 0 || pic.size > max_bytes_ ||
-		    (pic.format != proto::kFmtJpeg && pic.format != proto::kFmtH264) ||
+		    pic.format != proto::kFmtH264 ||
 		    pic.w == 0 || pic.h == 0)
 			return r;
 		pic.data.reset(new (std::nothrow) u8[pic.size]);

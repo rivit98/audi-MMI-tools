@@ -1,5 +1,5 @@
-// ui.h - draws the whole audi_stream_receiver screen from the model and the phone's
-// picture (video.h). Main loop only.
+// ui.h - draws the whole audi_stream_receiver status screen from the model.
+// Main loop only.
 #ifndef AUDI_STREAM_UI_H
 #define AUDI_STREAM_UI_H
 

@@ -2,8 +2,7 @@
 
 The phone's screen on the MMI over USB. The Android app (`android/`, "Audi
 streaming") captures its screen and sends it over Android Open Accessory
-(AOA): as hardware H.264 (default) decoded by the DM642, or as JPEG pictures
-decoded on the CPU. The phone app also has an Android Auto mode
+(AOA) as H.264, decoded in hardware by the DM642. The phone app also has an Android Auto mode
 ([docs/android-auto.md §4.3](../../docs/android-auto.md)); the MMI side is the same.
 
 ```
@@ -19,7 +18,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
   ```sh
   make sd SD_APPS=audi_stream_receiver
-  make test          # protocol, pictures, JPEG, live stream, camera tracker
+  make test          # protocol, frame reassembly, live stream, camera tracker
   make apk           # android/out/audi_streaming.apk; make apk-test, make apk-install
   make aoa-host      # desk test: the PC plays the MMI (stop host adb first)
   ```
@@ -30,7 +29,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
 1. Install the APK, insert the SD card: the MMI says *Waiting for phone*.
 2. Plug the phone in and accept "open Audi streaming": the bar turns green, *Connected*.
-3. Tap **Stream screen** and allow the capture. *Format* picks H.264 (default) or JPEG.
+3. Tap **Stream screen** and allow the capture.
 4. Rotating, Back/Home, unplug/replug keep the stream going. Stop it in the
    app; pull the SD card to end the MMI side.
 
@@ -45,26 +44,23 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   `VIDEO_DATA`, batched `VIDEO_ACKS`, `VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`
   (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only).
   **Retired, never reuse:** `0x02` TEXT, `0x03` ACK, `0x08` VIDEO_ACK, `0x0A` status bar,
-  `VIDEO_CAPS` format bit 1 (PNG).
-- **JPEG:** the phone captures at k× and box-averages k:1 (sharp text), JPEG
-  q90. The MMI decodes on the main thread (stb_image), copies only changed
-  row spans into the VFB, and caps itself at 5 pictures a second and ≤ 50 %
-  main-thread duty by holding acks (`jpeg_pacer.h`).
+  format 1 (JPEG) and 2 (PNG).
 - **H.264** (`hwvideo.cpp`, `src/common/hw_stream.h`): 720×432 Baseline from
   the phone's MediaCodec → CS-MP4 stream served by our own resource manager
   at `/dev/audi_stream/live.mp4` → io-media → VCAP 0 input 1. 25 fps stream
   clock with skip-frame gap fill; a clock cap (> 500 ms ahead) and an io-media
   catch-up (> 12 frames behind) drop frames and resume from an IDR. Frames
   are capped at 128 KB. Up to 3 io-media errors per 60 s restart the stream,
-  then `REFUSED` (JPEG fallback). Details:
+  then `REFUSED`: the phone pauses and tries again later. Details:
   [docs/phone-mirroring.md §7.10–7.13](../../docs/phone-mirroring.md).
 - **Rear camera:** `common/camera.cpp` follows the camera from dev-videoctrl's
   slog lines; while it is up the app writes nothing to VP1 and shows
   nothing, and retakes the screen 1 s after it ends
   ([docs/rear-camera.md §9](../../docs/rear-camera.md)).
-- **Logging:** hot threads only write to a RAM ring (`perf.cpp`); a
-  low-priority thread writes the log. `slogmark.h` writes markers with the
-  log's time into the system log.
+- **Screen:** while no stream plays, a CPU-drawn status screen (`ui.cpp`):
+  link state and what to do next. The stream's video replaces it.
+- **Logging:** per-frame paths only count in RAM; `h264:` summaries every
+  10 s. `slogmark.h` writes markers with the log's time into the system log.
 
 ## Log lines
 
@@ -73,7 +69,6 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | `rx HELLO ... build <v>` | the phone app's version: check it first |
 | `rx STREAM_SETTINGS` | the phone's settings (format, fps, bit rate, frame size, …) |
 | `cpu:` (10 s) | app and unit CPU, per thread, free RAM, heap; ` - HIGH` at ≥ 50 % own load |
-| `perf: window` (10 s) / `perf: stream` | JPEG: fps, dropped, bad, rx/decode/render/copy/flip/latency ms, cap holds |
 | `h264: config:` | the stream's frame cap and size |
 | `h264: 10.0 s:` | frames in, skips, io-media reads/waits/lead, `lag min/median/max`, reader behind, data rate |
 | `h264: stream ended` | totals: refused, bad, ahead of the clock, catch-up, evicted |
@@ -94,7 +89,6 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
 **Works**
 - AOA end to end (Redmi Note 8 Pro); reconnects on its own.
-- JPEG: 2–4 fps (set by the phone), latency 80–160 ms, rotation works, 0 bad.
 - H.264: 720×432, sharp text, 22–25 fps, lag ~500 ms (~1.1 s on a session's
   first stream), MMI CPU ~30 % (receiver 6–9 %).
 - Rear camera takes the screen and the stream comes back after it.
@@ -107,4 +101,4 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - 256 KB frames made io-media fall behind and fail ~45 s in: hence the 128 KB cap.
 
 **Built, not yet confirmed on the car**
-- JPEG cap, slog markers, restart after an io-media error, io-media catch-up.
+- Slog markers, restart after an io-media error, io-media catch-up.

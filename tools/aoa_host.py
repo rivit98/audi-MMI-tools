@@ -10,11 +10,7 @@ protocol (src/audi_stream_receiver/proto.h): HELLO / HELLO_REPLY, then the phone
 screen. Replug the phone at will; it goes back to waiting, like the MMI
 receiver. Ctrl-C to stop.
 
-Video: announces the MMI's boxes (VIDEO_CAPS, 800x480 screen, as
-src/audi_stream_receiver/video.cpp), reassembles the phone's pictures, acks each as
-shown and, with --save DIR, keeps the newest one as DIR/latest.jpg.
-
-H.264 (the phone app's "H.264" format): announces the MMI's limits
+Video (H.264, the only format): announces the MMI's limits
 (720x576, 25 fps, frames up to 128 KB), takes H264_CONFIG, checks every
 frame the way the MMI does (an IDR first, no bigger than the config's
 frame size), acks it at once and answers H264_STATUS like
@@ -83,13 +79,11 @@ H264_CONFIG, H264_STATUS, VIDEO_ACKS, STREAM_SETTINGS = 11, 12, 13, 14
 H264_PLAYING, H264_SYNC, H264_REFUSED, H264_CONFIG_WANTED = 0, 1, 2, 3
 VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
-SCREEN_W, SCREEN_H, MAX_BYTES = 800, 480, 512 * 1024
-FMT_JPEG, FMT_H264 = 1, 3
+SCREEN_W, SCREEN_H = 800, 480
+FMT_H264 = 3  # 1, 2: JPEG / PNG, retired
 H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME = 720, 576, 25, 128 * 1024  # = hwvideo.h
-CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, MAX_BYTES,
-                   1 << (FMT_JPEG - 1) | 1 << (FMT_H264 - 1),
-                   H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME)
-EXT = {FMT_JPEG: "jpg"}
+CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, H264_MAX_FRAME,
+                   1 << (FMT_H264 - 1), H264_MAX_W, H264_MAX_H, H264_FPS, H264_MAX_FRAME)
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 GAP_S = 1.0
 PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, H264_CONFIG,
@@ -569,11 +563,11 @@ class H264:
 
 
 class Pictures:
-    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one JPEG / H.264 frame."""
+    """The phone's pictures: VIDEO_START + VIDEO_DATA... -> one H.264 frame."""
 
     def __init__(self) -> None:
         """Nothing received yet."""
-        self.cur, self.data, self.shown, self.t0 = None, b"", 0, time.monotonic()
+        self.cur, self.data = None, b""
         self.h264, self.gaps = H264(), FrameGaps()
         self.acks = aoa_sim.AckGate()
 
@@ -585,54 +579,34 @@ class Pictures:
     def start(self, payload: bytes, ep_out) -> None:
         """A new picture; refused like vasm.h does."""
         pid, w, h, fmt, size = struct.unpack_from("<HHHBI", payload)
-        phone_ms = struct.unpack_from("<H", payload, 11)[0] if len(payload) >= 13 else 0
-        box = (SCREEN_W // 2, SCREEN_H) if w < h else (SCREEN_W, SCREEN_H)
-        if fmt == FMT_H264:
-            box = (H264_MAX_W, H264_MAX_H)
-        if (fmt not in EXT and fmt != FMT_H264) or not 0 < size <= MAX_BYTES or \
-                not (0 < w <= box[0] and 0 < h <= box[1]):
-            log(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes (box {box[0]}x{box[1]})")
+        if fmt != FMT_H264 or not 0 < size <= H264_MAX_FRAME or \
+                not (0 < w <= H264_MAX_W and 0 < h <= H264_MAX_H):
+            log(f"picture {pid} refused: {w}x{h} format {fmt} {size} bytes")
             self.ack(VIDEO_BAD, ep_out)
             self.cur = None
             return
-        self.cur, self.data = (pid, w, h, fmt, size, phone_ms), b""
+        self.cur, self.data = (pid, size), b""
 
     def data_chunk(self, payload: bytes, ep_out) -> None:
         """More of the current picture; ack it when complete."""
         if self.cur is None or struct.unpack_from("<H", payload)[0] != self.cur[0]:
             return
         self.data += payload[2:]
-        pid, w, h, fmt, size, phone_ms = self.cur
-        if len(self.data) < size:
+        if len(self.data) < self.cur[1]:
             return
         self.cur = None
-        if fmt == FMT_H264:
-            ack = self.h264.on_frame(self.data)
-            self.ack(ack, ep_out)
-            if ack == VIDEO_SHOWN:
-                self.gaps.frame(time.monotonic())
-                SCREEN.send("h264", self.data)
-            model = self.h264.model
-            if model is not None and model.catching and not model.caught:
-                pass  # the MMI asks for the IDR once io-media is back
-            elif ack == VIDEO_DROPPED or (ack == VIDEO_BAD and self.h264.config):
-                self.h264.sync(ep_out)
-            elif ack == VIDEO_BAD:
-                self.h264.status(H264_CONFIG_WANTED, ep_out)
-            return
-        self.shown += 1
-        if SAVE_DIR:
-            name = os.path.join(SAVE_DIR, f"latest.{EXT[fmt]}")
-            with open(name + ".tmp", "wb") as f:
-                f.write(self.data)
-            os.replace(name + ".tmp", name)
-        self.ack(VIDEO_SHOWN, ep_out)
-        self.gaps.frame(time.monotonic())
-        SCREEN.send("jpeg", self.data)
-        if self.shown <= 3 or self.shown % 20 == 0:
-            fps = self.shown / max(time.monotonic() - self.t0, 0.001)
-            log(f"picture #{self.shown} id {pid}: {w}x{h} {'portrait' if w < h else 'landscape'}, "
-                  f"{EXT[fmt]} {size} bytes (phone {phone_ms} ms), {fps:.1f} fps on average")
+        ack = self.h264.on_frame(self.data)
+        self.ack(ack, ep_out)
+        if ack == VIDEO_SHOWN:
+            self.gaps.frame(time.monotonic())
+            SCREEN.send("h264", self.data)
+        model = self.h264.model
+        if model is not None and model.catching and not model.caught:
+            pass  # the MMI asks for the IDR once io-media is back
+        elif ack == VIDEO_DROPPED or (ack == VIDEO_BAD and self.h264.config):
+            self.h264.sync(ep_out)
+        elif ack == VIDEO_BAD:
+            self.h264.status(H264_CONFIG_WANTED, ep_out)
 
 
 class Faults:

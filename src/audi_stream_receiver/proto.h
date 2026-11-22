@@ -13,26 +13,25 @@
 //                            an old phone app's TEXT is logged and ignored.
 //   HELLO_REPLY 0x04  both   "who I am", answer to HELLO (never answered)
 //
-// Video (a few fps of screen mirroring, one JPEG per picture):
+// Video (screen mirroring, one H.264 frame per "picture"):
 //
 //   VIDEO_CAPS  0x05  MMI    land_w u16, land_h u16, port_w u16, port_h u16,
 //                            max_bytes u32, formats u8 (bit n-1 = format n:
-//                            bit 0 JPEG, bit 2 H.264 - an MMI app without
-//                            H.264 no bit 2; bit 1 was PNG, retired, not
-//                            to be reused). The boxes a
-//                            landscape / portrait picture has to fit in.
-//                            With H.264 (22 bytes) followed by the
+//                            bit 2 H.264; bit 0 was JPEG and bit 1 PNG,
+//                            both retired, not to be reused). The boxes
+//                            and max_bytes are what the retired JPEG
+//                            pictures had to fit in: still sent (the
+//                            screen and its left half, the H.264 frame
+//                            cap), unused. Followed by the
 //                            H.264 limits: h264_max_w u16, h264_max_h u16,
 //                            h264_fps u8, h264_max_frame u32 (the largest
 //                            frame_bytes H264_CONFIG may ask for).
 //                            Sent after HELLO and with HELLO_REPLY; a phone
 //                            streams only to an MMI that sent it.
-//   VIDEO_START 0x06  phone  id u16, w u16, h u16, format u8 (kFmt*),
-//                            size u32 [, phone_ms u16]: a picture of size
-//                            bytes follows ... phone_ms (for the perf log
-//                            only) is what the phone spent
-//                            on it: scaling + encoding. Longer payloads are
-//                            fine, the rest is ignored.
+//   VIDEO_START 0x06  phone  id u16, w u16, h u16, format u8 (kFmtH264),
+//                            size u32 [, phone_ms u16]: a frame of size
+//                            bytes follows. phone_ms (the phone's encode
+//                            time) is ignored, like anything after it.
 //   VIDEO_DATA  0x07  phone  id u16 + the next bytes of it, in order
 //   (0x08)                   retired: VIDEO_ACK, one per picture (id, status,
 //                            decode_ms). Not to be reused.
@@ -43,10 +42,9 @@
 //   VIDEO_ACKS  0x0D  MMI    shown u16, bad u16, dropped u16: this many more
 //                            pictures are done, since the last VIDEO_ACKS,
 //                            in the order they were sent. The phone counts
-//                            its pictures in flight down by the sum. A JPEG
-//                            goes out alone, at once: shown = on screen,
-//                            and the phone keeps at most two in flight.
-//                            H.264 frames go out in batches (ack_batch.h).
+//                            its pictures in flight down by the sum. Sent
+//                            in batches (ack_batch.h); a bad or cut-short
+//                            frame at once.
 //   STREAM_SETTINGS 0x0E phone  ASCII "key=value key=value ...": the phone
 //                            app's streaming settings (format, max fps, bit
 //                            rate, ...) and its uptime, for the MMI's log
@@ -88,8 +86,9 @@
 //                            SYNC     send an IDR now (start, or a frame
 //                                     was dropped and the ones after it
 //                                     can't be decoded)
-//                            REFUSED  config unusable (log says why): send
-//                                     JPEG pictures instead
+//                            REFUSED  config unusable (log says why): the
+//                                     phone pauses and tries a config
+//                                     again later
 //                            CONFIG   send H264_CONFIG again (in-band SPS
 //                                     / PPS differ, or the stream ended)
 //
@@ -118,7 +117,7 @@ enum Type : u8 {
 	kStreamSettings = 0x0E,
 };
 
-constexpr unsigned kFmtJpeg = 1;
+// (1 JPEG and 2 PNG: retired, not to be reused)
 constexpr unsigned kFmtH264 = 3;
 
 // H264_STATUS code
@@ -130,7 +129,7 @@ constexpr u8 kH264ConfigWanted = 3;
 // How a picture ended: one of VIDEO_ACKS's counts.
 enum class PicStatus {
 	Shown,
-	Bad,      // not decodable, or bigger than its box
+	Bad,      // refused (too big, no config, ...)
 	Dropped,  // superseded or cut short before shown
 };
 
@@ -163,11 +162,6 @@ inline void put_u32(u8 *p, u32 v)
 {
 	put_u16(p, v & 0xffff);
 	put_u16(p + 2, v >> 16);
-}
-
-inline const char *fmt_name(unsigned format)
-{
-	return format == kFmtH264 ? "H.264" : "JPEG";
 }
 
 // Encodes one frame into out[cap]. Returns its size, or 0 if len is over

@@ -38,7 +38,6 @@ extern "C" {
 #include "model.h"
 #include "mono_cond.h"
 #include "vasm.h"
-#include "video.h"
 
 using model::LinkState;
 using proto::PicStatus;
@@ -101,11 +100,12 @@ bool              kick;          // manager has work besides events
 AckBatch          acks;
 std::thread       manager_thread;
 bool              manager_started;
-// log_ms() + 1 of the last complete picture or frame (0: none yet): while
-// pictures come, the system log is saved every kSlogPeriodMs
+// log_ms() + 1 of the last complete frame (0: none yet): while
+// frames come, the system log is saved every kSlogPeriodMs
 std::atomic<unsigned> video_rx_ms{0};
 constexpr unsigned kSlogPeriodMs = 60000;
-constexpr unsigned kStreamingGapMs = 5000;  // no picture for this long: not streaming
+unsigned screen_w = 800, screen_h = 480;  // for VIDEO_CAPS (start())
+constexpr unsigned kStreamingGapMs = 5000;  // no frame for this long: not streaming
 
 void post(EvKind kind, const usbd_device_instance_t *inst)
 {
@@ -248,7 +248,7 @@ public:
 	static void close(std::unique_ptr<Link> l);
 
 private:
-	Link() : assembler_(video::kMaxBytes) {}
+	Link() : assembler_(hwvideo::kMaxFrame) {}
 
 	static void out_done_cb(struct usbd_urb *urb, struct usbd_pipe *, void *arg)
 	{
@@ -269,8 +269,7 @@ private:
 	void on_video(u8 type, const u8 *p, unsigned n);
 
 	proto::Decoder decoder_;
-	Assembler      assembler_;           // the picture being received
-	unsigned       rx_start_us_ = 0;     // of that picture
+	Assembler      assembler_;           // the frame being received
 
 	struct usbd_pipe   *in_ = nullptr, *out_ = nullptr;
 	Urb                 in_urb_, out_urb_;
@@ -348,29 +347,27 @@ void Link::out_done(struct usbd_urb *urb)
 
 void Link::send_caps()
 {
-	auto caps = video::caps();
+	auto caps = hwvideo::caps(screen_w, screen_h);
 	send(proto::kVideoCaps, caps.data(), (unsigned)caps.size());
 }
 
-// VIDEO_START / VIDEO_DATA; usbd thread. Bad pictures are acked at once,
-// JPEGs when they are on screen (video.cpp), H.264 frames with a batch.
+// VIDEO_START / VIDEO_DATA; usbd thread. Bad frames are acked at once,
+// the rest with a batch.
 void Link::on_video(u8 type, const u8 *p, unsigned n)
 {
 	Assembler::Result r;
 
 	if (type == proto::kVideoStart) {
 		r = assembler_.start(p, n);
-		if (r.rx == Assembler::Rx::Ok)
-			rx_start_us_ = log_us();
 		if (r.cut_short >= 0) {
-			log_msg("video: picture %d cut short by the next one", r.cut_short);
+			log_msg("video: frame %d cut short by the next one", r.cut_short);
 			ack(PicStatus::Dropped);
 		}
 	} else {
 		r = assembler_.data(p, n);
 	}
 	if (r.rx == Assembler::Rx::Bad) {
-		log_msg("rx %s for picture %d refused (%u bytes%s)",
+		log_msg("rx %s for frame %d refused (%u bytes%s)",
 		        type == proto::kVideoStart ? "VIDEO_START" : "VIDEO_DATA", r.id, n,
 		        n >= proto::kVideoStartLen && type == proto::kVideoStart ?
 		        ": bad size/format/dimensions" : "");
@@ -378,16 +375,8 @@ void Link::on_video(u8 type, const u8 *p, unsigned n)
 	} else if (r.rx == Assembler::Rx::Done) {
 		Picture pic = assembler_.take();
 		video_rx_ms = log_ms() + 1;
-		pic.rx_start_us = rx_start_us_;
-		pic.rx_done_us = log_us();
-		if (pic.format == proto::kFmtH264) {
-			// into the hardware stream (proto.h)
-			ack_later(hwvideo::frame(pic.data.get(), pic.size));
-			return;
-		}
-		if (hwvideo::active())
-			hwvideo::stop("the phone sent a picture: back to pictures");
-		video::submit(std::move(pic));
+		// into the hardware stream (proto.h)
+		ack_later(hwvideo::frame(pic.data.get(), pic.size));
 	}
 }
 
@@ -429,7 +418,6 @@ void Link::on_frame(u8 type, const u8 *p, unsigned n)
 	case proto::kVideoStop:
 		log_msg("rx VIDEO_STOP");
 		assembler_.reset();
-		video::stop("the phone stopped streaming");
 		hwvideo::stop("the phone stopped streaming");
 		break;
 	case proto::kH264Config:
@@ -761,7 +749,6 @@ void link_drop(const char *why, LinkState next)
 		return;
 	log_msg("usb: accessory link down: %s", why);
 	Link::close(std::move(acc));
-	video::stop("USB link down");
 	hwvideo::stop("USB link down");
 	if (acc_entry != nullptr)
 		dev_release(acc_entry);
@@ -774,7 +761,7 @@ bool acc_open(DevEntry *d, const char *detail)
 {
 	{
 		std::lock_guard<std::mutex> lock(qlock);
-		acks.clear();                    // the old link's pictures
+		acks.clear();                    // the old link's frames
 	}
 	// Before Link::open(): its reads may set CONNECTED right away.
 	model::set_state(LinkState::Accessory, detail);
@@ -1224,9 +1211,11 @@ void ack_later(PicStatus status)
 		qcond.notify();
 }
 
-bool start(const char *sd_path)
+bool start(const char *sd_path, unsigned scr_w, unsigned scr_h)
 {
 	slog_sd = sd_path;
+	screen_w = scr_w;
+	screen_h = scr_h;
 	try {
 		manager_thread = std::thread(manager);
 	} catch (const std::system_error &e) {

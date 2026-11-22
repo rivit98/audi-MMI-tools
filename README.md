@@ -48,7 +48,7 @@ and what doesn't). Shared code is in [src/common/](src/common/); the knob and bu
 | [hello9](src/hello9/README.md) | live H.264 stream through the DSP |
 | [hello10](src/hello10/README.md) | 800×480 video: io-media capture-width probe, software H.264 decoding on the SH4 |
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
-| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
+| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
 | [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/`; the main knob chooses, its press runs it as run.sh would (run.sh starts it by default) |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens |

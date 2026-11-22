@@ -57,7 +57,8 @@ gradle, adb or gcc.
 - `sdk/qnx-elf-fix.py` runs after every link and **deletes** a binary that has TLS or IFUNC.
 - 64-bit types are 4-byte aligned (QNX 6.3.2 ABI).
 - SD writes are slow (~12 ms per fsync'ed log line). Keep `log_msg` out of per-frame paths:
-  use a RAM ring + low-priority writer thread (`audi_stream_receiver/perf.cpp`).
+  count in RAM and log one summary per window (`audi_stream_receiver/hwvideo.cpp`'s
+  `h264: 10.0 s:` lines).
 - Use `CLOCK_MONOTONIC` (`log_ms()`). The wall clock is 1970 after every cold boot, so file
   dates and slog timestamps in car logs mean nothing.
 - **Give the screen back on every exit path.** Displayables outlive the process.

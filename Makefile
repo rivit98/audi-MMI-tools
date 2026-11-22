@@ -19,9 +19,8 @@
 #   make apk-test        its Kotlin unit tests
 #   make apk-install     adb install it (adb in the container, phone on USB)
 #   make aoa-host        desk test: this PC plays the MMI for the phone app
-#                        (the newest streamed picture: build/aoa-host/latest.jpg;
-#                        H.264: build/aoa-host/stream.h264) and shows it in an
-#                        800x480 window like the MMI's screen
+#                        (the H.264 stream: build/aoa-host/stream.h264) and
+#                        shows it in an 800x480 window like the MMI's screen
 #   make aoa-host-test   tools/aoa_host.py's and the window's tests
 #   make aa-host         android_auto's desk test: this PC is the Android Auto
 #                        head unit for the phone (build/aa-host/: video, audio,
@@ -86,7 +85,6 @@ CXXFLAGS := $(CFLAGS)
 #   SCREEN  screen.c: a CPU-drawn layer-manager screen (VFB), + TEXT
 #   GL      gfx.c (gf + EGL), hud.c (FPS counter), img.c (BMP/PNG)
 #   PROC    proc.c: start the unit's own tools from a threaded app
-#   IMGDEC  imgdec.c: JPEG decoding (stb_image)
 #   CPUMON  cpumon.c: own + unit CPU load and memory, a "cpu:" log line per window
 #           (cpustat.c); slogmark.c: our markers in the system log
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
@@ -110,7 +108,6 @@ SCREEN := $(call common,screen vfbcopy) $(TEXT)
 IMG    := $(call common,img) src/common/stb_image_write.h
 GL     := $(call common,gfx hud) $(IMG)
 PROC   := $(call common,proc)
-IMGDEC := $(call common,imgdec) src/common/stb_image.h
 CPUMON := $(call common,cpumon cpustat slogmark)
 IOM    := $(call common,iom)
 HBDSI  := $(call common,hbdsi hbdsi_wire)
@@ -269,10 +266,9 @@ build/hello11: $(wildcard src/hello11/*.cpp src/hello11/*.h) $(call commonxx,cam
     $(BASE) $(SCREEN) $(UI)
 LIBS_hello11 := -lgf
 CXXFLAGS_hello11 := -Wno-ignored-attributes
-# audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn screen, no GL. The
-# phone's pictures are JPEGs, decoded on the CPU, or an
-# H.264 stream played by the unit's DM642 through LIVE (hwvideo.cpp).
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(IMGDEC) $(CPUMON) $(LIVE)
+# audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn status screen, no GL.
+# The phone's H.264 stream plays on the unit's DM642 through LIVE (hwvideo.cpp).
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(LIVE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
 
@@ -470,8 +466,8 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
-TESTBIN := build/test_proto build/test_imgdec build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
+TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -503,9 +499,6 @@ test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
 # audi_stream_receiver's wire protocol, picture reassembly and ack batches (C++, below)
 build/test_proto: tests/test_proto.cpp tests/check.h src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.h src/audi_stream_receiver/ack_batch.h
-# audi_stream_receiver's JPEG decoding, on pictures stb_image_write encodes
-build/test_imgdec: tests/test_imgdec.c tests/check.h $(IMGDEC) src/common/stb_image_write.h
-TESTLIBS_test_imgdec := -lm
 build/test_cpustat: tests/test_cpustat.c tests/check.h $(call common,cpustat)
 build/test_text:  tests/test_text.c tests/check.h $(call common,text)
 # lz4mini against the reference liblz4 (liblz4-dev in the SDK image)
@@ -564,8 +557,8 @@ build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 li
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
 # audi_stream_receiver: which H264_CONFIGs restart the stream
 build/test_config_gate: tests/test_config_gate.cpp tests/check.h src/audi_stream_receiver/config_gate.h
-# audi_stream_receiver: the JPEG cap, and the warnings' rate limit
-build/test_pacer: tests/test_pacer.cpp tests/check.h src/audi_stream_receiver/jpeg_pacer.h src/common/rate_limit.h
+# the warnings' rate limit
+build/test_rate_limit: tests/test_rate_limit.cpp tests/check.h src/common/rate_limit.h
 # android_auto's protocol core against a fake phone (TLS server included)
 build/test_android_auto: tests/test_android_auto.cpp tests/check.h $(AA_CORE) $(call common,log) \
     build/mbedtls-host/libmbedtls.a $(AA_CERT)/.done
@@ -597,11 +590,11 @@ build/test_runner: tests/test_runner.cpp tests/check.h src/runner/conf.cpp src/r
 	    -Isrc/common/buttons -Isrc/runner -o $@ $(filter %.cpp,$^)
 # the HMI's rear camera, from dev-videoctrl's slog lines
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera_log.h
-build/test_proto build/test_config_gate build/test_pacer build/test_camera:
+build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_swdec build/test_hello11 build/test_hello10_mapinfo build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_pacer build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_swdec build/test_hello11 build/test_hello10_mapinfo build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

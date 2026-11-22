@@ -4,8 +4,7 @@
 // polls and stops the stream.
 //
 //   usbd thread   hwvideo::config() (H264_CONFIG), hwvideo::frame() (a
-//                 complete frame), hwvideo::stop() (VIDEO_STOP, link down,
-//                 a JPEG picture: the phone went back to pictures)
+//                 complete frame), hwvideo::stop() (VIDEO_STOP, link down)
 //   manager       hwvideo::status_pop() -> H264_STATUS frames
 //   main loop     hwvideo::active(): while true the screen belongs to the
 //                 video; close the CPU-drawn screen, open it again after
@@ -16,6 +15,7 @@
 #ifndef AUDI_STREAM_HWVIDEO_H
 #define AUDI_STREAM_HWVIDEO_H
 
+#include <array>
 #include "types.h"
 
 #include "proto.h"
@@ -29,6 +29,11 @@ constexpr unsigned kFps = 25;
 // Every frame is padded to the phone's frame size, and io-media reads it all:
 // 256 KB frames (6.7 MB/s) are more than it reads in time, 128 KB ones keep up.
 constexpr u32 kMaxFrame = 128u * 1024;
+
+// VIDEO_CAPS payload: the screen as the landscape box, its left half as the
+// portrait box (both kept on the wire, unused by the H.264 stream), only the
+// H.264 format bit and the limits above.
+std::array<u8, proto::kVideoCapsLen> caps(unsigned screen_w, unsigned screen_h);
 
 void start();
 void shutdown();

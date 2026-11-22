@@ -22,6 +22,7 @@ extern "C" {
 #include "proto.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <atomic>
 #include <climits>
@@ -577,6 +578,24 @@ void run()
 } // namespace
 
 namespace hwvideo {
+
+std::array<u8, proto::kVideoCapsLen> caps(unsigned screen_w, unsigned screen_h)
+{
+	std::array<u8, proto::kVideoCapsLen> a;
+	u8 *out = a.data();
+
+	proto::put_u16(out, screen_w);
+	proto::put_u16(out + 2, screen_h);
+	proto::put_u16(out + 4, screen_w / 2);
+	proto::put_u16(out + 6, screen_h);
+	proto::put_u32(out + 8, kMaxFrame);
+	out[12] = 1u << (proto::kFmtH264 - 1);
+	proto::put_u16(out + 13, kMaxW);
+	proto::put_u16(out + 15, kMaxH);
+	out[17] = kFps;
+	proto::put_u32(out + 18, kMaxFrame);
+	return a;
+}
 
 void start()
 {

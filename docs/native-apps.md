@@ -196,7 +196,6 @@ docs/                   this guide and the deep dives
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
 | `GL` | `gfx`, `hud`, `img` | gf + EGL bring-up, FPS counter, BMP/PNG writer |
 | `IMG` | `img` | PNG/BMP writer (stb_image_write) |
-| `IMGDEC` | `imgdec` | JPEG decoder (stb_image) |
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
@@ -334,8 +333,8 @@ Rules the platform forces:
 - **64-bit types are 4-byte aligned** (QNX 6.3.2 ABI). Structs shared with
   device libraries depend on it.
 - **SD writes are slow:** ~12 ms per fsync'ed line, ~140 KB/s. Keep
-  `log_msg` out of per-frame paths. Put records in a RAM ring and let a
-  low-priority thread write them (`src/audi_stream_receiver/perf.cpp`).
+  `log_msg` out of per-frame paths. Count in RAM and log one summary per
+  window (`src/audi_stream_receiver/hwvideo.cpp`, `h264: 10.0 s:`).
 - `/tmp` takes files (binaries, WAVs that io-media plays), but `mkdir
   /tmp` and `rm -rf /tmp/…` report errors. The shell has no `sync` or
   `touch` (`: > file`).
@@ -423,8 +422,7 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
   (type by extension: png/bmp/jpg/gif). These capture the HMI and CPU-drawn
   VFBs, **never GL output**. `v-level` / `s-level` also exist; meaning
   unknown.
-- Pictures: `imgdec.c` (stb_image) decodes JPEG to ARGB, `img.c`
-  (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
+- Pictures: `img.c` (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
   `pngondemand` renders a small text-layout language to PNG
   ([src/pngondemand/README.md](../src/pngondemand/README.md)).
 
@@ -612,16 +610,14 @@ after ~18 s. Both are handled by retrying.
 **Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, at most 2048 B. `HELLO`/`HELLO_REPLY`,
 `VIDEO_CAPS`, `VIDEO_START` + `VIDEO_DATA` chunks, `VIDEO_ACKS`,
-`VIDEO_STOP`. Types `0x02`/`0x03`/`0x08`/`0x0A` are retired: don't
-reuse them.
+`VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`. Types `0x02`/`0x03`/`0x08`/`0x0A`
+and formats 1 (JPEG) / 2 (PNG) are retired: don't reuse them.
 
-**Screen streaming, measured:** JPEG pictures, two in flight,
-decoded on the MMI with stb_image. ~3 fps at 80–160 ms latency, 0 bad
-pictures in 230. JPEG 800×368 decodes in ~61 ms.
-About 100 ms of MMI work per picture puts its ceiling near 10 fps; the
-phone sets the rate. **Hardware H.264**: 25 fps, ~0.6 s lag, MMI
+**Screen streaming, measured:** hardware H.264: 25 fps, ~0.6 s lag, MMI
 CPU ~24 % ([src/audi_stream_receiver/README.md](../src/audi_stream_receiver/README.md)). Streaming stops when the phone locks (Android revokes
-MediaProjection).
+MediaProjection). CPU-decoded JPEG pictures (stb_image) managed ~3 fps:
+~100 ms of MMI work per picture capped them near 10 fps, so the receiver
+takes H.264 only.
 
 **Desk testing:** `make aoa-host` makes the PC play the MMI's part, so
 phone-app bugs and MMI bugs can be told apart without the car.
@@ -648,7 +644,7 @@ phone-app bugs and MMI bugs can be told apart without the car.
 | GL texture upload | ~50 MB/s (800×480 RGBA: 31 ms) |
 | Fill per 60 Hz frame | ~2 full-screen blended layers |
 | Lit triangles | < 0.2 M/s; ~1000 per frame at 60 fps |
-| JPEG decode, 800×368 | 61 ms |
+| JPEG decode (stb_image), 800×368 | 61 ms |
 | RGB565 → BGRA, 800×480 | 12 ms |
 | LZ4 decompress, UI / photo frame | 9 / 29 ms |
 | SD log line with fsync | ~12 ms |

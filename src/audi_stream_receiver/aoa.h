@@ -12,7 +12,7 @@
 //   3. The phone re-enumerates as 18d1:2d00..2d05. Its accessory interface
 //      (class/subclass ff/ff) gets a bulk IN and OUT pipe; IN is read
 //      continuously with asynchronous usbd_io(), frames go to model.h
-//      (HELLO: the peer) and, reassembled by vasm.h, video.h (pictures). The
+//      (HELLO: the peer) and, reassembled by vasm.h, hwvideo.h (H.264). The
 //      MMI's VIDEO_CAPS goes out with its HELLO; VIDEO_ACKS are sent from
 //      the manager thread.
 //   4. Removal or any transfer error tears the connection down and goes
@@ -32,14 +32,15 @@ constexpr int kSlogSnapshots = 6;
 
 // false if the manager thread could not start. sd_path: where a failed
 // handshake or a removal saves a system log snapshot (var/usb_slog_<time>.txt).
-bool start(const char *sd_path);
+// screen_w x screen_h: the screen, for VIDEO_CAPS.
+bool start(const char *sd_path, unsigned screen_w, unsigned screen_h);
 void stop();    // tear down and join; bounded by quit.c's hard alarm
 
-// A picture is done (any thread): goes out in the next VIDEO_ACKS, sent at
-// once. A JPEG: the phone waits for it to send the next one.
+// A frame is done (any thread): goes out in the next VIDEO_ACKS, sent at
+// once (a bad or cut-short frame).
 void ack(proto::PicStatus status);
-// The same for an H.264 frame: sent with a full batch or on the manager's
-// next tick, whichever comes first (ack_batch.h).
+// The same, sent with a full batch or on the manager's next tick, whichever
+// comes first (ack_batch.h).
 void ack_later(proto::PicStatus status);
 
 // Something for the manager to send (any thread).
@@ -47,7 +48,7 @@ void wake();
 
 // The system log now, in the background, into var/usb_slog_<time>.txt (up to
 // kSlogSnapshots per run); logs "usb: slog snapshot <n> (<why>)". Any thread.
-// While pictures or frames come, the manager also saves it every 60 s into
+// While frames come, the manager also saves it every 60 s into
 // var/usb_slog_periodic_<time>.txt.
 void slog_snapshot(const char *why);
 

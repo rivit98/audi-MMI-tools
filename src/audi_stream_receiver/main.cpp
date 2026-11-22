@@ -1,6 +1,5 @@
 // audi_stream_receiver - receive the phone's screen from an Android phone
-// over USB (Android Open Accessory) and show it on the MMI screen: as JPEG
-// pictures, a few a second, decoded here; or as an
+// over USB (Android Open Accessory) and show it on the MMI screen as an
 // H.264 stream decoded by the unit's DM642 (hwvideo.h). (It has no text
 // messages; README.md says why.)
 //
@@ -10,14 +9,12 @@
 // can be plugged, unplugged and replugged any number of times: every drop
 // goes back to "waiting for phone" (aoa.cpp). The screen is a full-screen
 // layer-manager displayable drawn by the CPU (screen.c, the lmprobe path),
-// redrawn whenever the model changes or a picture arrives, and once a
-// second for the clock. Pictures are decoded here, on the main thread
-// (video.cpp); the USB threads only collect them. While an H.264 stream
-// plays, the screen is the video's: the CPU-drawn one is closed, and
-// opened again when the stream ends.
+// redrawn whenever the model changes, and once a second for the clock.
+// While the H.264 stream plays, the screen is the video's: the CPU-drawn
+// one is closed, and opened again when the stream ends.
 //
 // Writes <sd>/audi_stream_receiver.log: states, every USBDI result, every message
-// but the picture data, a "perf:" summary every 10 s of streaming and a
+// but the video data, "h264:" stream lines (hwvideo.h) and a
 // "cpu:" line every 10 s (own and unit load, per thread; cpumon.h).
 // The previous run's log is kept as *.prev.*; the slog snapshots
 // carry the time in their names (log_stamp), so runs never overwrite them.
@@ -42,15 +39,13 @@ extern "C" {
 #include "aoa.h"
 #include "hwvideo.h"
 #include "model.h"
-#include "perf.h"
 #include "ui.h"
-#include "video.h"
 
 namespace {
 
 constexpr unsigned kCpuWindowMs = 10000;
-// "HIGH" in the cpu: line and on screen: own load over a window: about
-// 27 % while streaming 3 fps; the unit has navigation etc. to run.
+// "HIGH" in the cpu: line and on screen: own load over a window; the unit
+// has navigation etc. to run.
 constexpr unsigned kCpuWarnPct = 50;
 
 // old -> new, replacing new.
@@ -97,7 +92,6 @@ int main(int argc, char *argv[])
 		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
-	perf::init();
 	screen_set_partial(1);
 
 	camera::start();
@@ -108,14 +102,13 @@ int main(int argc, char *argv[])
 	bool shown = screen_open() == 0;
 	if (!shown)
 		log_msg("FAIL screen; running headless (log only)");
-	if (shown)
-		video::init(screen_canvas()->w, screen_canvas()->h);
-	else
-		video::init(800, 480);
 	bool screen_up = shown;
 	camera::Takeover takeover;
 	hwvideo::start();
-	aoa::start(sd_path);
+	if (shown)
+		aoa::start(sd_path, (unsigned)screen_canvas()->w, (unsigned)screen_canvas()->h);
+	else
+		aoa::start(sd_path, 800, 480);
 
 	while (quit_poll() == QUIT_NONE) {
 		// the H.264 stream's video takes the screen (vout replaces what
@@ -153,38 +146,19 @@ int main(int argc, char *argv[])
 			break;
 		}
 
-		bool fresh = video::poll();
 		unsigned v = model::version();
 		unsigned s = log_ms() / 1000;
 		// The clock alone redraws at most once a second: a full screen copy
-		// into the VFB costs ~160 ms, and pictures redraw anyway.
-		if (screen_up && (fresh || v != last_version ||
+		// into the VFB costs ~160 ms.
+		if (screen_up && (v != last_version ||
 		              (s != last_second && log_ms() - last_present >= 1000))) {
-			video::Present p;
-
 			last_version = v;
 			last_second = s;
-			unsigned t0 = log_us();
 			ui::render(screen_canvas(), var_dir(sd_path));
-			p.render_us = log_us() - t0;
 			screen_present();
 			last_present = log_ms();
-			const screen_stats *st = screen_last_stats();
-			p.copy_us = st->copy_us;
-			p.flip_us = st->flip_us;
-			p.vfb_bytes = st->bytes;
-			p.vfb_rows = st->rows;
-			p.vfb_full = st->full != 0;
-			if (fresh)
-				video::presented(&p);
-		} else if (fresh) {
-			video::presented(nullptr);        // headless: still ack it
 		}
-		// Straight on if the next picture is already here (the phone keeps
-		// two in flight); else until one comes, or 50 ms for the rest.
-		unsigned t0 = log_us();
-		video::wait(50);
-		perf::idle(log_us() - t0);
+		usleep(50 * 1000);
 	}
 
 	aoa::stop();
@@ -196,7 +170,6 @@ int main(int argc, char *argv[])
 	}
 	camera::stop();
 	cpumon_stop();
-	perf::shutdown();
 	slogmark("exit (stop reason: %s)", quit_name(quit_poll()));
 	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();

@@ -3,8 +3,6 @@
 Lays things out like src/audi_stream_receiver/ui.cpp:
 
     H.264              the decoded frame stretched to 800x480, as the VCAP does
-    JPEG, landscape    centred on black; the status bar on top if the phone asks for it
-    JPEG, portrait     on the left at full height, the status panel in the rest
     no picture         the status panel, full width, with what to do next
 
 Messages come from aoa_host.py's USB process and are decoded on a thread that keeps
@@ -17,18 +15,15 @@ line is the USB process's "sim" message.
 """
 
 import copy
-import io
 import threading
 import time
-from collections import deque
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import av
 import pygame
 
 SCREEN_W, SCREEN_H = 800, 480
-FPS_WINDOW_S = 2.0
 REFRESH_HZ = 30
 TOOLBAR_H, BUTTON_H, BUTTON_GAP = 60, 28, 4
 TOGGLES_EVERY_S = 1.0
@@ -97,17 +92,10 @@ class ScreenState:
 
     link: str = "waiting"
     detail: str = ""
-    mode: str | None = None  # "h264", "jpeg" or None for no picture
+    mode: str | None = None  # "h264" or None for no picture
     picture: pygame.Surface | None = None
-    size: tuple[int, int] = (0, 0)
-    bytes: int = 0
     shown: int = 0
     sim: str = ""  # the toolbar's status line
-    times: deque = field(default_factory=lambda: deque(maxlen=128))
-
-    def fps(self, now: float) -> float:
-        """Pictures a second lately."""
-        return sum(now - t < FPS_WINDOW_S for t in self.times) / FPS_WINDOW_S
 
 
 class ScreenModel:
@@ -144,12 +132,7 @@ class ScreenModel:
             return
         picture = self.decoder.decode(body)
         if picture is not None:
-            self.show("h264", picture, picture.get_size(), len(body))
-
-    def on_jpeg(self, _head: dict, body: bytes) -> None:
-        """One accepted picture, drawn 1:1."""
-        picture = pygame.image.load(io.BytesIO(body), "picture.jpg")
-        self.show("jpeg", picture, picture.get_size(), len(body))
+            self.show(picture)
 
     def on_sim(self, head: dict, _body: bytes) -> None:
         """The faults' state, for the toolbar's status line."""
@@ -161,23 +144,17 @@ class ScreenModel:
         self.decoder = None
         with self.lock:
             self.state.mode, self.state.picture = None, None
-            self.state.times.clear()
 
-    def show(self, mode: str, picture: pygame.Surface, size: tuple[int, int], nbytes: int) -> None:
-        """Put a new picture on the screen."""
-        now = time.monotonic()
+    def show(self, picture: pygame.Surface) -> None:
+        """Put a new decoded frame on the screen."""
         with self.lock:
-            state = self.state
-            state.mode, state.picture, state.size, state.bytes = mode, picture, size, nbytes
-            state.shown += 1
-            state.times.append(now)
+            self.state.mode, self.state.picture = "h264", picture
+            self.state.shown += 1
 
     def snapshot(self) -> ScreenState:
         """A consistent copy for one redraw; surfaces are replaced, never drawn on."""
         with self.lock:
-            state = copy.copy(self.state)
-            state.times = self.state.times.copy()
-        return state
+            return copy.copy(self.state)
 
 
 class Toolbar:
@@ -266,44 +243,20 @@ class Painter:
             self.target.fill(C_VIDEO_BG)
             if s.picture is not None:
                 self.target.blit(s.picture, (0, 0))
-        elif s.mode == "jpeg" and s.size[0] < s.size[1]:
-            self.portrait(s, now)
-        elif s.mode == "jpeg":
-            self.landscape(s)
         else:
             self.target.fill(C_BG)
             self.panel(s, 0, SCREEN_W, now)
 
-    def landscape(self, s: ScreenState) -> None:
-        """A landscape picture centred, alone."""
-        self.target.fill(C_VIDEO_BG)
-        self.target.blit(s.picture, ((SCREEN_W - s.size[0]) // 2, (SCREEN_H - s.size[1]) // 2))
-
-    def portrait(self, s: ScreenState, now: float) -> None:
-        """A portrait picture on the left, the status panel in the rest."""
-        col = s.size[0]
-        self.target.fill(C_BG)
-        self.target.fill(C_VIDEO_BG, (0, 0, col, SCREEN_H))
-        self.target.blit(s.picture, (0, (SCREEN_H - s.size[1]) // 2))
-        self.target.fill(C_RULE, (col, 0, 1, SCREEN_H))
-        self.panel(s, col + 1, SCREEN_W - col - 1, now)
-
     def panel(self, s: ScreenState, x0: int, width: int, now: float) -> None:
-        """The status panel: status bar, detail, video stats or what to do next, footer."""
+        """The status panel: status bar, detail, what to do next, footer."""
         colour, title, hint = LINKS[s.link]
         self.target.fill(colour, (x0, 0, width, STATUS_H))
         self.text(self.big, (x0 + MARGIN, (STATUS_H - self.big.get_height()) // 2), title, C_TEXT)
         self.text(self.small, (x0 + MARGIN, DETAIL_Y), s.detail, C_DIM)
         self.target.fill(C_RULE, (x0, BODY_TOP - 4, width, 1))
-        if s.mode:
-            lines = [f"picture {s.size[0]}x{s.size[1]}, {s.bytes // 1024} KB {s.mode.upper()}",
-                     f"{s.fps(now):.1f} pictures a second", f"shown {s.shown}"]
-            for i, line in enumerate(lines):
-                self.text(self.small, (x0 + MARGIN, BODY_TOP + 8 + i * 22), line, C_TEXT)
-        else:
-            for i, line in enumerate(wrap(self.big, hint, width - 2 * MARGIN)):
-                self.text(self.big, (x0 + MARGIN, BODY_TOP + 24 + i * self.big.get_height()),
-                          line, C_TEXT)
+        for i, line in enumerate(wrap(self.big, hint, width - 2 * MARGIN)):
+            self.text(self.big, (x0 + MARGIN, BODY_TOP + 24 + i * self.big.get_height()),
+                      line, C_TEXT)
         self.target.fill(C_FOOTER_BG, (x0, SCREEN_H - FOOTER_H, width, FOOTER_H))
         up = int(now - self.started)
         self.text(self.small, (x0 + MARGIN, SCREEN_H - FOOTER_H + 5),
