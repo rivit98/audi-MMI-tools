@@ -21,13 +21,15 @@ exercised. *unverified* = an assumption.
 
 ```sh
 make sdk                          # once: mmi-sdk Docker image (cross-GCC + QNX sysroot)
-make sd SD_APPS="hello7"          # build + lay out an SD card in build/sd/
-# copy the CONTENTS of build/sd/ to the root of a FAT32 card,
+make sd                           # build every app + lay out an SD card in build/sd/
+rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ /media/$USER/CARD/
 # boot the MMI fully, insert into SD slot 1
 ```
 
-The card shows a start screen, then runs the apps one after another, each
-followed by its result screen. Everything the run writes comes back in `var/` on the card. If the screen
+The card shows a start screen, then the runner's menu of every app in
+`apps/` (main knob: choose, press: run). With `make sd SD_APPS="a b"` it
+runs those apps one after another instead, each followed by its result
+screen. Everything the run writes comes back in `var/` on the card. If the screen
 freezes, reboot the MMI: hold **MENU + rotary knob + top-right soft key**.
 
 ## 2. The platform
@@ -135,7 +137,7 @@ The Makefile expects to sit two levels below the toolkit root (`REPO :=
 |---|---|
 | `make sdk` | build `mmi-sdk` (again after changing `sdk/` or `FWLIBS`) |
 | `make` | all apps into `build/` (unstripped, `-O2 -g`) |
-| `make sd [SD_APPS="a b"]` | card layout in `build/sd/`: only those apps plus their clips, unit tools and files |
+| `make sd [SD_APPS="a b"]` | card layout in `build/sd/`: every app in `apps/` with its clips, unit tools and files; run.sh starts SD_APPS (default `runner`, the menu). File times are kept, so rsync copies only changes |
 | `make test` | host unit tests (`tests/*.c`, `*.cpp`) with ASan/UBSan |
 | `make check APP=x` | ELF header, interpreter, NEEDED, flags of `build/x` |
 | `make addr APP=x ADDR="0x08043270 …"` | crash address → function, file:line |

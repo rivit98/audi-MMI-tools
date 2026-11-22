@@ -8,8 +8,10 @@
 // installs it, nothing else to configure. Its apps.conf line, if any, adds a
 // title, text, arguments and timeout, and puts it in apps.conf's order (the
 // others follow by name, with no arguments and a 1 h timeout). A started
-// app is copied to /tmp/mmi_apps/apps/ first (FAT has no exec bit, and the
-// card may be pulled while it runs). Input: src/common/buttons (Hub fed by quit.c's ch8 thread, EventQueue).
+// app is copied to /tmp/mmi_apps/ first, next to run.sh's copy of bin/
+// (FAT has no exec bit, the card may be pulled while it runs, and the apps
+// find the unit tools next to themselves). Input: src/common/buttons (Hub
+// fed by quit.c's ch8 thread, EventQueue).
 //
 // Apps are started with QNX's spawn(), not fork + exec, system() or ksh
 // (README.md: why). The runner closes its screen first and opens it again
@@ -398,7 +400,9 @@ bool run_item(Item &it)
 {
 	const runner::AppConf &a = it.app;
 	std::string out_path = var + "/" + a.name + "_out.log";
-	std::string exe = bin + "/" + runner::kAppsDir + "/" + a.name;
+	// Next to run.sh's copy of bin/: the apps look for the unit tools
+	// (testapp-file, ...) next to themselves.
+	std::string exe = bin + "/" + a.name;
 	std::vector<std::string> args = {exe, sd};
 	args.insert(args.end(), a.args.begin(), a.args.end());
 
@@ -409,7 +413,6 @@ bool run_item(Item &it)
 
 	close_screen();
 	unsigned t0 = log_ms();
-	mkdir((bin + "/" + runner::kAppsDir).c_str(), 0755);
 	pid_t pid = -1;
 	bool copied = false;
 	std::string src = sd + "/" + runner::kAppsDir + "/" + a.name;

@@ -3,15 +3,15 @@
 #   make sdk             build the mmi-sdk Docker image (toolchain + QNX sysroot)
 #   make                 cross-compile all apps into build/
 #   make check APP=x     show what build/x looks like (ELF header, deps)
-#   make sd              assemble build/sd/: on SD insert run.sh runs every test
-#                        app in turn, with status screens (showScreen) in between,
-#                        rendered on the car by pngondemand
+#   make sd              build every app and assemble build/sd/: all apps in
+#                        apps/ with everything they need; on SD insert run.sh
+#                        starts the runner, a knob-driven menu of apps/
+#                        (src/runner/README.md). Copy it with rsync (README.md):
+#                        unchanged files keep their times, so only changes go.
 #   make sd SD_APPS="hello hello3"
-#                        the same with only those apps (in that order)
-#   make sd SD_APPS=runner MENU_APPS="hello7 hello11"
-#                        a knob-driven menu instead: run.sh starts only the
-#                        runner, which offers every binary in the card's apps/
-#                        (here the MENU_APPS; src/runner/README.md)
+#                        the same card, but run.sh runs those apps in turn
+#                        instead of the menu, with status screens (showScreen)
+#                        in between, rendered on the car by pngondemand
 #   make test            host-side unit tests (tests/) in the SDK container
 #   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
@@ -117,9 +117,10 @@ UI     := $(call commonxx,ui)
 LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vout hw_stream) src/common/camera_log.h $(IOM)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
-# APPS is everything `make` builds; TESTS are what run.sh executes by
-# default, in this order (settings: sd/apps.conf). `make sd` builds and
-# puts on the card only SD_APPS (default TESTS) and what they need.
+# APPS is everything `make` builds, and `make sd` puts all of them in the
+# card's apps/ (settings: sd/apps.conf). SD_APPS is what run.sh starts on
+# insert, in this order: by default only the runner, the menu of apps/.
+# The notes below say which apps still have open questions on the car.
 #
 # hello is still built but no longer run: it proved the toolchain produces
 # binaries the MMI runs. Run it with `make sd SD_APPS="hello ..."`.
@@ -179,18 +180,14 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # no longer in the default run: the phone app's Android Auto mode streams
 # through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
 #
-# runner (src/runner/README.md) is a menu of apps, chosen with the main knob:
-# `make sd SD_APPS=runner MENU_APPS="..."` puts the MENU_APPS in the card's
-# apps/ (and what they need elsewhere) and run.sh starts only the runner,
-# which lists whatever binary is in apps/.
+# runner (src/runner/README.md) is the menu of apps/, chosen with the main
+# knob; run.sh starts it by default.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
            audi_stream_receiver android_auto runner
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto runner
 # Tools run.sh uses, also built for the car and put in bin/ on the card.
 TOOLS   := pngondemand
-TESTS   := hello5 hello11 hello10 audi_stream_receiver
-SD_APPS ?= $(TESTS)
-MENU_APPS ?= hello7 $(TESTS)
+SD_APPS ?= runner
 # Seconds each status screen is shown: the start screen, and the result
 # screen after each app.
 PRE_S   := 3
@@ -414,34 +411,37 @@ FWTOOLS_hello10 := testapp-cmdline
 FILES_hello5   := src/hello5/beep.wav
 
 ifneq ($(filter sd,$(MAKECMDGOALS)),)
-ifneq ($(filter-out $(APPS),$(SD_APPS) $(MENU_APPS)),)
-$(error SD_APPS / MENU_APPS: not an app: $(filter-out $(APPS),$(SD_APPS) $(MENU_APPS)) (APPS: $(APPS)))
+ifneq ($(filter-out $(APPS),$(SD_APPS)),)
+$(error SD_APPS: not an app: $(filter-out $(APPS),$(SD_APPS)) (APPS: $(APPS)))
 endif
 endif
-# What goes on the card: the SD_APPS, and with the runner its MENU_APPS.
-SD_MENU   := $(if $(filter runner,$(SD_APPS)),$(filter-out $(SD_APPS),$(MENU_APPS)))
-SD_ALL    := $(SD_APPS) $(SD_MENU)
-per_app   = $(sort $(foreach a,$(SD_ALL),$($(1)_$(a))))
+# The card always gets every app (in apps/; the runner only in bin/) and
+# everything they need.
+SD_MENU   := $(filter-out runner,$(APPS))
+per_app   = $(sort $(foreach a,$(APPS),$($(1)_$(a))))
 SD_CLIPS  := $(call per_app,CLIPS)
 SD_FWTOOLS := $(wildcard $(addprefix $(FWEFS)/bin/,$(call per_app,FWTOOLS)))
 SD_FILES  := $(call per_app,FILES)
 
-# Only the SD_APPS (+ MENU_APPS with the runner) are built and copied, plus
-# run.sh's own tools (TOOLS, showScreen). Anything else: add it to SD_APPS.
-sd: $(addprefix build/,$(SD_ALL) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
-	rm -rf build/sd && mkdir -p build/sd/bin build/sd/var
-	cp $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
-	$(if $(SD_MENU),mkdir -p build/sd/apps && cp $(addprefix build/,$(SD_MENU)) build/sd/apps/)
-	cp sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
-	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
-	$(if $(filter android_auto,$(SD_ALL)),mkdir -p build/sd/aa && cp $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/)
+# Every app is built and copied, plus run.sh's own tools (TOOLS, showScreen).
+# cp -p keeps each file's time, so an rsync of build/sd/ to the card (size +
+# time) copies only what changed; run.sh and copie_scr.sh are written anew
+# every time (both tiny).
+sd: $(addprefix build/,$(APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
+	rm -rf build/sd && mkdir -p build/sd/bin build/sd/apps build/sd/var
+	cp -p $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	cp -p $(addprefix build/,$(SD_MENU)) build/sd/apps/
+	cp -p sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
+	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp -p $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
+	mkdir -p build/sd/aa && cp -p $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/
 	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
 	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
-	@echo "SD card layout ready in build/sd/ - copy its contents to the card root"
-	@echo "  apps (run by run.sh): $(SD_APPS)"
-	$(if $(filter runner,$(SD_APPS)),@echo "  in apps/ (the runner's menu): $(SD_MENU)")
+	@echo "SD card layout ready in build/sd/ - copy its contents to the card root:"
+	@echo "  rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ <card>/"
+	@echo "  run by run.sh: $(SD_APPS)"
+	@echo "  in apps/ (the runner's menu): $(SD_MENU)"
 	@echo "  clips: $(or $(SD_CLIPS),none)"
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
 	@du -sh build/sd | sed 's/\t.*/ on the card/; s/^/  /'

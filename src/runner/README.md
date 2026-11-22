@@ -7,10 +7,9 @@ library.
 
 - **Installing an app:** copy its binary into `apps/` on the card. That's
   all: the runner lists every ELF file there.
-- **Card:** `make sd SD_APPS=runner MENU_APPS="hello7 hello11"`. run.sh
-  starts only the runner; the MENU_APPS go into `apps/`, their clips, tools
-  and files where they always go. Default MENU_APPS: hello7 and the
-  Makefile's TESTS.
+- **Card:** `make sd` builds every app and puts all of them in `apps/`
+  (their clips, tools and files where they always go); run.sh starts only
+  the runner. Copy with rsync (README.md, "Build and run").
 - **Run:** `runner <sd_path>` (run.sh does it, timeout 24 h)
 - **Output:** `var/runner.log` (the menu, every key, every start and
   result), and per app what run.sh writes: `var/<app>_out.log` with its
@@ -44,8 +43,9 @@ library.
 ## Running an app
 
 The runner closes its screen, copies the app from `apps/` to
-`/tmp/mmi_apps/apps/` with mode 755 (FAT has no exec bit, and the card can
-be pulled while it runs, as run.sh does for `bin/`), starts it with `<sd_path>` and the
+`/tmp/mmi_apps/` with mode 755, next to run.sh's copy of `bin/` (FAT has no
+exec bit, the card can be pulled while it runs, and the apps look for the
+unit's tools next to themselves), starts it with `<sd_path>` and the
 `apps.conf` arguments, stdout + stderr into `var/<app>_out.log`, and waits.
 At the `apps.conf` timeout it sends TERM, and 15 s later KILL to the app's
 whole process group. Presses made while the app runs are dropped. Then the

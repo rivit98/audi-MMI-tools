@@ -10,14 +10,19 @@ rule: [docs/native-apps.md](docs/native-apps.md).
 
 ```sh
 make sdk                        # once: the mmi-sdk Docker image (toolchain + QNX sysroot)
-make sd                         # build + lay out build/sd/ with the default apps
-make sd SD_APPS="hello5 hello9" # only these, in this order
+make sd                         # build every app + lay out build/sd/ (all apps in apps/)
+make sd SD_APPS="hello5 hello9" # same card, but run.sh runs these in turn instead of the menu
 make test                       # host unit tests
+rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ /media/$USER/CARD/
 ```
 
-Copy the **contents** of `build/sd/` to the root of an empty FAT32 card,
-boot the MMI fully, insert the card in SD slot 1. The apps run one after
-another, each followed by a result screen; everything the run writes
+Copy the **contents** of `build/sd/` to the root of a FAT32 card. The
+rsync line copies only what changed (`make sd` keeps file times; `-rt`
+because FAT has no owners or modes, `--modify-window=1` for FAT's 2 s
+times) and leaves the card's `var/` alone. Boot the MMI fully, insert the
+card in SD slot 1: the [runner](src/runner/README.md)'s menu comes up, the
+main knob chooses an app and its press runs it. Any binary copied into
+`apps/` on the card shows up in the menu. Everything a run writes
 (logs, screenshots, recordings) comes back in `var/` on the card, so
 copying that one folder gets all of it. If the screen freezes, reboot the MMI:
 hold **MENU + rotary knob + top-right soft key**. Details:
@@ -45,7 +50,7 @@ and what doesn't). Shared code is in [src/common/](src/common/); the knob and bu
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264 or JPEG; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
-| [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/`; the main knob chooses, its press runs it as run.sh would (`make sd SD_APPS=runner MENU_APPS=...`) |
+| [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/`; the main knob chooses, its press runs it as run.sh would (run.sh starts it by default) |
 | [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens |
 
 Which apps a card gets by default, their timeouts and arguments:

@@ -14,7 +14,8 @@ board E1 (the firmware tree's `51` directory, the Makefile's `FW`).
 make sdk                         # once: mmi-sdk image (toolchain + sysroot from the firmware)
 make                             # cross-compile all apps into build/
 make test                        # host unit tests (ASan/UBSan), incl. protobuf + live-stream checks
-make sd SD_APPS="audi_stream_receiver"   # build/sd/ for the car; default list in the Makefile
+make sd                          # build/sd/ for the car: every app in apps/, run.sh starts the runner (menu)
+make sd SD_APPS="audi_stream_receiver"   # same card, run.sh runs that app instead of the menu
 make addr APP=x ADDR="0x804..."  # crash address -> function, file:line (apps are ET_EXEC, unstripped)
 make apk / apk-test / apk-install        # Android sender (android/Makefile, adb in a container)
 make aoa-host                    # desk: the PC plays the MMI for the phone app (stop host adb first)
