@@ -6,8 +6,9 @@
 #   make sd              build every app and assemble build/sd/: all apps in
 #                        apps/ with everything they need; on SD insert run.sh
 #                        starts the runner, a knob-driven menu of apps/
-#                        (src/runner/README.md). Copy it with rsync (README.md):
-#                        unchanged files keep their times, so only changes go.
+#                        (src/runner/README.md). Copy it with tools/sync_sd.sh
+#                        <card>: rsync, unchanged files keep their times, so
+#                        only changes go.
 #   make sd SD_APPS="hello hello3"
 #                        the same card, but run.sh runs those apps in turn
 #                        instead of the menu, with status screens (showScreen)
@@ -439,7 +440,7 @@ sd: $(addprefix build/,$(APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clip
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root:"
-	@echo "  rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ <card>/"
+	@echo "  tools/sync_sd.sh <card mount point>   (rsync: only changes, keeps the card's var/)"
 	@echo "  run by run.sh: $(SD_APPS)"
 	@echo "  in apps/ (the runner's menu): $(SD_MENU)"
 	@echo "  clips: $(or $(SD_CLIPS),none)"

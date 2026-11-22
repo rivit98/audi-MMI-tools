@@ -9,7 +9,7 @@ library.
   all: the runner lists every ELF file there.
 - **Card:** `make sd` builds every app and puts all of them in `apps/`
   (their clips, tools and files where they always go); run.sh starts only
-  the runner. Copy with rsync (README.md, "Build and run").
+  the runner. Copy with `tools/sync_sd.sh <card>`.
 - **Run:** `runner <sd_path>` (run.sh does it, timeout 24 h)
 - **Output:** `var/runner.log` (the menu, every key, every start and
   result), and per app what run.sh writes: `var/<app>_out.log` with its

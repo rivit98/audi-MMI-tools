@@ -13,13 +13,13 @@ make sdk                        # once: the mmi-sdk Docker image (toolchain + QN
 make sd                         # build every app + lay out build/sd/ (all apps in apps/)
 make sd SD_APPS="hello5 hello9" # same card, but run.sh runs these in turn instead of the menu
 make test                       # host unit tests
-rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ /media/$USER/CARD/
+tools/sync_sd.sh /media/$USER/CARD   # copy build/sd/ to the card
 ```
 
-Copy the **contents** of `build/sd/` to the root of a FAT32 card. The
-rsync line copies only what changed (`make sd` keeps file times; `-rt`
-because FAT has no owners or modes, `--modify-window=1` for FAT's 2 s
-times) and leaves the card's `var/` alone. Boot the MMI fully, insert the
+`tools/sync_sd.sh` copies the **contents** of `build/sd/` to the root of
+a FAT32 card with rsync: only what changed (`make sd` keeps file times),
+files gone from `build/sd/` are deleted, the card's `var/` is left alone.
+It refuses a path that isn't the root of a mounted FAT file system. Boot the MMI fully, insert the
 card in SD slot 1: the [runner](src/runner/README.md)'s menu comes up, the
 main knob chooses an app and its press runs it. Any binary copied into
 `apps/` on the card shows up in the menu. Everything a run writes

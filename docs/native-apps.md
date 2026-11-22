@@ -22,7 +22,7 @@ exercised. *unverified* = an assumption.
 ```sh
 make sdk                          # once: mmi-sdk Docker image (cross-GCC + QNX sysroot)
 make sd                           # build every app + lay out an SD card in build/sd/
-rsync -rt --modify-window=1 --delete --exclude=/var/ build/sd/ /media/$USER/CARD/
+tools/sync_sd.sh /media/$USER/CARD  # rsync build/sd/ to the card (changes only, keeps var/)
 # boot the MMI fully, insert into SD slot 1
 ```
 

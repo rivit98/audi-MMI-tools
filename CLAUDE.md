@@ -15,6 +15,7 @@ make sdk                         # once: mmi-sdk image (toolchain + sysroot from
 make                             # cross-compile all apps into build/
 make test                        # host unit tests (ASan/UBSan), incl. protobuf + live-stream checks
 make sd                          # build/sd/ for the car: every app in apps/, run.sh starts the runner (menu)
+tools/sync_sd.sh /media/$USER/CARD       # rsync build/sd/ to the mounted card (host; changes only, keeps var/)
 make sd SD_APPS="audi_stream_receiver"   # same card, run.sh runs that app instead of the menu
 make addr APP=x ADDR="0x804..."  # crash address -> function, file:line (apps are ET_EXEC, unstripped)
 make apk / apk-test / apk-install        # Android sender (android/Makefile, adb in a container)
@@ -38,7 +39,7 @@ gradle, adb or gcc.
   Put logic that doesn't touch car APIs in pure files/headers and test it here first.
 - `sd/`: `run.sh` (ksh, the on-car runner), `screens.sh`, `apps.conf` (timeout|args|title|text).
 - `android/`: the "Audi streaming" phone app (Kotlin, package `mmi3g.audistreaming`).
-- `tools/`: desk tools (`aoa_host.py`, `ch5dump.py`, Ghidra helpers).
+- `tools/`: desk tools (`aoa_host.py`, `ch5dump.py`, `sync_sd.sh`, Ghidra helpers).
 - Inputs that are not in git: the extracted firmware and openqnx source (the Makefile's `FW`,
   `FWEFS`, `OQ`), and mbedTLS + aasdk's certificate, which the Makefile fetches with pinned
   SHA-256s. Car logs and the user's working notes are kept outside git too. Never commit
