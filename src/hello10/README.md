@@ -20,11 +20,9 @@ in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 | `probe` | read only: io-media-nvidia's three capture-width words through `/proc/<pid>/as`; its `pidin arg` / `env`; its segment list (`DCMD_PROC_MAPINFO`, flags named by `mapinfo.cpp`); the width word's page mapped `MAP_SHARED` from `/mnt/efs-system/sbin/io-media-nvidia` in our own process and its `posix_mem_offset64` | Are the addresses right? How is io-media's code mapped, and is that page RAM or flash (phone-mirroring §7.14)? |
 | `cap800` | c3 (720×480) with io-media's capture width written to 800 in memory, 30 s | Does the media port capture an 800-sample line? (phone-mirroring §7.14) |
 | `seq` | c3 at 720, `cap800`, c3 at 720 again | The same, with a control before and after |
-| `sw` | c12 (800×480) decoded in **software** on the SH4: 15 s decode only (`swdec`), then 8 s on screen through each drawing path (`swcpu`, `swimage`, `swimage565`, `swyuv`, `swblit`, `swgl`, `swgl565`), each also runnable alone | How many frames a second the SH4 decodes, which drawing path gets the picture on screen, and how fast. Section "Software decoder" |
-
 | `iomcopy` | a second io-media-nvidia from RAM next to the HMI's own: an unchanged copy plays c3 (10 s), then a copy with the capture width at 800 plays it (20 s), then the original plays it (8 s). Section "io-media copy" | Can a copy run beside the original, and does the media port capture an 800-sample line (phone-mirroring §7.14)? |
 
-The default is `probe`, `sw` and then `iomcopy`, about 6 minutes. `seq`
+The default is `probe` and then `iomcopy`, about 3 minutes. `seq`
 runs by name. `iomcopy` is last: it may leave the radio or the screen
 broken until the MMI restarts.
 
@@ -53,63 +51,6 @@ How each piece works:
 fires, sound or video may stay dead until the MMI restarts (MENU + main
 knob + top-right key). hello10 says so on its first screen; the control
 runs first.
-
-## Software decoder (`sw`)
-
-The DM642 path can't show 800 wide. Decoding in software on the SH4 has no
-width limit. Decoding and getting the picture on screen are measured
-separately.
-
-**Decoding:** `common/swdec.c` over h264bsd (Android's Baseline decoder,
-Apache-2.0, fetched by the Makefile at a pinned commit). The wrapper adds
-an access unit delimiter to each frame, so every picture comes out of its
-own access unit with no frame of delay. `tests/test_swdec.cpp` checks it
-against ffmpeg, byte for byte, single and multi-slice, with cropping. It
-also checks the colour converters (`swdec_to_bgra`, `_rgba`, `_rgb565`),
-which work out the chroma terms once per two pixels.
-
-**Drawing:** CPU writes into the VFB are slow, ~9 MB/s, so a full 800×480
-BGRA picture costs ~160 ms ([docs/gpu-results.md](../../docs/gpu-results.md)
-§7). Each sub-test tries another way to the screen:
-
-| Sub-test | Path | CPU work per picture |
-|---|---|---|
-| `swdec` | decode only, no picture | decode |
-| `swcpu` | I420 → BGRA by the CPU straight into the VFB's CPU mapping, `updateVfb`: the path the text screens use | decode + 1.5 MB into the VFB |
-| `swimage` | BGRA in RAM, `gf_draw_image` copies it into the VFB | decode + convert |
-| `swimage565` | as `swimage`, RGB565 (half the bytes) | decode + convert |
-| `swyuv` | `gf_draw_image` of the decoder's planar I420 (the 2D engine converts the colour); UYVY packed by the CPU if I420 is refused | decode (+ pack) |
-| `swblit` | BGRA in RAM wrapped as a gf surface (`gf_surface_attach`), `gf_draw_blit2` into the VFB. This is how layermanagerV2 copies a RAM picture into a surface (`CImageLoader`, P1001 `0x08053ed8`). The CPU cache is written back (`msync MS_CACHE_ONLY`) before each blit | decode + convert |
-| `swgl` | GL: `glTexSubImage2D` RGBA into a 1024×512 texture, `glFinish`, a textured quad, swap. GL draws on hardware layer 7, outside the layer manager | decode + convert + upload |
-| `swgl565` | as `swgl`, an RGB565 texture (half the bytes) | decode + convert + upload |
-
-`glFinish` follows every upload: queued uploads froze the whole unit
-(gpu-results §6). An RGB565 texture has only ever been uploaded in the loop
-that froze, so `swgl565` runs last.
-
-**Did the picture get there?** Every 25th picture each screen sub-test
-reads 16 sample pixels back from the surface it drew: the VFB through its
-CPU mapping, or `glReadPixels` for GL (`readback.h`, host-tested). It
-compares them with what the decoder made, within a tolerance per format (2
-for BGRA, 12 for RGB565, 24 for colour converted by the 2D engine). After
-the timed part it saves the layer manager's state dump to
-`var/hello10/lm_<sub-test>.txt` and logs which cid layer 0 shows and cid
-40's sids. For the layer-manager paths it also saves a `d-shot` of cid 40
-(`dshot_<sub-test>.png`, ~3 s). A d-shot of a CPU-written VFB is exact; a
-d-shot of a GL displayable is noise (gpu-results §2).
-
-The log has a line every 5 s and one `RESULT sw_<sub-test>` line each:
-fps (without the read-back time), min/median/p90/max ms for decode,
-convert, draw and flip, and `readback=ok|partly|wrong|-` with the first
-wrong pixel. `swyuv`'s `format=` says which YUV format libgf took.
-
-| Seen | Meaning |
-|---|---|
-| picture on screen, `readback=ok` | the path works; its fps is what the screen gets |
-| black or old screen, `readback=ok` | the surface holds our picture but isn't what the screen shows (the d-shot and the state dump say which surface is shown) |
-| black or old screen, `readback=wrong` | the drawing call returns 0 but writes elsewhere or nothing |
-| wrong colours or stripes, `readback=wrong` only for `swyuv` | the 2D engine takes the format but reads it differently (the layout is a guess) |
-| `FAIL draw/flip failed: <code>` | libgf or GL refuses that format or size |
 
 ## io-media copy (`iomcopy`)
 
@@ -186,45 +127,21 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 - `seq` videos 1 and 3 (c3, 720×480 through the DSP): picture on screen,
   knob turns seen, io-media reports 720×480, no errors; lag median ~330 ms
   and ~540 ms.
-- `sw` decoding: 800×480 Baseline at **37.6 fps** (752 frames in 20 s),
-  decode ms min/median/p90/max 22/25/28/63, IDR ~54 ms, P ~25 ms, no errors.
-- `gf_draw_image` returns 0 for `BGRA8888` and for `PLANAR_YUV_420`; the
-  loop runs at 12.1 fps (BGRA: decode 26 + CPU convert 33 + flip 23 ms)
-  and 21.6 fps (I420: decode 26 + flip 20 ms, no convert).
 
 **Doesn't work**
 - `cap800` (video 2): the in-memory patch is refused. The three words read
   720, the first write fails with `ESRVRFAULT` ("Server fault on msg
   pass"), nothing is changed and video 2 is skipped (phone-mirroring §7.14).
-- `sw` on screen: **no decoded picture is visible**. During both drawing
-  steps the screen alternates between the previous text screen (the step's
-  instructions, left in the VFB) and the HMI's radio screen showing
-  through, about every 2–4 s, though every draw and flip returns 0.
-- **`gf_draw_image` draws nothing** [confirmed: `sw` sub-tests]. For
-  BGRA8888, RGB565 and planar I420 it returns 0 in ~2 ms, but the read-back
-  of the VFB finds every sample pixel 0 and the d-shot of cid 40 shows the
-  old text screen; on screen the text and the radio take turns. The loop's
-  fps (14.5 BGRA, 14.4 RGB565, 28.2 I420) is the loop's, not pictures seen.
-- **The pictures that show are slow** [confirmed]: `swcpu` (the CPU writes
-  BGRA into the VFB) 5.1 fps and `swblit` (`gf_draw_blit2` from a RAM
-  surface) 4.4 fps; both show the clip with the right colours, read-back
-  correct, ~155 ms of the ~200 ms per picture in the draw. The RAM surface
-  has no physical address (`posix_mem_offset` -1, 0 contiguous), so the
-  blit is a CPU copy as well [inferred].
-- **`swgl` froze the whole unit** in its first `glTexImage2D` (1024×512
-  RGBA, + `glFinish`), before anything was drawn; the HMI's screen stayed
-  frozen until a restart (gpu-results.md §6). `swgl565` and `iomcopy` never
-  ran.
 - **`probe`**: the width page is RAM shared by every io-media process, not
   flash; its physical address is still unknown (phone-mirroring §7.14).
 
 ## State
 
-Run on the car: `seq`, `probe`, and `sw` up to `swgl` (results above).
-Not yet run: `swgl` and `swgl565` in a fresh process (the GL freeze may
-come from the 2D sub-tests before it), and `iomcopy`. Open: whether GL can
-upload a decoded picture at a useful rate; whether the media port captures
-an 800-sample line (`iomcopy`'s `copy800`).
+Run on the car: `seq` and `probe` (results above). Not yet run:
+`iomcopy`. Open: whether the media port captures an 800-sample line
+(`iomcopy`'s `copy800`). Software decoding on the SH4 was tried and
+dropped: the picture reaches the screen at ~5 fps at best
+([docs/phone-mirroring.md](../../docs/phone-mirroring.md) §4).
 
 `probe` output: `maps:` lines (each width word's segment: flags, dev, ino,
 offset, what a `/proc` write there does; the same for hello10's own code,

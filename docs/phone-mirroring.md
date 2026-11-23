@@ -255,7 +255,7 @@ screen's shape) with the letterbox inside it (§7.12).
 |---|---|
 | Raw pixels (dirty tiles + LZ4, or DXT1 tiles) drawn with GL | GL upload ~50 MB/s with one upload in flight, so busy content (scrolling, maps) drops to ~15 fps; H.264 gives 25 fps at a fixed bandwidth with the SH4 mostly idle |
 | Talking to the DSP driver directly (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) | Reverse engineering a private NVIDIA protocol with no symbols; only worth it to cut io-media's ~0.5 s lag |
-| Software H.264 on the SH4 | Decoding keeps up (800×480 Baseline: ~38 fps decode only, ~25 ms per P frame, ~54 ms per IDR, h264bsd **[confirmed]**, hello10 `sw`), but no fast way onto the screen is known: through `gf_draw_image` 12 fps (BGRA, CPU colour convert ~33 ms) or 22 fps (planar I420), and neither picture was visible (src/hello10/README.md). H.264 through the DSP costs ~10% CPU |
+| Software H.264 on the SH4 | Decoding keeps up: 800×480 Baseline at ~38 fps decode only, ~25 ms per P frame, ~54 ms per IDR (h264bsd) **[confirmed]**. Getting the picture on screen doesn't: CPU writes into the VFB and `gf_draw_blit2` from a RAM surface show it at ~5 fps (~155 ms of ~200 ms per picture in the draw) **[confirmed]**; `gf_draw_image` (BGRA, RGB565, planar I420) returns 0 and draws nothing **[confirmed]**; the first GL texture upload after those tests froze the whole unit (gpu-results.md §6). The test and the decoder were removed from the repo. H.264 through the DSP costs ~10% CPU |
 | scrcpy over adb (the MMI as adb host) | Needs USB debugging always on, and its video still needs the DSP path |
 | Android Auto receiver on the MMI | Works up to the video, which is 800 wide and can't be shown (android-auto.md §4.1); the phone relay (§1) replaces it |
 

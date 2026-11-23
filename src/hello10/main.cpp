@@ -25,16 +25,11 @@
 // The driver turns the knob once when the moving picture appears and films
 // the screen (the bands are only on video).
 //
-// sw      software decoding (soft.h, common/swdec.c over h264bsd) of c12,
-//          800x480: decode only for 15 s, then on screen for 8 s through
-//          each drawing path, one sub-test each: swdec, swcpu, swimage,
-//          swimage565, swyuv, swblit, swgl, swgl565 (also runnable alone)
-//
 // iomcopy (last in the default run): a second io-media-nvidia from RAM next
 // to the HMI's (iomcopy.h): an unchanged copy plays c3, then one with the
 // capture width at 800 plays it, then the original plays it again.
 //
-// The default run is probe, sw, then iomcopy. seq (by name): three plays in a row. (1) c3, 720x480, as the unit
+// The default run is probe, then iomcopy. seq (by name): three plays in a row. (1) c3, 720x480, as the unit
 // plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
 // MP4) played, width put back. (3) c3 again. The crop tests above are answered
 // and run only by name.
@@ -56,7 +51,7 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the system log after the tests).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: probe,sw,iomcopy)
+// usage: hello10 <sd_path> [test,test,...]   (default: probe,iomcopy)
 #include "types.h"
 
 extern "C" {
@@ -73,7 +68,6 @@ extern "C" {
 #include "h264.h"
 #include "hw_stream.h"
 #include "player.h"
-#include "soft.h"
 #include "ui.h"
 #include "vout.h"
 
@@ -94,7 +88,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 720;    // the default run is ~6 min
+constexpr unsigned kWatchdogS = 720;    // the default run is ~3 min
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -106,7 +100,7 @@ constexpr const char *kLivePath = "/dev/hello10/live.mp4";
 constexpr const char *kRawClip = "c12_h264_800.h264";
 constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
 
-enum class Kind { File, Live, Probe, Patched, Sequence, Soft, Copy };
+enum class Kind { File, Live, Probe, Patched, Sequence, Copy };
 
 struct Test {
 	const char *name;
@@ -148,26 +142,6 @@ const std::vector<Test> kTests = {
 	{"seq", "Normal, 800 wide, normal (about 1 min)",
 	 "Three videos in a row. Turn the main knob ONE click whenever the moving picture appears.",
 	 Kind::Sequence, nullptr, 0, 0, 0, 0},
-	// Soft: clip = the sub-tests (soft.h), in order
-	{"sw", "Software decoder, 800x480 (about 3 min)",
-	 "The MMI decodes an 800x480 video itself, without the video chip: first without a "
-	 "picture, then on the screen seven times, drawn a different way each time. Film the "
-	 "screen; nothing else to do.",
-	 Kind::Soft, "dec,cpu,image,image565,yuv,blit,gl,gl565", 0, 0, 0, 0},
-	{"swdec", "Software decoder: decoding only", "15 s, nothing on the screen.", Kind::Soft,
-	 "dec", 0, 0, 0, 0},
-	{"swcpu", "Software decoder: drawn by the processor", "Film the screen.", Kind::Soft,
-	 "cpu", 0, 0, 0, 0},
-	{"swimage", "Software decoder: draw image", "Film the screen.", Kind::Soft, "image", 0, 0,
-	 0, 0},
-	{"swimage565", "Software decoder: draw image, 16-bit", "Film the screen.", Kind::Soft,
-	 "image565", 0, 0, 0, 0},
-	{"swyuv", "Software decoder: colour by the graphics chip", "Film the screen.", Kind::Soft,
-	 "yuv", 0, 0, 0, 0},
-	{"swblit", "Software decoder: blit", "Film the screen.", Kind::Soft, "blit", 0, 0, 0, 0},
-	{"swgl", "Software decoder: OpenGL", "Film the screen.", Kind::Soft, "gl", 0, 0, 0, 0},
-	{"swgl565", "Software decoder: OpenGL, 16-bit", "Film the screen.", Kind::Soft, "gl565", 0,
-	 0, 0, 0},
 	// last in the default run: it may take the radio or the screen until a restart
 	{"iomcopy", "A second io-media (about 2 min)",
 	 "A copy of the MMI's media service starts next to the original, plays a video, then a "
@@ -832,7 +806,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 	char title[96];
 	std::snprintf(title, sizeof(title), "Test %d/%d: %s", n, total, t.title);
 	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title,
-	        t.kind == Kind::Live || t.kind == Kind::Soft ? kRawClip : (t.clip ? t.clip : "no clip"));
+	        t.kind == Kind::Live ? kRawClip : (t.clip ? t.clip : "no clip"));
 	if (t.kind == Kind::Sequence)
 		return run_sequence(t);
 	if (t.kind == Kind::Copy) {
@@ -848,17 +822,12 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 		summary.push_back(std::string(t.name) + ": clip missing");
 		return true;
 	}
-	if ((t.kind == Kind::Live || t.kind == Kind::Soft) && clip == nullptr) {
+	if (t.kind == Kind::Live && clip == nullptr) {
 		log_msg("FAIL %s: %s", t.name, clip_err.c_str());
 		summary.push_back(std::string(t.name) + ": " + clip_err);
 		return true;
 	}
 
-	if (t.kind == Kind::Soft) {   // a screen before each sub-test, no knob
-		std::string dir = out_path("");
-		dir.pop_back();
-		return soft::run(clip->data.data(), clip->frames, t.clip, dir, summary);
-	}
 	ui::show(title, std::string(t.what) + kSeen, kFooter);
 	if (sleep_quit(kLabelMs))
 		return false;
@@ -877,7 +846,7 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)   // the default run
-		return t.kind == Kind::Probe || t.kind == Kind::Copy || std::strcmp(t.name, "sw") == 0;
+		return t.kind == Kind::Probe || t.kind == Kind::Copy;
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }
@@ -924,7 +893,7 @@ int main(int argc, char *argv[])
 	for (const Test &t : kTests)
 		if (selected(only, t)) {
 			run.push_back(&t);
-			live = live || t.kind == Kind::Live || t.kind == Kind::Soft;
+			live = live || t.kind == Kind::Live;
 		}
 
 	Clip clip;
@@ -947,7 +916,7 @@ int main(int argc, char *argv[])
 	              "moving test picture.\n\nIf the radio or the screen stops working afterwards, "
 	              "restart the MMI (MENU + main knob + top-right key).",
 	              run.size());
-	ui::show("hello10: capture width, software decoder", intro, kFooter);
+	ui::show("hello10: capture width", intro, kFooter);
 	if (!sleep_quit(kIntroMs)) {
 		int n = 0;
 		for (const Test *t : run)

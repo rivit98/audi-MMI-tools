@@ -50,13 +50,6 @@ AA_CERT_SHA := 85b5043a09b1ba9464f745e6917bdbaa2bc582fe48cb727a7787c1a832a773e4 
 # (tests/check_aa_proto.py checks our hand-written protobuf against them).
 AA_PROTO     := third_party/aasdk-proto
 AA_PROTO_SHA := 095c1088225c88032b1b29a415df13a0b12a87bf80e07747d872aaa4151501f4
-# h264bsd (Apache-2.0): Android's software H.264 Baseline decoder, as a
-# standalone library (oneam/h264bsd). hello10's sw test, via common/swdec.c.
-H264BSD_REV := 42bcb5d753ad86d84903354bf3c68423c28adb7b
-H264BSD     := third_party/h264bsd
-H264BSD_SHA := fae8563cc3d7980d23facbd781daa4dec737e8a78785967c4f9f5ffcaf922d32
-SWDEC        = $(call common,swdec)
-SWDEC_INC   := -I$(H264BSD)/src
 # mbedTLS for an app: its headers + our config (src/common/mbedtls/)
 MBEDTLS_INC := -Isrc/common/mbedtls -I$(MBEDTLS)/include '-DMBEDTLS_CONFIG_FILE="mbedtls_config.h"'
 AA_INC      := -Isrc/android_auto $(MBEDTLS_INC)
@@ -160,8 +153,7 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # the card.
 #
 # hello10 (docs/phone-mirroring.md 7.14): the capture-width probe (read only)
-# and the software decoder's drawing paths (src/hello10/README.md). The
-# capture tests run by name. It puts ~6 MB of test videos on the card.
+# and a second io-media (src/hello10/README.md). The capture tests run by name. It puts ~6 MB of test videos on the card.
 #
 # hello11 (src/hello11/README.md): read only. Which ch4 telegrams, BAP
 # functions, ch5 records and slog lines change with the light switch, the
@@ -242,13 +234,10 @@ LIBS_hello9 := -lgf
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
 # hello10: C++. 800x480 cropped to 720 in the SPS (h264::crop_sps), pushed
-# through LIVE's HwStream like hello9's live tests. Its sw test decodes in
-# software (SWDEC: common/swdec.c over h264bsd, built as a library) and draws
-# the picture every way we have: CPU, gf 2D (draw image, blit) and GL.
-build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE) \
-    $(GL) $(SWDEC) build/h264bsd-sh4/libh264bsd.a
-LIBS_hello10 := build/h264bsd-sh4/libh264bsd.a -lGLES_CM -lgf
-CXXFLAGS_hello10 := -Wno-ignored-attributes $(SWDEC_INC)
+# through LIVE's HwStream like hello9's live tests.
+build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE)
+LIBS_hello10 := -lgf
+CXXFLAGS_hello10 := -Wno-ignored-attributes
 # hello11: C++. Read only: ch4's telegrams (CAMERA's ch4 reader), ch5's records
 # and the slog's brightness lines (sources.cpp, pure), ndr's reverse flag and
 # the camera's state, against steps the driver goes through (watch.cpp,
@@ -318,23 +307,6 @@ $(AA_CERT)/.done:
 	done
 	cd $(AA_CERT) && printf '$(AA_CERT_SHA)\n' | sha256sum -c -
 	touch $@
-
-$(H264BSD)/.done:
-	rm -rf $(H264BSD) && mkdir -p $(H264BSD)
-	curl -fsSL -o third_party/h264bsd.tar.gz.part https://github.com/oneam/h264bsd/archive/$(H264BSD_REV).tar.gz
-	echo "$(H264BSD_SHA)  third_party/h264bsd.tar.gz.part" | sha256sum -c -
-	tar -xzf third_party/h264bsd.tar.gz.part -C $(H264BSD) --strip-components=1 \
-	    h264bsd-$(H264BSD_REV)/src h264bsd-$(H264BSD_REV)/LICENSE.md
-	rm third_party/h264bsd.tar.gz.part
-	touch $@
-# The decoder library, one build per target. Third-party code: -w.
-H264BSD_BUILD = rm -rf $(@D) && mkdir -p $(@D) && $(RUN) sh -c 'cd $(@D) && \
-    ls /src/$(H264BSD)/src/*.c | xargs -P8 -n1 $(1) -O2 -g -w -c && $(2) rcs $(@F) *.o && rm *.o'
-build/h264bsd-sh4/libh264bsd.a: $(H264BSD)/.done
-	$(call H264BSD_BUILD,shle-nto-gcc,sh4-linux-gnu-ar)
-build/h264bsd-host/libh264bsd.a: $(H264BSD)/.done
-	$(call H264BSD_BUILD,gcc,ar)
-
 $(AA_PROTO)/.done:
 	rm -rf $(AA_PROTO) && mkdir -p $(AA_PROTO)
 	curl -fsSL -o third_party/aasdk.tar.gz.part https://codeload.github.com/opencardev/aasdk/tar.gz/$(AASDK_REV)
@@ -446,7 +418,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -466,8 +438,6 @@ test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
 	$(RUN) bash tools/check_types.sh
 	rm -rf build/test_live.d && mkdir -p build/test_live.d
 	$(MEDIA_RUN) python3 -I tests/check_live.py prepare build/test_live.d
-	rm -rf build/test_swdec.d && mkdir -p build/test_swdec.d
-	$(MEDIA_RUN) bash tests/swdec_clips.sh build/test_swdec.d
 	rm -rf build/test_aa_proto.d && mkdir -p build/test_aa_proto.d/hu
 	$(AA_PROTO_RUN) prepare build/test_aa_proto.d $(AA_PROTO)
 	@for t in $(TESTBIN); do $(RUN) ./$$t || exit 1; done
@@ -489,15 +459,6 @@ build/test_png:    tests/test_png.c tests/check.h src/common/img.c src/common/im
                    src/common/stb_image_write.h src/common/text.c
 # screen.c's full / changed-span VFB copy
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
-# common/swdec.c (h264bsd) against ffmpeg's decode of the same clips
-# (tests/swdec_clips.sh, in the mmi-media image, before the tests run)
-# + hello10's screen read-back check (src/hello10/readback.h)
-build/test_swdec: tests/test_swdec.cpp tests/check.h $(SWDEC) $(call commonxx,h264) \
-    src/hello10/readback.h build/h264bsd-host/libh264bsd.a
-	mkdir -p build
-	$(RUN) g++ -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common -Isrc/hello10 $(SWDEC_INC) \
-	    -o $@ -x c src/common/swdec.c -x none tests/test_swdec.cpp src/common/h264.cpp \
-	    build/h264bsd-host/libh264bsd.a
 # the layer manager's state dump (common/lmstate.c), lmprobe logs it
 build/test_lmstate: tests/test_lmstate.c tests/check.h src/common/lmstate.c src/common/lmstate.h
 # hello5's ping train and WAV header
@@ -579,7 +540,7 @@ build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -Isrc/common/camera -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_swdec build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
