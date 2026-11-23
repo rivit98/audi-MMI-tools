@@ -92,6 +92,14 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - H.264: 720×432, sharp text, 22–25 fps, lag ~500 ms (~1.1 s on a session's
   first stream), MMI CPU ~30 % (receiver 6–9 %).
 - Rear camera takes the screen and the stream comes back after it.
+- The H.264-only phone app (no JPEG fallback): a 2-minute stream with no
+  refused or bad frames, lag ~300 ms (240–400 ms per 10 s window).
+- io-media catch-up: at a stream's start io-media was 19 frames behind;
+  the frames in between were dropped, an IDR asked for, and the stream
+  played on. A frame over 64 KB raised the frame size to 128 KB with one
+  restart, as designed.
+- Slog markers (`audi_stream_receiver: t=<ms> ms ...`) show in the
+  periodic slog snapshots.
 
 **Doesn't work / known**
 - Landscape only for H.264 (portrait shows a "turn the phone" card).
@@ -101,4 +109,5 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - 256 KB frames made io-media fall behind and fail ~45 s in: hence the 128 KB cap.
 
 **Built, not yet confirmed on the car**
-- Slog markers, restart after an io-media error, io-media catch-up.
+- Restart after an io-media error (none happened); a stream longer than a
+  few minutes with the 128 KB cap.

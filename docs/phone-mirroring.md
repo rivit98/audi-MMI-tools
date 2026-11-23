@@ -1159,18 +1159,25 @@ How to get the patches onto a running unit (efs-system stays untouched):
   only on SMP; it writes a trap instruction, not our bytes. Programs map
   their code `MAP_SHARED`, one copy for every process running the file
   (MMI3GApplication's text: flags `0x571` = SHARED FIXED ELF NOSYNCFILE
-  r-x [confirmed]). hello10's `probe` logs io-media's own flags and the
-  physical address of the width word's page (`capture::maps`,
-  `capture::phys`) [built, not yet run]: if that page is RAM, mapping it
-  with `mmap_device_memory` would patch it for io-media (and every later
-  start until a reboot); if it is flash, no in-place patch exists.
+  r-x [confirmed]). io-media's width words sit in its text segment,
+  mapped `0x01000571` = SHARED FIXED ELF NOSYNCFILE **SYSRAM** r-x: the
+  code was loaded into RAM, not run in place from flash, and every process
+  of that file shares the page [confirmed: hello10 `probe`, the same for
+  hello10's own code]. All three words read 720 and every load
+  instruction that uses one points at it [confirmed]. Patching the page in
+  place would need its physical address for `mmap_device_memory`:
+  `posix_mem_offset64` on our own mapping of the file returns the file
+  offset (`0x14a190`) with no fd, not a physical address [confirmed], so
+  that address is still unknown. io-media runs as
+  `/sbin/io-media-nvidia -c /etc/iom.cfg` with the environment below
+  [confirmed: `pidin arg` / `env`].
 
   **A patched copy instead** (static check, not tried): srv-starter starts
   io-media as `/sbin/io-media-nvidia -c /etc/iom.cfg` (process 21, a
   symlink to `/mnt/efs-system/sbin`), priority 10, partition `System`,
   environment `NV_DEMUX=6 NV_MEDIAVIDEO=1 NV_ENABLE_DYNAMIC_PRIORITIES=1
-  NV_AVSYNC=7 NV_MEDIAAUDIO=6` (`NMSDK_DSP_PD=1` is defined but not listed
-  for it; hello10 `probe` saves the real `pidin arg` / `env`). It has
+  NV_AVSYNC=7 NV_MEDIAAUDIO=6`, `NV_DISPLAY_PRIORITY=15
+  NV_COMPOSITOR_PRIORITY=15` among the rest [confirmed: `pidin env`]. It has
   `OnTerminate IGNORE_ALL`, `MaxProcessRestarts 0`: nothing restarts it,
   so a copy can take `/dev/io-media` after the original is slain, and
   nothing brings the original back but us or a reboot. io-display and

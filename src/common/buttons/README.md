@@ -155,10 +155,11 @@ Logged on ch8 while the volume was changed [confirmed: the messages]:
 .. 01 02 03 01 00 00 00 00 00 12 00 0f 11    roller 12, -1
 ```
 
-Roller `12` is most likely the wheel's volume roller, and `+1` louder
-[inferred]. In another run the wheel steps of hello7's guide got no ch8
-message at all [confirmed]; why is open (ignition, or the wheel not used).
-hello7's guide asks for both directions to settle it.
+Roller `12` is the steering wheel's volume roller: one message per click,
+`+1` (nibble `1`) rolled up, `-1` (nibble `F`) rolled down, each followed by
+the code-`00` release [confirmed: hello7's guided steps, 3 clicks each
+way]. In an earlier run the wheel steps got no ch8 message at all; that
+run's wheel was probably not used.
 
 ### Touch pad: byte 14 = `02`
 
@@ -208,6 +209,32 @@ then `3D`/`3E` pairs as it crosses preset zones (KEY6, KEY4, KEY2, KEY1,
 ...), then `CB`. A main-knob press or a soft key changes the HMI's screen,
 and ~0.6 s later the pad answers `C4 00` and `C4 06` / `C4 09`: the HMI
 switched the mode off and to the new screen's [inferred].
+
+**What each mode reports** [confirmed: hello7 wrote each mode itself, then
+a line, the letter A and a tap were drawn]:
+
+| Mode | Answer | What the pad sends |
+|---|---|---|
+| 6 | `C4 06` | the 9 direction keys (`30`/`31`, `3D`/`3E` with `50`–`58`), relative motion `C6`, tap `D3` |
+| 9 | `C4 09` | the six preset keys KEY1–KEY6 (`30`/`31`, `3D`/`3E`), nothing else |
+| 10 | none | not taken: the pad stays in its mode |
+| 11, 12, 13 | `C4 0B`..`0D` | absolute positions `C5` while the finger moves, a recognised character `C7` after it lifts, tap `D3` |
+| 16 | none | not taken: the pad stays in its mode |
+| 17, 18 | `C4 11` / `C4 12` | the direction keys and the 2D slider `48` (axes 3 and 4), tap `D3` |
+
+- Before each new mode the pad first answers `C4 00`.
+- With no mode set by an app, a tap and a double tap give the same
+  messages (`CA`, `30`/`31`, `CB`; no `D3`), and a line gives `3D`/`3E`.
+- The HMI's map screen sets `0`, then `18`, then the language (`C2
+  "pl_PL"`) [confirmed]. So 18 is the map's mode, 9 the radio's (presets,
+  earlier runs) [inferred]. A mode an app set stays until the HMI sets
+  another: on the radio screen after hello7's mode 18 the pad kept sending
+  sliders.
+- `C7`'s data is not plain text after its first byte: for a drawn "A" the
+  first text bytes were `5`, `4`, `c` and `3` in the different modes, with
+  more bytes behind them that are not letters (`1e 0f 00 00 20 5f 2d ..`).
+  Probably several candidates in a fixed layout, or cut short by the
+  message length [inferred]; the layout is open.
 
 
 

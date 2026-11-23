@@ -199,24 +199,32 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 - `sw` on screen: **no decoded picture is visible**. During both drawing
   steps the screen alternates between the previous text screen (the step's
   instructions, left in the VFB) and the HMI's radio screen showing
-  through, about every 2–4 s, though every draw and flip returns 0. So the
-  2D engine's writes don't reach the surface the layer manager shows, or
-  arrive transparent (cid 40 is a "Transparent" displayable,
-  platform-notes §3.1) [inferred, cause not known]. The fps figures above
-  are the loop's, not frames seen.
+  through, about every 2–4 s, though every draw and flip returns 0.
+- **`gf_draw_image` draws nothing** [confirmed: `sw` sub-tests]. For
+  BGRA8888, RGB565 and planar I420 it returns 0 in ~2 ms, but the read-back
+  of the VFB finds every sample pixel 0 and the d-shot of cid 40 shows the
+  old text screen; on screen the text and the radio take turns. The loop's
+  fps (14.5 BGRA, 14.4 RGB565, 28.2 I420) is the loop's, not pictures seen.
+- **The pictures that show are slow** [confirmed]: `swcpu` (the CPU writes
+  BGRA into the VFB) 5.1 fps and `swblit` (`gf_draw_blit2` from a RAM
+  surface) 4.4 fps; both show the clip with the right colours, read-back
+  correct, ~155 ms of the ~200 ms per picture in the draw. The RAM surface
+  has no physical address (`posix_mem_offset` -1, 0 contiguous), so the
+  blit is a CPU copy as well [inferred].
+- **`swgl` froze the whole unit** in its first `glTexImage2D` (1024×512
+  RGBA, + `glFinish`), before anything was drawn; the HMI's screen stayed
+  frozen until a restart (gpu-results.md §6). `swgl565` and `iomcopy` never
+  ran.
+- **`probe`**: the width page is RAM shared by every io-media process, not
+  flash; its physical address is still unknown (phone-mirroring §7.14).
 
 ## State
 
-Run on the car (`seq` + `sw` with `gf_draw_image` only). The extended `probe`
-(mappings, physical address, io-media's arguments and environment) is built
-and host-tested (`tests/test_hello10_mapinfo.cpp`), not yet run on the car.
-The `sw` sub-tests (CPU, draw image BGRA/RGB565/YUV, blit, GL RGBA/RGB565,
-each with read-back, state dump and d-shot) are built and host-tested, not
-yet run on the car. `iomcopy` is built, its config and patch host-tested and
-checked against the unit's files, not yet run on the car. Open: which drawing path shows the picture, and why
-`gf_draw_image` output stays invisible; the capture-width probe needs a
-patched io-media copy (or a RAM page patch, if `probe` finds one) instead of
-the `/proc` write.
+Run on the car: `seq`, `probe`, and `sw` up to `swgl` (results above).
+Not yet run: `swgl` and `swgl565` in a fresh process (the GL freeze may
+come from the 2D sub-tests before it), and `iomcopy`. Open: whether GL can
+upload a decoded picture at a useful rate; whether the media port captures
+an 800-sample line (`iomcopy`'s `copy800`).
 
 `probe` output: `maps:` lines (each width word's segment: flags, dev, ino,
 offset, what a `/proc` write there does; the same for hello10's own code,

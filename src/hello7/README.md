@@ -72,15 +72,18 @@ no known control explains shows as `unknown b<byte> 0x<bits>`.
   ([src/common/buttons/README.md](../common/buttons/README.md) table).
 - The touch pad's radio-screen stroke decodes: `CA` down at x, y, `3D`/`3E`
   over the preset keys, `CB` up.
+- The guided run (19 of 19 steps answered): the wheel's volume roller is
+  roller `12`, `+1` up and `-1` down; the pad's modes 6, 9, 11, 12, 13, 17
+  and 18 each report differently, 10 and 16 are not taken; the HMI's map
+  screen sets mode 18 (table in the buttons README).
 
 **Doesn't work / open**
 - The HMI still acts on every input.
 - Joystick (main knob tilt): nothing on ch8; this car has none.
-- The steering wheel steps of the earlier guide got no ch8 message, while
-  other runs logged roller `12` messages on ch8. The new wheel steps say
-  which.
-- The new guide (wheel + touch pad, pad mode writes) is built and
-  host-tested, not yet run on the car.
+- `C7` (recognised character) is printed wrongly: its data is not plain
+  UTF-8 after the first byte (layout open, buttons README).
+- After the run the pad stays in the last mode hello7 set until the HMI
+  sets another.
 - `keys.c` names only the old eight panel controls; the full table is in
   [src/common/buttons](../common/buttons/README.md).
 - This car's volume knob sometimes reports both directions in one turn (hardware fault).

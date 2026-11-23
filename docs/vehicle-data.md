@@ -295,8 +295,15 @@ not from a light sensor or the clock:
    setting (`Context#setSetupDayNightView`) then calls `setDayView()` or
    `setNightView()`, and MMI3GNavigation logs `updateDayNightView(%d)`
    [inferred: `lsd.jxe` strings; the bytecode is not decompiled].
-3. That the byte is 1 with the headlights on (terminal 58) is
-   [unverified]. hello11 checks it on the car.
+3. What the byte does on the car [confirmed: hello11, `ch4.txt`]: the
+   function is sent only when it changes. With the headlights switched on
+   it became `51` (second byte `64`), then `52`, and `00` within ~1 s of
+   switching them off; earlier, outside the steps, it went `44`, `45`,
+   `00` and `46` … `49` (one step every ~1.6 s), `00`. So non-zero while
+   the lights are on, with a counter or level in its low bits
+   [inferred]. One "lights on" step showed no change at all, so it is not
+   settled; daytime running lights and the light sensor (AUTO) were not
+   tested. Nothing else on ch4 or ch5 changed with the lights.
 
 The display's own dimming is a separate attribute, `Brightness` (slot
 `0x2c`). None of the `DA 01` handlers sets it (dispatch `0x83c5414`:

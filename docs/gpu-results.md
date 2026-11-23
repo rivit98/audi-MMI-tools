@@ -272,12 +272,16 @@ fired, the next app never started), two cases:
 |---|---|
 | `glTexImage2D(GL_RGB 565, 1024x512)` from a zero buffer, then a ~400 ms loop of `glTexSubImage2D` 800x480 RGB565 (768 KB each) with **no `glFinish`** at all | froze in the loop |
 | a timed loop of `glTexSubImage2D` 800×480 RGBA (1.5 MB) on the same texture, with a `glFinish` only after **every 4th** call | froze in the loop; the same upload alone with `glFinish` had passed just before |
+| the **first** `glTexImage2D(GL_RGBA, 1024x512)` from a zero buffer + `glFinish`, in a process that had just run five gf 2D tests (CPU writes, `gf_draw_image`, `gf_draw_blit2`, each with its own displayable 40 register / unregister and `gf_dev_attach`) | froze in that call: the log stops at it, nothing GL drew ever showed, the HMI's clock on screen stopped [confirmed: hello10 `sw`, video]. The same call passed in hello6, as the first GL work of a process |
 
 Not video memory: `ShowVideoMemory` reported 123.7 of 134 MB free just
 before. Everything that was followed by a `glFinish` on its own passed.
 
 **[hypothesis]** The driver (or GPU) hangs when a texture upload is queued
-while an earlier one, to the same texture, is still in flight. The
+while an earlier one, to the same texture, is still in flight. The third
+case has no queue: it points at state the 2D tests left behind in the
+driver (or the GPU), not only at queued uploads [inferred; GL alone in a
+fresh process would tell]. The
 alternative is a hang once the queued client data passes some
 staging-buffer size. A whole-system freeze fits `devg-NVMiniRM`'s thread 2,
 which runs at **priority 21 FIFO**, spinning on a wedged GPU: everything at
