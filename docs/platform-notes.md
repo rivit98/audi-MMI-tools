@@ -405,6 +405,9 @@ restores the radio on release. hello5 step `d` does exactly this, with a
 control of pings on `navi` without the focus. **[inferred: built, not yet
 run on the car]**
 
+Live audio through the DSP's SBC decoder and the Bluetooth music path:
+[bt-audio-path.md](bt-audio-path.md).
+
 ### Why the graph volume does nothing
 
 io-media-nvidia, P1001 efs-system, IDA. The `mixer:` output plugin's ops

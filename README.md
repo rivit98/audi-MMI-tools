@@ -94,6 +94,7 @@ What is built but not yet confirmed is listed in each app's README and in
 | [phone-mirroring.md](docs/phone-mirroring.md) | video decoder, display path, streaming options and results |
 | [android-auto.md](docs/android-auto.md) | what an Android Auto receiver would need |
 | [rear-camera.md](docs/rear-camera.md) | how the HMI shows the rear camera; what apps must not do |
+| [bt-audio-path.md](docs/bt-audio-path.md) | how Bluetooth music reaches the speakers (BT stack, `/dev/wms`, io-media's `a2dp_player`); feeding that path from an app |
 | [hbdsi.md](docs/hbdsi.md) | how the unit's processes call each other's services (servicebroker, HBDSI messages, SGAudioManagement) |
 | [vehicle-data.md](docs/vehicle-data.md) | what the unit reads from the car's buses |
 | [map-and-cluster.md](docs/map-and-cluster.md) | how the navigation map is drawn; how the cluster display is fed (DDP2, KOMO) |
