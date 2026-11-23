@@ -3,6 +3,8 @@
  * ends, what it records, signatures and duplicates. Messages as logged on
  * the car (src/common/buttons/README.md).
  */
+#include <string.h>
+
 #include "check.h"
 #include "types.h"
 #include "guide.h"
@@ -114,6 +116,21 @@ int main(void)
 	guide_signature(&g.res[1], sig, sizeof(sig));
 	CHECK_STR(sig, "wheel 12 -2");
 	CHECK_EQ(guide_same_as(&g, 1), -1);   /* same roller, but 0 also got a knob turn */
+	{
+		/* the car's answer: the roller alone, 3 up then 3 down - not the same */
+		static struct guide h;
+		memset(&h, 0, sizeof(h));
+		h.cur = 2;
+		h.res[0].seen = h.res[1].seen = 1;
+		h.res[0].mode = h.res[1].mode = -1;
+		h.res[0].nwheel = h.res[1].nwheel = 1;
+		h.res[0].wheel_code[0] = h.res[1].wheel_code[0] = 0x12;
+		h.res[0].wheel_sum[0] = 3;
+		h.res[1].wheel_sum[0] = -3;
+		CHECK_EQ(guide_same_as(&h, 1), -1);
+		h.res[1].wheel_sum[0] = 2;           /* the same way, fewer clicks */
+		CHECK_EQ(guide_same_as(&h, 1), 0);
+	}
 
 	/* the pad prompts: a recMode echo after a button doesn't count, a
 	 * stroke does; the finger-down position is kept */

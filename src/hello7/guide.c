@@ -257,7 +257,8 @@ void guide_press_list(const struct guide_result *r, char *buf, int size)
 }
 
 /* Same bytes, bits, wheel codes and pad subfunctions; knobs compare by
- * which bytes turned, not how far; the echoed mode doesn't count. */
+ * which bytes turned, not how far; rollers by code and direction (up and
+ * down are different answers); the echoed mode doesn't count. */
 static int same(const struct guide_result *a, const struct guide_result *b)
 {
 	int i;
@@ -271,7 +272,9 @@ static int same(const struct guide_result *a, const struct guide_result *b)
 	if (a->nwheel != b->nwheel)
 		return 0;
 	for (i = 0; i < a->nwheel; i++)
-		if (a->wheel_code[i] != b->wheel_code[i])
+		if (a->wheel_code[i] != b->wheel_code[i] ||
+		    (a->wheel_sum[i] > 0) != (b->wheel_sum[i] > 0) ||
+		    (a->wheel_sum[i] < 0) != (b->wheel_sum[i] < 0))
 			return 0;
 	return 1;
 }
