@@ -15,16 +15,16 @@ channel or device. Written in C++ ([docs/cpp-apps.md](../../docs/cpp-apps.md)).
 
 | Source | What it gives | Expected signal |
 |---|---|---|
-| `/dev/ipc/ch4` | the IOC's telegrams to MMI3GApplication's MOST subsystem: every function block's payload and every BAP function (`ipc4.h`, vehicle-data.md §5.1) | lights: `DA01.0C0D` first byte; camera: `BAP 0B.17` (`ff 01` request, `xx 00` end, rear-camera.md §3.1) |
+| `/dev/ipc/ch4` | the IOC's telegrams to MMI3GApplication's MOST subsystem, from the camera library's reader (`camera::subscribe_ch4`, `ipc4.h`, vehicle-data.md §5.1): every function block's payload and every BAP function | lights: `DA01.0C0D` first byte; camera: `BAP 0B.1A` (rear-camera.md §3.3) |
 | `/dev/ipc/ch5` | the vehicle-signal records by tag and subtag (`sources.h`, vehicle-data.md §3); gyro, accelerometer and clock left out | light sensor: maybe `ch5 09.xx RainSens` |
 | `/dev/ndr/name/sensor/ReverseGear` | ndr's reverse flag, from ch5 (vehicle-data.md §4) | reverse gear |
 | `/dev/slog` | dev-videoctrl's lines (`common/camera`); lines about brightness, dimming, day / night (`sources.h`), keyed with their numbers as `#` | the HMI shows the camera: ground truth; the display dims |
 
 **Channel safety.** MMI3GApplication reads ch4 too, ndr reads ch5. dev-ipc gives every reader
 its own copy ([vehicle-data.md §2.2](../../docs/vehicle-data.md)), so our
-reads take nothing from them, as long as we keep reading (both threads do nothing else). As a guard, each
+reads take nothing from them, as long as we keep reading (the threads do nothing else). As a guard, each
 telegram has a running counter: more than one gap in five telegrams stops ch4
-reading for the rest of the run (`ch4: STOP` in the log).
+reading for the rest of the run (`camera: ch4 STOP` in the log).
 
 ## Steps
 
@@ -54,8 +54,8 @@ shows the camera (never hide the camera) and comes back after it.
 **The answer** is the summary (last screen and `hello11.log`): per kind, the
 keys that changed in **every** step of that kind and in **no** quiet step,
 with their first change. "lights on: DA01.0C0D/C" with `[00 ..] -> [01 ..]`
-would confirm §5.2; "reverse: BAP 0B.17" that the camera request can be read
-natively. A key under "sensor covered" that is not under "lights on" follows
+would confirm §5.2; "reverse: BAP 0B.1A" that the camera's session can be
+read natively. A key under "sensor covered" that is not under "lights on" follows
 the sensor, not the headlights: the darkness signal.
 
 ## Output
@@ -71,6 +71,20 @@ the sensor, not the headlights: the darkness signal.
 
 ## State
 
-Built and host-tested (`tests/test_hello11.cpp`; the ch4 parser also decodes
-the system dump's ch4 capture with no gaps and no skipped bytes). Not yet run
-on the car.
+Run on the car once [confirmed]:
+
+- **Camera: yes.** BAP `0B.1A` and `0B.16` follow every camera session,
+  about 1 s ahead of the slog ([rear-camera.md §3.3](../../docs/rear-camera.md)).
+  The camera library now uses it.
+- **Lights and light sensor: no.** Nothing on ch4 or ch5 changed only with
+  the light switch or the covered sensor; `DA01.0C0D` steps like a counter,
+  also in quiet steps. `/dev/ndr/.../ReverseGear` is not readable (ENOSYS).
+- Side finds: BAP `0A.12` / `0A.13` / `0A.15` change with reverse (the
+  parking aid's LSG), BAP `11.11` is the clock (`0d 0e 1d` = 13:14:29).
+- The camera came up during the quiet and lights steps as well, so the
+  per-kind summary lists came out empty; the step-by-step changes in
+  `hello11.log` carry the answer.
+
+Since then the ch4 reading moved into the camera library
+(`camera::subscribe_ch4`); built and host-tested (`tests/test_hello11.cpp`,
+`tests/test_camera.cpp`).

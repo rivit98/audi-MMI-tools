@@ -5,17 +5,18 @@
 //
 // Sources, each value fed to watch::Watch under a key:
 //   ch4    /dev/ipc/ch4, the IOC's telegrams to MMI3GApplication's MOST
-//          subsystem (ipc4.h): every telegram's payload by function, and
-//          every BAP function (rear camera: BAP 0B.17). The light flag is
-//          expected in DA01.0C0D (InteriorLight, first byte).
+//          subsystem (common/camera's ch4 reader, ipc4.h): every telegram's
+//          payload by function, and every BAP function (rear camera: BAP
+//          0B.1A, common/camera/bap.h). The light flag was expected in
+//          DA01.0C0D (InteriorLight, first byte).
 //   ch5    /dev/ipc/ch5, the vehicle-signal records (sources.h), by tag;
 //          RainSens (tag 0x09) may carry the light sensor
 //   ndr    /dev/ndr/name/sensor/ReverseGear: ndr's reverse flag (from ch5)
 //   slog   dev-videoctrl's lines (common/camera): the HMI shows the camera;
 //          and any line about brightness, dimming or day / night (sources.h)
 // dev-ipc gives every reader its own copy (docs/vehicle-data.md §2.2), as
-// long as each reader keeps reading: both channel threads only read. As a
-// guard, ch4 reading stops if our counters show gaps.
+// long as each reader keeps reading: the channel threads only read. As a
+// guard, the camera library stops reading ch4 if its counters show gaps.
 //
 // The driver goes through steps (lights on / off twice, the light sensor
 // covered / free twice with the switch at AUTO, reverse in / out twice,
@@ -38,6 +39,7 @@ extern "C" {
 #include "quit.h"
 }
 
+#include "bap.h"
 #include "camera.h"
 #include "ipc4.h"
 #include "sources.h"
@@ -68,8 +70,6 @@ constexpr unsigned kDarkMs = 120000;    // auto headlights come on within second
 constexpr unsigned kBrightMs = 180000;  // and go off only after a delay
 constexpr unsigned kScreenMs = 1000;
 constexpr unsigned kPageMs = 30000;
-constexpr unsigned kGapCheckAfter = 20; // telegrams
-constexpr const char *kCh4 = "/dev/ipc/ch4";
 constexpr const char *kCh5 = "/dev/ipc/ch5";
 constexpr const char *kFooter = "hello11 - read only. Pull the SD card to stop.";
 const char *const kNdrPaths[] = {"/dev/ndr/name/sensor/ReverseGear", "/dev/navi/sensor/ReverseGear"};
@@ -133,8 +133,7 @@ std::vector<u8> raw5_q;                 // -> ch5.bin
 std::vector<std::string> slog_q;        // -> slog.txt
 u32 ch5_reads = 0, ch5_records = 0, ch5_skipped = 0, slog_lines = 0;
 std::string ch5_state = "not started";
-u32 ch4_telegrams = 0, ch4_gaps = 0, ch4_missing = 0, ch4_skipped = 0, ch4_odd = 0;
-std::string ch4_state = "not started";
+u32 ch4_odd = 0;
 std::atomic<unsigned> clicks{0};
 std::atomic<bool> stopping{false};
 
@@ -202,56 +201,25 @@ void handle(unsigned ms, const ipc4::Telegram &t)
 	if (!ipc4::parse_bap(m.payload, fns))
 		text_q.push_back("           (BAP stream does not parse completely)");
 	for (const ipc4::BapFn &f : fns) {
-		bool rvc = f.lsg == ipc4::kRvcLsg;
+		bool rvc = f.lsg == camera::kRvcLsg;
 		feed(ms, ipc4::bap_key(f), f.payload, rvc);
-		if (rvc && f.fid == ipc4::kRvcPresentationFid)
+		if (rvc && f.fid == camera::kRvcSessionFid)
 			rvc_now = ipc4::hex(f.payload, 4);
 	}
 }
 
-void ch4_thread(int fd)
+// Every ch4 read, on the camera library's reader thread: short, no SD
+// writes (the writer thread does those).
+void on_ch4(u32 ms, const u8 *buf, usize n, const std::vector<ipc4::Telegram> &ts)
 {
-	ipc4::Splitter sp;
-	std::vector<ipc4::Telegram> ts;
-	u8 buf[4096];
-	for (;;) {
-		isize n = read(fd, buf, sizeof(buf));
-		if (stopping)
-			return;
-		if (n < 0 && errno == EINTR)
-			continue;
-		unsigned ms = log_ms();
-		if (n <= 0) {
-			log_msg("ch4: read returned %d (%s): stop reading", (int)n,
-			        n < 0 ? std::strerror(errno) : "end");
-			std::lock_guard<std::mutex> lock(mu);
-			ch4_state = "read failed";
-			close(fd);
-			return;
-		}
-		ts.clear();
-		sp.feed(buf, (usize)n, ts);
-		std::lock_guard<std::mutex> lock(mu);
-		u32 hdr[2] = {ms, (u32)n};
-		raw_q.insert(raw_q.end(), (const u8 *)hdr, (const u8 *)hdr + sizeof(hdr));
-		raw_q.insert(raw_q.end(), buf, buf + n);
-		for (const ipc4::Telegram &t : ts)
-			handle(ms, t);
-		ch4_telegrams = sp.telegrams();
-		ch4_gaps = sp.gaps();
-		ch4_missing = sp.missing();
-		ch4_skipped = sp.skipped();
-		// Every second telegram missing = shared, not copied: give them all back.
-		if (sp.telegrams() >= kGapCheckAfter && sp.gaps() * 5 > sp.telegrams()) {
-			log_msg("ch4: STOP: %u gaps (%u telegrams missing) in %u telegrams: dev-ipc shares "
-			        "them between readers, MMI3GApplication would miss ours",
-			        sp.gaps(), sp.missing(), sp.telegrams());
-			ch4_state = "stopped: gaps";
-			close(fd);
-			return;
-		}
-		ch4_state = "reading";
-	}
+	if (stopping)
+		return;
+	std::lock_guard<std::mutex> lock(mu);
+	u32 hdr[2] = {ms, (u32)n};
+	raw_q.insert(raw_q.end(), (const u8 *)hdr, (const u8 *)hdr + sizeof(hdr));
+	raw_q.insert(raw_q.end(), buf, buf + n);
+	for (const ipc4::Telegram &t : ts)
+		handle(ms, t);
 }
 
 // ---- ch5 ----
@@ -442,15 +410,18 @@ void writer_thread()
 
 std::string status()
 {
+	camera::Ch4Stats c4 = camera::ch4_stats();
+	camera::Status cs = camera::status();
 	std::lock_guard<std::mutex> lock(mu);
 	char s[600];
 	std::snprintf(s, sizeof(s),
-	              "Light flag DA01.0C0D: %s\nch5 RainSens: %s\nCamera BAP 0B.17: %s\n"
-	              "ndr reverse: %s, slog camera: %s\nslog: %s\n"
+	              "Light flag DA01.0C0D: %s\nch5 RainSens: %s\nCamera BAP 0B.1A: %s\n"
+	              "ndr reverse: %s, camera: %s (VCAP 0 %s, BAP %s)\nslog: %s\n"
 	              "ch4: %s, %u telegrams, %u gaps; ch5: %s, %u records; %zu keys",
 	              light_now.c_str(), rain_now.c_str(), rvc_now.c_str(), ndr_now.c_str(),
-	              camera::active() ? "UP" : "off", slog_now.c_str(), ch4_state.c_str(),
-	              ch4_telegrams, ch4_gaps, ch5_state.c_str(), ch5_records, w.keys());
+	              cs.active ? "UP" : "off", cs.vcap ? "HMI" : "free", cs.bap ? "on" : "off",
+	              slog_now.c_str(), c4.state, c4.telegrams, c4.gaps, ch5_state.c_str(),
+	              ch5_records, w.keys());
 	return s;
 }
 
@@ -559,12 +530,13 @@ bool run_step(int n, const StepDef &s)
 
 std::vector<std::string> summary()
 {
+	camera::Ch4Stats c4 = camera::ch4_stats();
 	std::lock_guard<std::mutex> lock(mu);
 	std::vector<std::string> out;
 	char s[300];
 	std::snprintf(s, sizeof(s), "ch4: %s, %u telegrams, %u gaps (%u missing), %u bytes skipped, "
-	              "%u not MOST-shaped", ch4_state.c_str(), ch4_telegrams, ch4_gaps, ch4_missing,
-	              ch4_skipped, ch4_odd);
+	              "%u not MOST-shaped", c4.state, c4.telegrams, c4.gaps, c4.missing, c4.skipped,
+	              ch4_odd);
 	out.push_back(s);
 	std::snprintf(s, sizeof(s), "ch5: %s, %u reads, %u records, %u bytes skipped; slog: %u lines",
 	              ch5_state.c_str(), ch5_reads, ch5_records, ch5_skipped, slog_lines);
@@ -619,6 +591,7 @@ int main(int argc, char *argv[])
 	log_msg("hello11 start, pid=%d", (int)getpid());
 	quit_init_ex(sd_path, kWatchdogS, on_key, nullptr);
 	camera::start();
+	int ch4_sub = camera::subscribe_ch4(on_ch4, "hello11");
 
 	std::vector<std::thread> threads;
 	try {
@@ -632,15 +605,6 @@ int main(int argc, char *argv[])
 		} else {
 			ch5_state = "reading";
 			std::thread(ch5_thread, fd5).detach();
-		}
-		int fd = open(kCh4, O_RDONLY | O_CLOEXEC);
-		if (fd < 0) {
-			log_msg("ch4: open %s: %s", kCh4, std::strerror(errno));
-			ch4_state = "no open";
-		} else {
-			ch4_state = "reading";
-			// blocks in read() until a telegram comes: detached, exit() ends it
-			std::thread(ch4_thread, fd).detach();
 		}
 	} catch (const std::system_error &e) {
 		log_msg("FAIL thread: %s", e.what());
@@ -672,6 +636,7 @@ int main(int argc, char *argv[])
 	}
 	quit_request(QUIT_TIMER);
 	stopping = true;
+	camera::unsubscribe_ch4(ch4_sub);
 	for (std::thread &t : threads)
 		t.join();
 	camera::stop();

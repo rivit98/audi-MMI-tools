@@ -1,5 +1,5 @@
-// cam.cpp - common/camera (C++) for hello7's C code: is the HMI showing the
-// rear camera (dev-videoctrl's slog lines, docs/rear-camera.md §9)?
+// cam.cpp - common/camera (C++) for hello7's C code: is the rear camera up
+// (the slog and its BAP session on ch4, docs/rear-camera.md §9.1)?
 #include "cam.h"
 
 #include "camera.h"

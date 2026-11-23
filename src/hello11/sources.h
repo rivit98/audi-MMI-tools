@@ -43,7 +43,7 @@ std::string key(const Record &r);
 namespace slogtext {
 
 // Text lines of /dev/slog events as read() gives them, whole: 3 ints of
-// header (flags and int count, code, time), then the data (common/camera_log.h).
+// header (flags and int count, code, time), then the data (common/camera/vcap.h).
 std::vector<std::string> lines(const int *ev, usize n_ints);
 
 // A line about the display's brightness, dimming, day / night or lights.

@@ -53,8 +53,8 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   are capped at 128 KB. Up to 3 io-media errors per 60 s restart the stream,
   then `REFUSED`: the phone pauses and tries again later. Details:
   [docs/phone-mirroring.md §7.10–7.13](../../docs/phone-mirroring.md).
-- **Rear camera:** `common/camera.cpp` follows the camera from dev-videoctrl's
-  slog lines; while it is up the app writes nothing to VP1 and shows
+- **Rear camera:** [common/camera](../common/camera/README.md) follows the
+  camera (the slog and its BAP session on ch4); while it is up the app writes nothing to VP1 and shows
   nothing, and retakes the screen 1 s after it ends
   ([docs/rear-camera.md §9](../../docs/rear-camera.md)).
 - **Screen:** while no stream plays, a CPU-drawn status screen (`ui.cpp`):

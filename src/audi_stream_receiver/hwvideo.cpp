@@ -5,7 +5,7 @@
 #include "types.h"
 
 #include "camera.h"
-#include "camera_log.h"
+#include "takeover.h"
 #include "config_gate.h"
 #include "hw_stream.h"
 #include "live_stream.h"

@@ -43,7 +43,7 @@
 
 #include "aoa_host.h"
 #include "camera.h"
-#include "camera_log.h"
+#include "takeover.h"
 #include "mono_cond.h"
 #include "session.h"
 

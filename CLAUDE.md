@@ -61,9 +61,10 @@ gradle, adb or gcc.
 - Use `CLOCK_MONOTONIC` (`log_ms()`). The wall clock is 1970 after every cold boot, so file
   dates and slog timestamps in car logs mean nothing.
 - **Give the screen back on every exit path.** Displayables outlive the process.
-- **Never hide the rear camera.** While the HMI owns VCAP 0 (`camera::active()`, from
-  dev-videoctrl's `/dev/slog` lines), write nothing to VP1 and show nothing. Retake the screen
-  1 s after the camera goes off (docs/rear-camera.md §9.1).
+- **Never hide the rear camera.** While `camera::active()` (src/common/camera: the HMI owns
+  VCAP 0 per dev-videoctrl's `/dev/slog` lines, or the camera's BAP session on ch4 ~1 s
+  earlier), write nothing to VP1 and show nothing. Retake the screen 1 s after the camera goes
+  off (docs/rear-camera.md §9.1). Never open `/dev/ipc/ch4` yourself: `camera::subscribe_ch4`.
 - Hardware video: DM642 H.264 Baseline up to 720 wide (800 is refused; an 800-wide picture with
   its SPS cropped to 720 stays black; the DSP's decoder and BT.656 signal are 720 wide, §7.14),
   only through a CS-MP4

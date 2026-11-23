@@ -1,4 +1,4 @@
-// test_hello11.cpp - hello11's ch4 telegram parsing (src/hello11/ipc4.h),
+// test_hello11.cpp - ch4 telegram parsing (src/common/camera/ipc4.h),
 // ch5 records and slog lines (src/hello11/sources.h) and its change / step
 // bookkeeping (src/hello11/watch.h). The telegrams are
 // built here in the layout ipc4.h describes.
@@ -103,7 +103,7 @@ void test_bap()
 	std::vector<ipc4::BapFn> fns;
 	CHECK(ipc4::parse_bap(s, fns));
 	CHECK_EQ(fns.size(), 2);
-	CHECK_EQ(fns[0].fid, ipc4::kRvcPresentationFid);
+	CHECK_EQ(fns[0].fid, 0x17);
 	CHECK(ipc4::hex(fns[0].payload) == std::string("ff 01"));
 	CHECK_EQ(fns[1].fid, 0x13);
 	CHECK_EQ(fns[1].payload[0], 0x04);

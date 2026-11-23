@@ -249,7 +249,7 @@ network of logical devices:
 
 Every telegram in the capture parses as one MOST-style message
 [confirmed: all 13 telegrams of `ipc/ch4.bin`, no bytes left over;
-parser `src/hello11/ipc4.h`]:
+parser `src/common/camera/ipc4.h`]:
 
 ```
  00 | fblock u8 | inst u8 | fct u16 BE | op u16 LE | plen u16 LE | FF | payload[plen]
@@ -327,8 +327,10 @@ protocol work and B adds speed, steering and gear.
 - Which tags appear with the ignition on, the engine running, while
   driving, reversing and steering. Units and scaling of STR_ANGLE,
   SpeedoPulse, GearPosition, OutsideTemp and TIMEDATE.
-- Whether `DA 01` / `0x0C0D` follows the light switch (§5.2), and whether
-  the camera's BAP request (LSG 0x0B fid 0x17) arrives on ch4 (hello11).
+- What follows the light switch and the light sensor: neither `DA 01` /
+  `0x0C0D` (§5.2) nor anything else on ch4 or ch5 changed with them
+  (hello11). The camera's session does arrive on ch4, as BAP `0B.1A`
+  ([rear-camera.md §3.3](rear-camera.md)).
 - Which buses the unit is wired to (§2).
 
 A shell script on the SD card answers most of these, no app needed:

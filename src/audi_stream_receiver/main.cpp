@@ -26,7 +26,7 @@
 #include <unistd.h>
 
 #include "camera.h"
-#include "camera_log.h"
+#include "takeover.h"
 
 extern "C" {
 #include "cpumon.h"

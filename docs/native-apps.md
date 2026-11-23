@@ -201,6 +201,7 @@ docs/                   this guide and the deep dives
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 | `BUTTONS` | `src/common/buttons/` (C++, add `-Isrc/common/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
+| `CAMERA` | `src/common/camera/` (C++, on the include path for all) | is the rear camera up (slog + its BAP session on ch4), change observers, the process's one ch4 reader ([README](../src/common/camera/README.md)) |
 
 Integer, size and float types use the short names from `src/common/types.h`
 (C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`. Include
@@ -679,7 +680,8 @@ phone-app bugs and MMI bugs can be told apart without the car.
 - Latency floor of live H.264 through io-media (measured: steady ~0.5 s, §10).
 - Confirm ch8 byte 15 as the motorised screen's status (turn the ignition
   off during `hello7` and watch the screen).
-- How the HMI shows the rear camera: answered in [rear-camera.md](rear-camera.md). Still open: how an app can tell the camera is active before it touches VP1.
+- How the HMI shows the rear camera, and how an app tells it is up:
+  answered in [rear-camera.md](rear-camera.md) §3.3 and §9.1.
 - Reading CAN data from an app.
 - Layer manager details beyond what qnx-audi used: register flags `2`
   (bit 0 selects a different displayable class). `{cid, 16, 19}` on exit:

@@ -171,6 +171,36 @@ ready. The native `COnOffPresCtrl` / `COnOffFSMHandler` covers that window
   `'RUN'` line at 1:49 is only srv-starter waiting for `/tmp/startLVM`
   [confirmed: slog].
 
+### 3.3 What ch4 shows of a session
+
+`/dev/ipc/ch4` carries the camera's BAP functions to MMI3GApplication
+([vehicle-data.md §5](vehicle-data.md)), and an app can read them (every
+reader gets its own copy). Three camera sessions on the car, each one
+reverse in and out, all showed the same telegrams, and nothing else on LSG
+0x0B [confirmed: hello11, `ch4.txt`]:
+
+| Function | Payload | When |
+|---|---|---|
+| `0B.1A` | `f1 01 01 01` → `11 01 01 01` (~50 ms apart) | session starts |
+| `0B.16` | `08` → `38` | ~100 ms after |
+| `0B.1A` | `f0 00 00 00` → `00 00 00 00` (~120 ms apart) | session ends |
+| `0B.16` | `38` → `08` | ~50 ms after |
+
+- **Function 0x1A, not 0x17.** The DP_PRESENTATION exchange of §3.1 (fct
+  0x17) never appeared on ch4. Function 0x1A is not in MMI3GApplication's
+  table of §8; the first byte's low nibble is the state (1 on, 0 off), the
+  high nibble `f` a transition [inferred: the values above].
+- **About 1 s ahead of the HMI.** The `on` came 0.9–1.3 s before the slog's
+  `VP0: source changed to 1` (the HMI takes VCAP 0, §10), the `off`
+  0.6–1.1 s before `VP1: vcap disabled` [confirmed: the three sessions].
+- **Sent only on a change.** No repeats in between; a telegram lost on the
+  way (ch4's counters showed 16 gaps in 683 telegrams) is not sent again.
+- **Not a gear signal.** It ends with the session, which outlives reverse by
+  the follow-up time (§3.1).
+
+The camera library uses `0B.1A` as an early warning next to the slog
+(§9.1).
+
 ---
 
 ## 4. The video path inside the HMI
@@ -473,7 +503,10 @@ hello9, live streaming) uses input 1. These HMI facts matter
 | `/dev/ndr` `sensor/ReverseGear` | the gear, but the session is the ECU's and outlives it by its follow-up time (§3.1) |
 | **dev-videoctrl's lines in `/dev/slog`** | what was really written, in order, with `-v` on every boot. Used |
 
-**The signal** (`src/common/camera.cpp`, `camera_log.h`): a thread keeps
+**The signal** (`src/common/camera/`, its README): the slog says when the
+HMI owns VCAP 0, and the camera's BAP session on ch4 (§3.3) says so about
+1 s earlier. Either one makes the camera "up"; the slog is the authority,
+BAP the early warning. The slog part: a thread keeps
 `/dev/slog` open with `O_NONBLOCK` and reads it every 250 ms. Reading doesn't
 disturb anything: each open has its own position in slogger's ring, and the
 first read starts at the oldest event, so an app started mid-session sees the

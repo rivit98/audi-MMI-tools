@@ -31,7 +31,9 @@ hold **MENU + rotary knob + top-right soft key**. Details:
 
 Each app lives in `src/<app>/` with a README (what it verifies, what works
 and what doesn't). Shared code is in [src/common/](src/common/); the knob and button library
-(ch8 events for any app) in [src/common/buttons/](src/common/buttons/README.md).
+(ch8 events for any app) in [src/common/buttons/](src/common/buttons/README.md),
+the rear camera library (is the camera up; the one ch4 reader) in
+[src/common/camera/](src/common/camera/README.md).
 
 | App | What it is |
 |---|---|

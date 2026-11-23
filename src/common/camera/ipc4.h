@@ -1,7 +1,8 @@
 // ipc4.h - /dev/ipc/ch4, the IOC's message channel to MMI3GApplication's
 // MOST subsystem (docs/vehicle-data.md §5): telegram framing, the MOST-style
 // header inside, and the BAP streams some of them carry. Pure: no car APIs,
-// tested on the host (tests/test_hello11.cpp).
+// tested on the host (tests/test_camera.cpp, tests/test_hello11.cpp). The
+// camera library (camera.h) owns the process's one ch4 reader.
 //
 // Framing (CHBIpcProtocol, MMI3GApplication 0x08806908):
 //
@@ -15,8 +16,8 @@
 // ("LSG") each (CBapCommDevCtrl::processStream 0x081da084):
 //
 //   lsg u8 | { fid u8 | len u16 LE | payload[len] } ...
-#ifndef HELLO11_IPC4_H
-#define HELLO11_IPC4_H
+#ifndef CAMERA_IPC4_H
+#define CAMERA_IPC4_H
 
 #include "types.h"
 
@@ -88,16 +89,12 @@ std::string bap_key(const BapFn &f);
 std::string hex(const std::vector<u8> &v, usize max = 64);
 std::string hex(const u8 *p, usize n, usize max = 64);
 
-// What we expect to see (docs/vehicle-data.md §5.1-5.2, rear-camera.md §3.1).
-// The car-service function block: InteriorLight status, whose first byte
-// MMI3GApplication passes on as the HMI's externLightActive (night map).
+// The car-service function block (docs/vehicle-data.md §5.1-5.2):
+// InteriorLight status, whose first byte MMI3GApplication passes on as the
+// HMI's externLightActive (night map). The camera's BAP functions: bap.h.
 constexpr u8 kCarFblock = 0xDA;
 constexpr u16 kInteriorLightFct = 0x0C0D;
 constexpr u16 kExteriorLightFct = 0x0C0C;
-// The rear camera's control unit and its DP_PRESENTATION function
-// (docs/rear-camera.md §3.1): payload [x, 01] request, [x, 00] end.
-constexpr u8 kRvcLsg = 0x0B;
-constexpr u8 kRvcPresentationFid = 0x17;
 
 } // namespace ipc4
 

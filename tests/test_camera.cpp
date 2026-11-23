@@ -1,14 +1,22 @@
-// test_camera.cpp - common/camera_log.h: the camera's state from the slog, and
-// what an app with a picture does about it.
+// test_camera.cpp - src/common/camera's pure parts: the camera's state from
+// the slog (vcap.h) and from BAP on ch4 (bap.h, on telegrams logged on the
+// car), the two combined (state.h), and what an app with a picture does
+// about it (takeover.h).
 #include "types.h"
-#include "camera_log.h"
+#include "bap.h"
 #include "check.h"
+#include "ipc4.h"
+#include "state.h"
+#include "takeover.h"
+#include "vcap.h"
 
 #include <cstring>
 #include <vector>
 
+using camera::Combiner;
+using camera::Rvc;
 using camera::Takeover;
-using camera::Tracker;
+using Tracker = camera::VcapTracker;
 using Action = camera::Takeover::Action;
 
 namespace {
@@ -84,6 +92,125 @@ void test_events()
 	CHECK(t.ended_ms() == 4);
 }
 
+// One ch4 telegram as it comes off the channel: counter, type 1, len,
+// the MOST header D8 01 0500 op C, the BAP stream, FA DE.
+std::vector<u8> bap_telegram(u8 counter, const std::vector<u8> &stream)
+{
+	std::vector<u8> body = {0x00, 0xD8, 0x01, 0x05, 0x00, 0x0C, 0x00,
+	                        (u8)stream.size(), (u8)(stream.size() >> 8), 0xFF};
+	body.insert(body.end(), stream.begin(), stream.end());
+	std::vector<u8> t = {counter, 0x01, (u8)(body.size() + 1), (u8)((body.size() + 1) >> 8)};
+	t.insert(t.end(), body.begin(), body.end());
+	t.push_back(0xFA);
+	t.push_back(0xDE);
+	return t;
+}
+
+Rvc rvc_of(const std::vector<u8> &raw)
+{
+	ipc4::Splitter sp;
+	std::vector<ipc4::Telegram> ts;
+	sp.feed(raw.data(), raw.size(), ts);
+	CHECK_EQ(ts.size(), 1);
+	return ts.empty() ? Rvc::None : camera::rvc_state(ts[0]);
+}
+
+void test_bap()
+{
+	// one camera session as the car sent it (BAP 0B.1A, 0B.16)
+	CHECK(rvc_of(bap_telegram(0x98, {0x0b, 0x1a, 0x04, 0x00, 0xf1, 0x01, 0x01, 0x01})) == Rvc::On);
+	CHECK(rvc_of(bap_telegram(0x9b, {0x0b, 0x16, 0x01, 0x00, 0x38})) == Rvc::None);
+	CHECK(rvc_of(bap_telegram(0x9d, {0x0b, 0x1a, 0x04, 0x00, 0x11, 0x01, 0x01, 0x01})) == Rvc::On);
+	CHECK(rvc_of(bap_telegram(0xbb, {0x0b, 0x1a, 0x04, 0x00, 0xf0, 0x00, 0x00, 0x00})) == Rvc::Off);
+	CHECK(rvc_of(bap_telegram(0xbf, {0x0b, 0x1a, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00})) == Rvc::Off);
+	// other control units and functions: parking aid 0A.13, the clock 11.11
+	CHECK(rvc_of(bap_telegram(0x10, {0x0a, 0x13, 0x06, 0x00, 0xff, 0x4f, 0x51, 0xff, 0x01, 0x10}))
+	      == Rvc::None);
+	CHECK(rvc_of(bap_telegram(0x11, {0x11, 0x11, 0x03, 0x00, 0x0d, 0x0e, 0x1d})) == Rvc::None);
+	// several functions in one stream: the last camera state counts
+	CHECK(rvc_of(bap_telegram(0x12, {0x0b, 0x1a, 0x01, 0x00, 0x11, 0x16, 0x01, 0x00, 0x38,
+	                                 0x1a, 0x01, 0x00, 0x00})) == Rvc::Off);
+	// not BAP: the light status DA01.0C0D
+	std::vector<u8> body = {0x00, 0xDA, 0x01, 0x0C, 0x0D, 0x0C, 0x00, 0x02, 0x00, 0xFF, 0x45, 0x64};
+	std::vector<u8> t = {0x20, 0x01, (u8)(body.size() + 1), 0x00};
+	t.insert(t.end(), body.begin(), body.end());
+	t.push_back(0xFA);
+	t.push_back(0xDE);
+	CHECK(rvc_of(t) == Rvc::None);
+	// an empty payload is no state
+	ipc4::BapFn f;
+	f.lsg = 0x0b;
+	f.fid = 0x1a;
+	CHECK(camera::rvc_state(f) == Rvc::None);
+}
+
+void test_combiner_session()
+{
+	// the car's timing: BAP ~1 s ahead of the slog both ways
+	Combiner c;
+	CHECK(!c.active());
+	CHECK(c.clear(0));
+	CHECK(c.bap(true, 58764));             // early warning
+	CHECK(c.active());
+	CHECK(!c.clear(58800));
+	CHECK(!c.bap(true, 58863));            // f1 -> 11: still on
+	CHECK(!c.vcap(true, 60028));           // the HMI takes VCAP 0
+	CHECK(!c.tick(70000));                 // confirmed: no timeout
+	CHECK(!c.bap(false, 65128));           // BAP off first: VCAP 0 still the HMI's
+	CHECK(c.active());
+	CHECK(c.vcap(false, 65713));
+	CHECK(!c.active());
+	CHECK(c.ended_ms() == 65713);
+	CHECK(!c.clear(65713 + camera::kSettleMs - 1));
+	CHECK(c.clear(65713 + camera::kSettleMs));
+	CHECK_EQ(c.unconfirmed(), 0);
+}
+
+void test_combiner_lost_telegrams()
+{
+	// lost "off": the HMI's release ends the session
+	Combiner c;
+	c.bap(true, 1000);
+	c.vcap(true, 2000);
+	CHECK(c.vcap(false, 30000));
+	CHECK(!c.active());
+	CHECK(!c.bap_on());
+
+	// lost "on": the slog alone, as before
+	Combiner d;
+	CHECK(d.vcap(true, 1000));
+	CHECK(d.active());
+	CHECK(!d.bap(false, 5000));            // BAP off while VCAP 0 is held
+	CHECK(d.active());
+	CHECK(d.vcap(false, 6000));
+
+	// an "on" the HMI never follows: dropped after kBapAloneMs
+	Combiner e;
+	e.bap(true, 1000);
+	CHECK(!e.tick(1000 + camera::kBapAloneMs - 1));
+	CHECK(e.active());
+	CHECK(e.tick(1000 + camera::kBapAloneMs));
+	CHECK(!e.active());
+	CHECK_EQ(e.unconfirmed(), 1);
+	CHECK(e.ended());
+	// BAP repeats "on" (f1 -> 11) while dropped: a new session from that time
+	CHECK(e.bap(true, 7000));
+	CHECK(!e.tick(7000 + camera::kBapAloneMs - 1));
+
+	// the HMI comes after the BAP "on" but before the timeout: confirmed
+	Combiner g;
+	g.bap(true, 0);
+	g.vcap(true, 4000);
+	CHECK(!g.tick(60000));
+	CHECK(g.active());
+	// a camera already up at start (slog), BAP arrives later: no timeout
+	Combiner h;
+	h.vcap(true, 0);
+	h.bap(true, 100);
+	CHECK(!h.tick(60000));
+	CHECK(h.active());
+}
+
 void test_takeover_normal()
 {
 	Takeover o;
@@ -156,6 +283,9 @@ int main()
 {
 	test_tracker();
 	test_events();
+	test_bap();
+	test_combiner_session();
+	test_combiner_lost_telegrams();
 	test_takeover_normal();
 	test_takeover_camera_comes_back();
 	test_takeover_race();
