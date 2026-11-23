@@ -35,6 +35,11 @@
  * processes were found, -1 if not. */
 int ipc_probe(const char *out_dir);
 
+/* Called before each slow part of the probe and the pid lookup (a unit tool,
+ * the /proc walk) with what it is and how long it may take at most, for a
+ * progress screen. NULL (the default): none. */
+void ipc_set_progress(void (*cb)(const char *what, unsigned max_ms));
+
 /* Worst-case run time in ms (the bounded pidin calls, the pid lookup
  * included), for the watchdog. */
 unsigned ipc_probe_max_ms(void);

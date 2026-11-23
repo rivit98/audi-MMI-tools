@@ -239,12 +239,9 @@ management is `0x00020027`.
 The registry itself is built from the table at runtime
 (`FUN_08066acc` copies each entry of the thread's service list into the
 root's `+0x50` registry), so the id is in MMI3GApplication's memory next
-to the role name. hello5's step `d` looks for it there (`svcscan.c`): it
-reads the process's segment list (`/proc/<pid>/as`,
-`DCMD_PROC_MAPINFO`), finds every place that holds
-`"AudioManagementDevCtrl"` or points at a copy of it, and dumps the words
-around each one. Words shaped like a component id become the ids it
-tries, with `0x00020027` first.
+to the role name. Reading it there from outside (the process's segments
+through `/proc/<pid>/as`) found no id on the car (§6.1), so step `d`
+tries the table's ids, `0x00020027` then `0x00010027` (`svcid.h`).
 
 ## 6. Connecting without the broker
 
@@ -281,10 +278,16 @@ from §4 and the server id from §5. Two things make this readable:
   channels to the navigation's chids 4 and 5. `pidin -p <pid> fd` on
   either MMI3G process never finishes (killed after ~18 s); on the
   servicebroker it does.
-- **The memory scan** reads 258 segments, ~150 MB of MMI3GApplication, in
-  ~70 s. `"AudioManagementDevCtrl"` is in 26 places, but no word points at
-  any of them and no component-id-shaped word sits next to them: 0
-  candidate ids [confirmed]. `0x00020027` stays the only id to try.
+- **A memory scan finds no id.** Reading MMI3GApplication's 258 segments
+  (~150 MB) takes ~70 s. `"AudioManagementDevCtrl"` is in 26 places, but
+  no word points at any of them and no component-id-shaped word sits next
+  to them: 0 candidate ids, the same in two runs [confirmed]. A SIGKILL
+  sent during the scan took effect only when the scan's reads ended, ~40 s
+  later [confirmed]. The scan is gone from step `d`.
+- **The control pings on `navi` are not heard** without a channel: three
+  pings written to io-audio `navi` with no audio focus, radio on, nothing
+  audible [confirmed: by ear and the video's 880 Hz band]. A ping heard
+  there would mean the channel opened.
 - **ConnectRequest to chid 6** (id `0x00020027`): replied at once with
   all zeros (chids 0/0, pid 0, nd 0), nothing connected back within
   600 ms, the receive threads got nothing [confirmed]. A zero reply is
@@ -309,4 +312,5 @@ So step `d` sends from a helper process that owns no screen, with a
 deadline on each send (src/hello5/README.md), and run.sh and the runner
 leave behind an app that is still there 5 s after the KILL. Of the
 channels the navigation uses, only 14 is untried; step `d` sends to
-nothing else.
+nothing else. In the one run with the helper, its time limit for the
+memory scan (25 s) ran out first, so chid 14 is still untried.

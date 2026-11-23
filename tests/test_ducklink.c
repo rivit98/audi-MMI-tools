@@ -61,6 +61,17 @@ static void test_parse(void)
 	CHECK_EQ(link_parse("", &ms, &rest), -3);
 }
 
+/* the progress callback: what it saw last */
+static unsigned progress_calls;
+static char progress_what[96];
+
+static void on_progress(const struct duck_link *l, unsigned now)
+{
+	(void)now;
+	progress_calls++;
+	snprintf(progress_what, sizeof(progress_what), "%s", l->what);
+}
+
 static void test_answers(void)
 {
 	struct duck_link l;
@@ -68,6 +79,7 @@ static void test_answers(void)
 	unsigned t0;
 
 	CHECK_EQ(start(&l), 0);
+	l.progress = on_progress;
 	CHECK_EQ(link_cmd(&l, "connect", 100, reply, sizeof(reply), NULL), LINK_OK);
 	CHECK_STR(reply, "123 14 0x00020027.0");
 	CHECK_STR(l.note, "chid 14");
@@ -79,6 +91,10 @@ static void test_answers(void)
 	CHECK_EQ(link_cmd(&l, "slow", 0, reply, sizeof(reply), NULL), LINK_OK);
 	CHECK_STR(reply, "late");
 	CHECK(now_ms() - t0 >= 2900);
+	/* called while waiting, with the helper's last "wait" */
+	CHECK(progress_calls >= 10);
+	CHECK_STR(progress_what, "b");
+	CHECK_STR(l.what, "b");
 	t0 = now_ms();
 	CHECK_EQ(link_end(&l, 2000), 1);
 	CHECK(now_ms() - t0 < 1000);

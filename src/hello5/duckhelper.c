@@ -17,7 +17,6 @@
 #include "ducklink.h"
 #include "ipcprobe.h"
 #include "svcid.h"
-#include "svcscan.h"
 
 #define MAX_CHIDS   8           /* channels of the server we collect */
 #define MAX_IDS     (SVC_MAX_IDS + 2)
@@ -55,7 +54,7 @@ static void nap(unsigned ms)
 unsigned duck_connect_max_ms(void)
 {
 	return 2 * DUCK_BROKER_MS + (MAX_LISTED + N_VERSIONS) * DUCK_BROKER_MS +
-	       ipc_find_max_ms() + svc_scan_max_ms() +
+	       ipc_find_max_ms() +
 	       DUCK_MAX_TRIES * (DUCK_CONNECT_MS + DUCK_BACK_MS + 2 * DUCK_LINK_SLACK_MS);
 }
 
@@ -134,10 +133,10 @@ static int skipped(int chid)
  *                            (ipcprobe.c), DUCK_SKIP_CHIDS left out; never
  *                            the ones MMI3GApplication only receives on:
  *                            each untried channel can hang the sender
- *   the service's server id  the component id from the bootstrap table,
- *                            looked for in the process's own memory
- *                            (svcscan.c), with the id read from the
- *                            binary as the fallback
+ *   the service's server id  the component ids from the binary's
+ *                            bootstrap table (svcid.h). Searching the
+ *                            process's memory for them found nothing in
+ *                            two car runs and took ~70 s, so it is gone
  * The server answers every ConnectRequest, found or not, with its own
  * channels, so the reply says nothing about success. What does: it only
  * connects back to our channels when it found the service. */
@@ -147,8 +146,6 @@ static int duck_internal(struct hbdsi *c)
 	int all[MAX_CHIDS], chids[MAX_CHIDS];
 	u32 ids[MAX_IDS];
 	unsigned nids = 0, tries = 0, n_nav = 0, k;
-	struct svc_result scan;
-	char path[256];
 	int n_all, n = 0, i, rc;
 
 	say("wait %u finding MMI3GApplication's channels", ipc_find_max_ms());
@@ -165,24 +162,11 @@ static int duck_internal(struct hbdsi *c)
 		        n_all, n_nav);
 		return -1;
 	}
-	snprintf(path, sizeof(path), "%s/hello5_services.txt", out_dir);
-	say("wait %u reading MMI3GApplication's memory", svc_scan_max_ms());
-	if (svc_scan(app, DUCK_ROLE, path, &scan) == 0)
-		for (k = 0; k < scan.nids && nids < MAX_IDS; k++)
-			ids[nids++] = scan.ids[k];
-	/* the ids the binary's bootstrap table gives, in case the scan found
-	 * nothing: they are what the table says audio management is */
-	for (k = 0; k < 2; k++) {
-		u32 id = k == 0 ? SVC_ID_AUDIO_DEVCTRL : SVC_ID_AUDIO_PRESCTRL;
-		unsigned j;
-
-		for (j = 0; j < nids; j++)
-			if (ids[j] == id)
-				break;
-		if (j == nids && nids < MAX_IDS)
-			ids[nids++] = id;
-	}
+	/* what the binary's bootstrap table says audio management is */
+	ids[nids++] = SVC_ID_AUDIO_DEVCTRL;
+	ids[nids++] = SVC_ID_AUDIO_PRESCTRL;
 	svc_ids_rank(ids, nids);
+	log_msg("step d: %d channel(s) x %u server id(s) to try", n, nids);
 
 	/* the best id on every channel first, then the next id: an answer on
 	 * the wrong channel costs a ConnectRequest timeout at most */
@@ -192,7 +176,9 @@ static int duck_internal(struct hbdsi *c)
 			int back = 0;
 
 			tries++;
-			say("note chid %d, server id 0x%08x", chids[i], (unsigned)ids[k]);
+			say("note try %u of %u: chid %d, server id 0x%08x", tries,
+			    (unsigned)n * nids < DUCK_MAX_TRIES ? (unsigned)n * nids : DUCK_MAX_TRIES,
+			    chids[i], (unsigned)ids[k]);
 			say("wait %u ConnectRequest to chid %d, server id 0x%08x",
 			    DUCK_CONNECT_MS + DUCK_BACK_MS, chids[i], (unsigned)ids[k]);
 			hbdsi_target(c, (u32)app, (u32)chids[i], ids[k]);

@@ -49,6 +49,13 @@ struct duck_link {
 	char buf[512];      /* a partial line from the helper */
 	usize len;
 	char note[96];      /* the last "note" line */
+	char what[96];      /* the last "wait" line's <what>: what the helper does */
+	unsigned what_ms;   /* when that wait began (CLOCK_MONOTONIC ms) */
+	unsigned deadline;  /* when hello5 gives up on the helper */
+	/* Called on every line from the helper and every DUCK_LINK_POLL_MS
+	 * while link_cmd waits, for a progress screen (NULL: none). Set it
+	 * after link_start, which clears the struct. */
+	void (*progress)(const struct duck_link *l, unsigned now_ms);
 };
 
 void link_init(struct duck_link *l);

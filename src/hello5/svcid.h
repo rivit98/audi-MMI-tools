@@ -1,8 +1,9 @@
 /*
  * svcid.h - which numbers can be an HBDSI server id, and how to pick them
  * out of a block of memory. Pure: no QNX calls, host-tested
- * (tests/test_svcid.c). svcscan.c reads the memory, this decides what in
- * it is worth trying.
+ * (tests/test_svcid.c). Step d tries the two audio ids below, in
+ * svc_ids_rank's order; svc_ids_collect picks candidates out of a memory
+ * dump (no longer read on the car: it found none).
  *
  * A server id is a component id from the process's bootstrap table, two
  * 16-bit halves: the low half a subsystem number, the high half the

@@ -29,8 +29,8 @@
  *      pings on io-audio "navi" while it is open, gives it back, then plays
  *      3 control pings with no channel (play_duck below). The broker does
  *      not know the interface, so a helper process sends the
- *      ConnectRequest straight to MMI3GApplication with a server id looked
- *      for in that process's own memory (duckhelper.c, svcscan.c); hello5
+ *      ConnectRequest straight to MMI3GApplication with a server id taken
+ *      from the binary's bootstrap table (duckhelper.c, svcid.h); hello5
  *      never sends to the MMI itself.
  *   p  no sound: which channels MMI3GApplication, MMI3GNavigation and the
  *      servicebroker are connected to and receive on (ipcprobe.c), the
@@ -1114,12 +1114,40 @@ static int play_native(const struct step *s, const char *log_file, struct play *
 static const struct step *duck_step;
 static int duck_index, duck_count;
 static char duck_note[96];
+/* the screen as last drawn, for the progress lines added to it */
+static const char *duck_text, *duck_question, *duck_big;
+static int duck_playing;
+static unsigned duck_drawn_ms;
 
 static void duck_screen(const char *text, const char *question, const char *big,
                         int playing)
 {
+	duck_text = text;
+	duck_question = question;
+	duck_big = big;
+	duck_playing = playing;
+	duck_drawn_ms = 0;
 	ui_step(duck_index, duck_count, duck_step->title, text, question, big,
 	        playing, duck_note[0] ? duck_note : NULL);
+}
+
+/* While hello5 waits for the helper (ducklink.h's progress): what the helper
+ * says it is doing, for how long, and when hello5 gives up on it, under the
+ * step's text. Redrawn every second, so the screen's clock moves too. */
+static void duck_progress(const struct duck_link *l, unsigned now)
+{
+	char text[700];
+	int left = (int)(l->deadline - now);
+
+	if (duck_text == NULL || (duck_drawn_ms != 0 && now - duck_drawn_ms < 1000))
+		return;
+	duck_drawn_ms = now;
+	snprintf(text, sizeof(text), "%s\n\nNow: %s\n%u s so far; hello5 gives up on it "
+	         "in %d s.%s%s", duck_text, l->what, (now - l->what_ms) / 1000,
+	         left > 0 ? (left + 999) / 1000 : 0, l->note[0] ? "\nLast: " : "",
+	         l->note);
+	ui_step(duck_index, duck_count, duck_step->title, text, duck_question, duck_big,
+	        duck_playing, duck_note[0] ? duck_note : NULL);
 }
 
 /* Hold for ms with the screen up; 1 if asked to stop. */
@@ -1307,6 +1335,7 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	argv[2] = (char *)DUCK_HELPER_ARG;
 	argv[3] = NULL;
 	rc = link_start(&duck_link, argv);
+	duck_link.progress = duck_progress;
 	if (rc != 0) {
 		log_msg("RESULT step d: helper %s would not start: %s", self_path,
 		        strerror(rc));
@@ -1385,12 +1414,32 @@ out:
 	return 0;
 }
 
+/* Step p's screen: what the probe is reading now, and for how long at most
+ * (ipcprobe.h's progress). */
+static const struct step *probe_step;
+
+static void probe_progress(const char *what, unsigned max_ms)
+{
+	char text[600];
+
+	snprintf(text, sizeof(text), "%s\n\nNow: %s\n(up to %u s)", probe_step->todo, what,
+	         (max_ms + 999) / 1000);
+	log_msg("step p: now %s (up to %u ms)", what, max_ms);
+	ui_step(cur_index, cur_count, probe_step->title, text, NULL, "reading", 1, NULL);
+}
+
 /* Step p: no sound, just the probe. */
 static int play_probe(const struct step *s, const char *log_file, struct play *p)
 {
+	int rc_probe;
+
 	(void)log_file;
+	probe_step = s;
 	ui_step(cur_index, cur_count, s->title, s->todo, NULL, "reading", 1, NULL);
-	if (ipc_probe(out_dir) == 0)
+	ipc_set_progress(probe_progress);
+	rc_probe = ipc_probe(out_dir);
+	ipc_set_progress(NULL);
+	if (rc_probe == 0)
 		p->eof = 1;
 	else
 		p->refused = 1;
@@ -1508,6 +1557,10 @@ static void run_step(const struct step *s, int index, int count)
 	if (s->play == play_probe)
 		result = p.eof ? "both MMI3G processes read" :
 		         "MMI3GApplication or MMI3GNavigation not found";
+	else if (s->play == play_duck)
+		result = rc != 0 ? "nothing to play the pings with" :
+		         p.eof ? "connected, pings played" :
+		         "no connection to audio management (control pings only)";
 	else
 		result = rc != 0 ? "nothing to play it with" :
 		         p.refused ? "the output would not attach" :

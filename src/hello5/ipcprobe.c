@@ -27,7 +27,9 @@
 #define MAX_THREADS   256
 #define NAME_MAX_LEN  64
 #define PIDIN_TIMEOUT 15        /* s, per pidin call */
-#define PIDIN_CALLS   3         /* per process: threads, fd, arg */
+#define PIDIN_CALLS   2         /* per process: threads, arg ("fd" always ran
+                                   into the timeout for the MMI3G processes,
+                                   and list_conns has the same) */
 #define TOOL_TIMEOUT  10        /* s, sloginfo / pidin arg for the pids */
 #define TOOL_CALLS    3        /* + the /proc diagnosis */
 
@@ -47,6 +49,19 @@ static struct pinfo procs[] = {
 unsigned ipc_find_max_ms(void)
 {
 	return (unsigned)(TOOL_CALLS * (TOOL_TIMEOUT + 3)) * 1000u;
+}
+
+static void (*progress)(const char *what, unsigned max_ms);
+
+void ipc_set_progress(void (*cb)(const char *what, unsigned max_ms))
+{
+	progress = cb;
+}
+
+static void say(const char *what, unsigned max_ms)
+{
+	if (progress != NULL)
+		progress(what, max_ms);
 }
 
 unsigned ipc_probe_max_ms(void)
@@ -214,6 +229,12 @@ static void scan_tool(const char *out_dir, const char *file, const char *cmd)
 		return;
 	snprintf(path, sizeof(path), "%s/%s", out_dir, file);
 	unlink(path);
+	{
+		char what[128];
+
+		snprintf(what, sizeof(what), "finding the MMI processes: %s", cmd);
+		say(what, TOOL_TIMEOUT * 1000u);
+	}
 	st = proc_shell(path, TOOL_TIMEOUT, cmd);
 	log_msg("procs: %s -> %s: %s", cmd, file, proc_status_str(st));
 	for (i = 0; i < NPROCS; i++) {
@@ -249,14 +270,17 @@ static void find_procs(const char *out_dir)
 	log_msg("procs: uid %d euid %d; own name through /proc: %s%s",
 	        (int)getuid(), (int)geteuid(), rc == 0 ? name : strerror(rc),
 	        rc == 0 ? "" : stage == NAME_OPEN ? " (open)" : " (devctl)");
+	say("finding the MMI processes: /proc", 2000);
 	named = walk_proc();
 	scan_tool(out_dir, "hello5_sloginfo.txt", "sloginfo");
 	scan_tool(out_dir, "hello5_pidin_arg.txt", "pidin arg");
 	for (i = 0; i < NPROCS; i++)
 		if (procs[i].pid == 0 || strcmp(procs[i].how, "/proc") != 0)
 			named = 0;
-	if (rc != 0 || named == 0)
+	if (rc != 0 || named == 0) {
+		say("finding the MMI processes: /proc diagnosis", TOOL_TIMEOUT * 1000u);
 		proc_diag(out_dir);
+	}
 	for (i = 0; i < NPROCS; i++)
 		log_msg("procs: %s: pid %d (%s)", procs[i].want, (int)procs[i].pid,
 		        procs[i].pid != 0 ? procs[i].how : "not found");
@@ -521,7 +545,7 @@ int ipc_probe(const char *out_dir)
 {
 	char path[256], pidin_path[256], cmd[96];
 	static const char *const pidin_fmt[PIDIN_CALLS] = {
-		"pidin -p %d", "pidin -p %d fd", "pidin -p %d arg",
+		"pidin -p %d", "pidin -p %d arg",
 	};
 	unsigned t0 = log_ms(), nf, ns, nt;
 	FILE *f;
@@ -535,6 +559,7 @@ int ipc_probe(const char *out_dir)
 		log_msg("step p: %s: %s", path, strerror(errno));
 		return -1;
 	}
+	say("listing connections and threads", 5000);
 	for (i = 0; i < NPROCS; i++) {
 		if (procs[i].pid == 0) {
 			fprintf(f, "=== %s: not running\n\n", procs[i].want);
@@ -564,6 +589,14 @@ int ipc_probe(const char *out_dir)
 			int st;
 
 			snprintf(cmd, sizeof(cmd), pidin_fmt[k], (int)procs[i].pid);
+			{
+				char what[160];
+
+				snprintf(what, sizeof(what), "%s (%s), call %d of %d", cmd,
+				         procs[i].want, i * PIDIN_CALLS + k + 1,
+				         NPROCS * PIDIN_CALLS);
+				say(what, PIDIN_TIMEOUT * 1000u);
+			}
 			st = proc_shell(pidin_path, PIDIN_TIMEOUT, cmd);
 			log_msg("step p: %s: %s", cmd, proc_status_str(st));
 		}

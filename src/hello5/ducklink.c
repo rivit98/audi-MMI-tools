@@ -197,6 +197,10 @@ int link_cmd(struct duck_link *l, const char *cmd, unsigned first_ms,
 	unsigned deadline = now_ms() + first_ms + DUCK_LINK_SLACK_MS;
 	usize len = strlen(cmd);
 
+	snprintf(l->what, sizeof(l->what), "%s", cmd);
+	l->what_ms = now_ms();
+	l->deadline = deadline;
+
 	if (size > 0)
 		reply[0] = '\0';
 	if (l->pid <= 0 || l->dead)
@@ -215,9 +219,12 @@ int link_cmd(struct duck_link *l, const char *cmd, unsigned first_ms,
 		while (take_line(l, line, sizeof(line))) {
 			log_msg("helper -> %s", line);
 			kind = link_parse(line, &ms, &rest);
-			if (kind == -1)
+			if (kind == -1) {
 				deadline = now_ms() + ms + DUCK_LINK_SLACK_MS;
-			else if (kind == -2)
+				snprintf(l->what, sizeof(l->what), "%s", rest);
+				l->what_ms = now_ms();
+				l->deadline = deadline;
+			} else if (kind == -2)
 				snprintf(l->note, sizeof(l->note), "%s", rest);
 			else if (kind == LINK_OK || kind == LINK_ERR) {
 				if (size > 0)
@@ -225,6 +232,8 @@ int link_cmd(struct duck_link *l, const char *cmd, unsigned first_ms,
 				return kind;
 			}
 		}
+		if (l->progress != NULL)
+			l->progress(l, now_ms());
 		if (stop != NULL && stop())
 			return LINK_STOP;
 		{
