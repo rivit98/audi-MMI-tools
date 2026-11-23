@@ -17,7 +17,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Build:**
 
   ```sh
-  make sd SD_APPS=audi_stream_receiver
+  make sd            # every app on the card; start it from the runner's menu
   make test          # protocol, frame reassembly, live stream, camera tracker
   make apk           # android/out/audi_streaming.apk; make apk-test, make apk-install
   make aoa-host      # desk test: the PC plays the MMI (stop host adb first)

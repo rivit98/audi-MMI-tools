@@ -16,7 +16,6 @@ make                             # cross-compile all apps into build/
 make test                        # host unit tests (ASan/UBSan), incl. protobuf + live-stream checks
 make sd                          # build/sd/ for the car: every app in apps/, run.sh starts the runner (menu)
 tools/sync_sd.sh /media/$USER/CARD       # rsync build/sd/ to the mounted card (host; changes only, keeps var/)
-make sd SD_APPS="audi_stream_receiver"   # same card, run.sh runs that app instead of the menu
 make addr APP=x ADDR="0x804..."  # crash address -> function, file:line (apps are ET_EXEC, unstripped)
 make apk / apk-test / apk-install        # Android sender (android/Makefile, adb in a container)
 make aoa-host                    # desk: the PC plays the MMI for the phone app (stop host adb first)
@@ -37,7 +36,7 @@ gradle, adb or gcc.
   the rest as C++), so `build/` has no `.o` files. That is expected.
 - `tests/`: host tests of the pure parts (protocol, parsing, stream planning, camera tracker).
   Put logic that doesn't touch car APIs in pure files/headers and test it here first.
-- `sd/`: `run.sh` (ksh, the on-car runner), `screens.sh`, `apps.conf` (timeout|args|title|text).
+- `sd/`: `run.sh` (ksh: copies `bin/` to `/tmp`, starts the runner), `apps.conf` (name|timeout|args|text).
 - `android/`: the "Audi streaming" phone app (Kotlin, package `mmi3g.audistreaming`).
 - `tools/`: desk tools (`aoa_host.py`, `ch5dump.py`, `sync_sd.sh`, Ghidra helpers).
 - Inputs that are not in git: the extracted firmware and openqnx source (the Makefile's `FW`,
@@ -113,12 +112,13 @@ The user copies the card's `var/` folder and points at it. Typical files:
 
 | File | What it is |
 |---|---|
-| `run.log` | run.sh: apps, timeouts, start errors (`mkdir /tmp` errors are harmless) |
+| `run.log` | run.sh: start, the runner's exit code (`mkdir /tmp` errors are harmless) |
+| `runner.log` | the runner: menu, keys, each app's start and verdict |
 | `<app>.log` | the app's log; `[N ms]` = monotonic ms since the app started |
 | `<app>_out.log` | stdout/stderr (usually identical to `<app>.log`) |
 | `usb_slog_<time>.txt` | slog snapshot taken at each USB removal (not at the end of the run); `<time>` = MMI clock, i.e. time since boot (1970-01-01) |
 | `usb_slog_periodic_<time>.txt` | slog snapshot every 60 s while streaming |
-| `<app>_slog.txt`, `summary.txt` | only if the app ended normally under run.sh |
+| `<app>_slog.txt`, `summary.txt` | written by the runner after each app (not for one still running when the card is pulled) |
 | `*.h264` | saved video (check with ffprobe/ffmpeg) |
 
 How to read a run:

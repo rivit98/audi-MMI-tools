@@ -2,184 +2,41 @@
 # run.sh - executed by copie_scr.sh (core/copie_scr_plain.sh) on SD insert:
 #     cd $SDPATH; exec ksh ./run.sh $SDPATH
 #
-# Runs every test app in APPS one after another (filled in by `make sd`,
-# settings per app in apps.conf). First the start screen for PRE_S
-# seconds (what this is, don't pull the card), then for each app:
-#   1. the app, with stdout + stderr captured in var/<app>_out.log and its
-#      exit code, run time and verdict appended there as "=== " lines.
-#      It is stopped (TERM, then KILL) if it runs longer than its timeout.
-#   2. its result screen for POST_S seconds
-# The verdicts are also in var/summary.txt. (There is no "Next" screen
-# before an app and no "all done" screen at the end.)
+# Copies bin/ (the runner and the unit tools the apps use) to /tmp/mmi_apps
+# and starts the runner, the knob-driven menu of the apps in apps/
+# (src/runner/README.md). The runner runs each app, with its timeout,
+# verdict, var/summary.txt line, slog and core files. It ends with "Leave
+# the menu" or when the card is pulled.
 #
-# Everything a run writes goes to var/ on the card: run.sh's own files, the
-# apps' logs, screenshots and recordings (they get the card's root as
-# argv[1] and write under <root>/var), and anything a tool drops into its
-# working directory (the apps run with var/ as cwd). Copy var/ off the card
-# and that's the whole run.
-#
-# The screens are rendered when they are needed: screens.sh prints the
-# layout, bin/pngondemand turns it into a PNG in /tmp, and bin/showScreen -t
-# (core/bin/showScreen, DrGER's tool, proven on the car) shows it. If any
-# of that fails, or showScreen returns early, the wait is made up with
-# sleep, so the timing stays the same.
-#
-# Binaries are copied to /tmp before running: the FAT32 card may not carry
-# an exec bit, and the card can be pulled while a program runs.
-#
-# After each app it collects crash evidence onto the card:
-#  - the system log (sloginfo) -> var/<app>_slog.txt: the Audi dumper writes
-#    a "run fault ... ip" line and a backtrace there when a process crashes
-#  - core files: the dumper (-d /HBpersistence/core -d /mnt/persistence,
-#    last resort /tmp) writes <name>.core*, gzip-compressed. They are moved
-#    to the card so they don't use up the unit's flash (efs-persist).
-APPS="@APPS@"
-PRE_S=@PRE_S@          # start screen
-POST_S=@POST_S@        # result screen after each app
-KILL_GRACE=15          # after TERM on timeout: the apps' own teardown limit is 10 s
-STUCK_GRACE=5          # after KILL: an app still there then is left behind
+# Binaries run from /tmp: the FAT32 card may not carry an exec bit, and the
+# card can be pulled while a program runs. Everything a run writes goes to
+# var/ on the card (the apps run with var/ as cwd).
 SDPATH="${1:-${0%/*}}"
 case "${SDPATH}" in /*) ;; *) SDPATH=$(cd "${SDPATH}" && pwd) ;; esac   # we cd away
 VAR="${SDPATH}/var"
 BIN=/tmp/mmi_apps
-SCREEN="${BIN}/screen"     # screen.layout -> screen.png, rendered by show
-LOG="${VAR}/run.log"
-SUMMARY="${VAR}/summary.txt"
 mkdir -p "${VAR}"
-cd "${VAR}" || exit 1      # cwd of the apps and their tools
-
-# app_info (ARGS, TIMEOUT from apps.conf) and the screen_* layouts. Without
-# it the apps still run (defaults), only the screens are missing.
-[ -f "${SDPATH}/screens.sh" ] && . "${SDPATH}/screens.sh"
-
-# run_limited <timeout> <out_file> <cmd> [args...]
-# Runs cmd in the background with stdout + stderr appended to out_file. A
-# watcher sends TERM after <timeout> s (or when the card is pulled) and
-# KILL KILL_GRACE s later. Sets RC, SECS (wall time) and TIMED_OUT (0/1).
-# A process REPLY-blocked on a channel that ignores unblock requests
-# survives even KILL (docs/hbdsi.md section 6.1), and a plain `wait` would
-# hang the whole run on it. So if it is still there STUCK_GRACE s after the
-# KILL, the watcher sends us USR1, which ends the `wait`, and the app is
-# left behind (RC 137, "did not exit after KILL" in the log).
-GAVE_UP=0
-trap 'GAVE_UP=1' USR1
-run_limited() {
-    _limit=$1; _out=$2; shift 2
-    rm -f "${BIN}/timed_out"
-    GAVE_UP=0
-    _t0=${SECONDS}
-    "$@" >> "${_out}" 2>&1 &
-    _pid=$!
-    _me=$$
-    (
-        t=0
-        while [ $t -lt ${_limit} ] && [ -d "${SDPATH}" ]; do
-            sleep 1
-            t=$((t + 1))
-        done
-        kill -TERM ${_pid} 2>/dev/null || exit 0
-        : > "${BIN}/timed_out"                 # (QNX has no touch)
-        echo "$1: stopped after ${_limit} s (TERM)"
-        sleep ${KILL_GRACE}
-        kill -KILL ${_pid} 2>/dev/null || exit 0
-        echo "$1: still running, sent KILL"
-        sleep ${STUCK_GRACE}
-        kill -0 ${_pid} 2>/dev/null || exit 0
-        echo "$1: did not exit ${STUCK_GRACE} s after KILL: left behind"
-        kill -USR1 ${_me}
-    ) &
-    _watch=$!
-    wait ${_pid}
-    RC=$?
-    if [ ${GAVE_UP} = 1 ]; then
-        RC=137
-        echo "=== $1 (pid ${_pid}) did not exit after KILL: left behind" >> "${_out}"
-    fi
-    kill ${_watch} 2>/dev/null
-    SECS=$((SECONDS - _t0))
-    TIMED_OUT=0
-    [ -f "${BIN}/timed_out" ] && TIMED_OUT=1
-}
-
-# show <seconds> <screen_* function> [args]: render that screen and show it
-# for that long (blocking). The layout is made first, while RC, SECS and
-# FAILS are still the app's (run_limited sets them again for showScreen).
-show() {
-    _s0=${SECONDS}; _secs=$1; shift
-    rm -f "${SCREEN}.png"
-    "$@" > "${SCREEN}.layout"
-    "${BIN}/pngondemand" "${SCREEN}.layout" "${SCREEN}.png" || echo "pngondemand $*: exit $?"
-    if [ -x "${BIN}/showScreen" ] && [ -f "${SCREEN}.png" ]; then
-        run_limited $((_secs + 10)) "${VAR}/showscreen.log" \
-            "${BIN}/showScreen" -t "${_secs}" "${SCREEN}.png"
-        echo "showScreen $*: exit ${RC}"
-    else
-        echo "no showScreen or no screen for $*"
-    fi
-    _left=$((_secs - (SECONDS - _s0)))
-    [ ${_left} -gt 0 ] && sleep ${_left}
-}
-
-run_app() {   # run_app <i> <app>
-    I=$1; APP=$2
-    app_info "${APP}" || { ARGS=""; TIMEOUT=120; }    # (no screens.sh)
-    OUT="${VAR}/${APP}_out.log"
-
-    echo "--- ${APP} ${ARGS}  (timeout ${TIMEOUT} s)"
-    : > "${OUT}"
-    if [ -f "${BIN}/${APP}" ]; then
-        run_limited ${TIMEOUT} "${OUT}" "${BIN}/${APP}" "${SDPATH}" ${ARGS}
-        [ -d "${SDPATH}" ] || exit 1               # card pulled: stop everything
-        FAILS=$(grep -c FAIL "${OUT}" 2>/dev/null)
-        [ -n "${FAILS}" ] || FAILS=0
-        if [ ${TIMED_OUT} = 1 ]; then
-            VERDICT=TIMEOUT; DETAIL="stopped after ${TIMEOUT} s"
-        elif [ ${RC} -gt 128 ]; then
-            VERDICT=CRASH; DETAIL="signal $((RC - 128))"
-        elif [ ${RC} -ne 0 ]; then
-            VERDICT=FAIL; DETAIL="exit ${RC}"
-        elif [ ${FAILS} -gt 0 ]; then
-            VERDICT=WARN; DETAIL="exit 0"
-        else
-            VERDICT=OK; DETAIL="exit 0"
-        fi
-    else
-        RC=127; SECS=0; FAILS=0; VERDICT=MISSING; DETAIL="no binary"
-        echo "no ${BIN}/${APP}" > "${OUT}"
-    fi
-    {
-        echo "=== exit code: ${RC}$([ ${RC} -gt 128 ] && echo " (killed by signal $((RC - 128)))")"
-        echo "=== run time: ${SECS} s"
-        echo "=== verdict: ${VERDICT} (${DETAIL}, ${FAILS} FAIL lines)"
-    } >> "${OUT}"
-    echo "${APP} exit code: ${RC}  verdict: ${VERDICT} (${DETAIL})  ${SECS} s"
-    echo "${APP} ${VERDICT} ${DETAIL}, ${SECS} s, ${FAILS} FAIL lines" >> "${SUMMARY}"
-
-    sloginfo > "${VAR}/${APP}_slog.txt" 2>&1
-    for f in /HBpersistence/core/"${APP}".* /mnt/persistence/"${APP}".* /tmp/"${APP}".*; do
-        [ -f "$f" ] || continue
-        echo "core file: $f"
-        cp "$f" "${VAR}/" && rm -f "$f"
-    done
-    sync
-
-    show ${POST_S} screen_result ${I} "${APP}" ${VERDICT}
-}
+cd "${VAR}" || exit 1
 
 {
-    echo "=== run.sh  $(date)  SDPATH=${SDPATH}  APPS=${APPS}"
+    echo "=== run.sh  $(date)  SDPATH=${SDPATH}"
     uname -a
     rm -rf "${BIN}" && mkdir -p "${BIN}"
     cp "${SDPATH}"/bin/* "${BIN}/" && chmod 755 "${BIN}"/*
-    rm -f "${SUMMARY}" "${VAR}/showscreen.log"
+    rm -f "${VAR}/summary.txt"
 
-    N=0
-    show ${PRE_S} screen_start
-    for A in ${APPS}; do
-        run_app ${N} "${A}"
-        N=$((N + 1))
-    done
+    "${BIN}/runner" "${SDPATH}" > "${VAR}/runner_out.log" 2>&1
+    RC=$?
+    echo "runner exit code: ${RC}"
+    # a crashed runner: its slog line and core file, if the card is still in
+    if [ ${RC} -ne 0 ] && [ -d "${SDPATH}" ]; then
+        sloginfo > "${VAR}/runner_slog.txt" 2>&1
+        for f in /HBpersistence/core/runner.* /mnt/persistence/runner.* /tmp/runner.*; do
+            [ -f "$f" ] || continue
+            echo "core file: $f"
+            cp "$f" "${VAR}/" && rm -f "$f"
+        done
+    fi
 
     rm -rf "${BIN}"
-    sync
-} > "${LOG}" 2>&1
+} > "${VAR}/run.log" 2>&1

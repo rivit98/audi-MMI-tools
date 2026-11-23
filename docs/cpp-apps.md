@@ -42,8 +42,8 @@ LIBS_myapp := -lgf
 ```
 
 The `CXX_APPS` rule compiles the `src/common` C files as C and yours as
-C++ in one command. Then add a line to `sd/apps.conf` and run
-`make sd SD_APPS=myapp`.
+C++ in one command. Then add a line to `sd/apps.conf` (optional), run
+`make sd` and start it from the runner's menu.
 
 - **`src/common` headers have no `extern "C"`.** Wrap the includes, as
   `src/hello8/main.cpp` does:

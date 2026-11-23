@@ -13,7 +13,7 @@ relay ([docs/android-auto.md §4.3](../../docs/android-auto.md)).
 - **Build:**
 
   ```sh
-  make sd SD_APPS=android_auto   # app + aa/headunit.crt, .key on the card
+  make sd                        # app + aa/headunit.crt, .key on the card (runner menu)
   make test                      # session against a fake phone + protobuf check
   make aa-host                   # desk test: the PC is the head unit (saves + plays the video)
   ```

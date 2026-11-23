@@ -1,13 +1,13 @@
 // runner - a menu of the test apps on the card: turn the main knob to choose
-// one, press it to run it. The app runs as it would under run.sh (same
-// arguments, timeout, output file, verdict, summary line, slog and core
-// files); then the menu comes back with its verdict. "Leave the menu" ends
-// the runner, and with it run.sh's run.
+// one, press it to run it. The app runs with its arguments and timeout, its
+// output file, verdict, summary line, slog and core files; then the menu
+// comes back with its verdict. "Leave the menu" ends the runner, and with it
+// run.sh's run.
 //
-// The menu lists every ELF file in <sd>/apps/: putting a binary there
-// installs it, nothing else to configure. Its apps.conf line, if any, adds a
-// title, text, arguments and timeout, and puts it in apps.conf's order (the
-// others follow by name, with no arguments and a 1 h timeout). A started
+// The menu lists every ELF file in <sd>/apps/ by its file name: putting a
+// binary there installs it, nothing else to configure. Its apps.conf line,
+// if any, adds text, arguments and timeout, and puts it in apps.conf's order
+// (the others follow by name, with no arguments and a 1 h timeout). A started
 // app is copied to /tmp/mmi_apps/ first, next to run.sh's copy of bin/
 // (FAT has no exec bit, the card may be pulled while it runs, and the apps
 // find the unit tools next to themselves). Input: src/common/buttons (Hub
@@ -18,7 +18,7 @@
 // after the app. While the HMI shows the rear camera the menu stays away.
 //
 // Output: <sd>/var/runner.log (every start, key and result), and per app
-// what run.sh writes: var/<app>_out.log (+ "=== " lines), var/summary.txt,
+// var/<app>_out.log (+ "=== " lines), a var/summary.txt line,
 // var/<app>_slog.txt, core files.
 //
 // usage: runner <sd_path>
@@ -30,6 +30,7 @@ extern "C" {
 #include "screen.h"
 #include "text.h"
 #include "font_big.h"
+#include "font_mid.h"
 #include "font_small.h"
 }
 
@@ -57,15 +58,16 @@ namespace {
 constexpr unsigned kRedrawMs = 100;
 constexpr unsigned kReshowMs = 1000;
 constexpr unsigned kWaitMs = 200;
-constexpr unsigned kKillGraceMs = 15000;   // run.sh's KILL_GRACE after a timeout
+constexpr unsigned kKillGraceMs = 15000;   // after the TERM at a timeout
 constexpr unsigned kQuitGraceMs = 7000;    // quit.c ends us QUIT_HARD_S after a stop
-constexpr unsigned kStuckGraceMs = 5000;   // run.sh's STUCK_GRACE after the KILL
+constexpr unsigned kStuckGraceMs = 5000;   // after the KILL
 constexpr unsigned kPostS = 60;            // the slog + core collection
 constexpr int kMargin = 20;
-constexpr int kRowH = 40;
+constexpr int kRowH = 32;                  // font_mid (24 px) + 8
 constexpr int kListY = 56;
-constexpr int kRows = 7;
-constexpr int kTextY = kListY + kRows * kRowH + 8;
+constexpr int kRows = 8;
+constexpr int kListEnd = kListY + kRows * kRowH - 4;   // the last row's bottom
+constexpr int kTextY = kListEnd + 18;
 constexpr const char *kSelf = "runner";
 constexpr const char *kDefaultBin = "/tmp/mmi_apps";
 
@@ -275,7 +277,7 @@ int await(pid_t pid, unsigned timeout_s, bool &timed_out, bool &stopped,
 	}
 }
 
-// run.sh's crash evidence: the system log, and core files moved to the card.
+// Crash evidence: the system log, and core files moved to the card.
 void collect(const std::string &app, const std::string &out_path)
 {
 	std::string cmd = "sloginfo > '" + var + "/" + app + "_slog.txt' 2>&1; "
@@ -377,27 +379,26 @@ void draw(const runner::Menu &m)
 		bool sel = i == m.selected();
 		if (sel)
 			canvas_fill(c, kMargin / 2, y - 4, c->w - kMargin, kRowH, C_SEL);
-		std::snprintf(line, sizeof(line), "%s %-.38s", sel ? ">" : " ",
-		              it.app.name.empty() ? "Leave the menu" : it.app.title.c_str());
-		text_draw(c, &font_big, kMargin, y, line, -1, sel ? C_TEXT : C_DIM);
+		std::snprintf(line, sizeof(line), "%s %-.52s", sel ? ">" : " ",
+		              it.app.name.empty() ? "Leave the menu" : it.app.name.c_str());
+		text_draw(c, &font_mid, kMargin, y, line, -1, sel ? C_TEXT : C_DIM);
 		if (!it.verdict.empty())
-			text_draw(c, &font_big, c->w - kMargin - 8 * font_big.w, y, it.verdict.c_str(), -1,
+			text_draw(c, &font_mid, c->w - kMargin - 8 * font_mid.w, y, it.verdict.c_str(), -1,
 			          verdict_color(it.verdict));
 	}
 	if (m.top() > 0)
 		text_draw(c, &font_small, c->w - kMargin - 3 * font_small.w, kListY - 18, "...", -1, C_DIM);
 	if (m.top() + kRows < m.count())
-		text_draw(c, &font_small, c->w - kMargin - 3 * font_small.w, kTextY - 18, "...", -1, C_DIM);
+		text_draw(c, &font_small, c->w - kMargin - 3 * font_small.w, kListEnd, "...", -1, C_DIM);
 
 	const Item &sel = items[m.selected()];
 	std::string text;
 	if (sel.app.name.empty()) {
 		text = "Give the screen back to the MMI and end the run.";
 	} else {
-		text = sel.app.name;
 		if (!sel.verdict.empty())
-			text += "  (last run: " + sel.verdict + ", " + sel.detail + ")";
-		text += "\n" + sel.app.text;
+			text = "Last run: " + sel.verdict + ", " + sel.detail + "\n";
+		text += sel.app.text;
 	}
 	Wrap w{c, kTextY, c->h - 36};
 	text_wrap(text.c_str(), (c->w - 2 * kMargin) / font_small.w, wrap_line, &w);
@@ -410,7 +411,7 @@ void draw(const runner::Menu &m)
 
 // ---- one app ----
 
-// Runs items[i] as run.sh would. false: we were asked to stop meanwhile.
+// Runs one app. false: we were asked to stop meanwhile.
 bool run_item(Item &it)
 {
 	const runner::AppConf &a = it.app;

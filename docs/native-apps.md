@@ -26,10 +26,9 @@ tools/sync_sd.sh /media/$USER/CARD  # rsync build/sd/ to the card (changes only,
 # boot the MMI fully, insert into SD slot 1
 ```
 
-The card shows a start screen, then the runner's menu of every app in
-`apps/` (main knob: choose, press: run). With `make sd SD_APPS="a b"` it
-runs those apps one after another instead, each followed by its result
-screen. Everything the run writes comes back in `var/` on the card. If the screen
+The card starts the runner, a menu of every app in `apps/` by file name
+(main knob: choose, press: run). Everything the run writes comes back in
+`var/` on the card. If the screen
 freezes, reboot the MMI: hold **MENU + rotary knob + top-right soft key**.
 
 ## 2. The platform
@@ -131,13 +130,13 @@ build contexts so the firmware tree is never sent to Docker:
 
 The Makefile expects to sit two levels below the toolkit root (`REPO :=
 ../..`), because `make sd` uses the toolkit's `builder/encoder.py` and
-`core/` (autorun launcher, `showScreen`).
+`core/` (autorun launcher).
 
 | Target | Does |
 |---|---|
 | `make sdk` | build `mmi-sdk` (again after changing `sdk/` or `FWLIBS`) |
 | `make` | all apps into `build/` (unstripped, `-O2 -g`) |
-| `make sd [SD_APPS="a b"]` | card layout in `build/sd/`: every app in `apps/` with its clips, unit tools and files; run.sh starts SD_APPS (default `runner`, the menu). File times are kept, so rsync copies only changes |
+| `make sd` | card layout in `build/sd/`: every app in `apps/` with its clips, unit tools and files; run.sh starts the runner (the menu). File times are kept, so rsync copies only changes |
 | `make test` | host unit tests (`tests/*.c`, `*.cpp`) with ASan/UBSan |
 | `make check APP=x` | ELF header, interpreter, NEEDED, flags of `build/x` |
 | `make addr APP=x ADDR="0x08043270 …"` | crash address → function, file:line |
@@ -164,7 +163,7 @@ sdk/                    wrapper, qnx-elf-fix.py, mkstubs.py, build-sysroot.sh,
 src/common/             shared code, linked per group (below)
 src/<app>/              one app's own logic + README.md
 tests/                  host unit tests (check.h)
-sd/                     run.sh, screens.sh, apps.conf, card README
+sd/                     run.sh, apps.conf
 media/                  test clip generators
 android/                phone app (own Makefile)
 tools/                  aoa_host.py, f3swalk.py, gusa-scan.awk, Ghidra script + resolve_decomp.py
@@ -186,13 +185,15 @@ docs/                   this guide and the deep dives
    For C++, also add it to `CXX_APPS` (the rule compiles the `src/common`
    files as C and yours as C++ in one command).
 3. Add a line to `sd/apps.conf`:
-   `name|timeout s|arguments after <sd>|title|what you see / do`.
-4. `make test` for the host-testable parts, then `make sd SD_APPS=myapp`.
+   `name|timeout s|arguments after <sd>|what you see / do` (optional: the
+   menu lists every binary in `apps/` by its file name).
+4. `make test` for the host-testable parts, then `make sd` and run it from
+   the menu.
 
 | Group | Files | Gives you |
 |---|---|---|
 | `BASE` | `log`, `quit`, `lmgr` | SD log, clean-stop sources, layer manager client |
-| `TEXT` | `text` + generated fonts | UTF-8, word wrap, Terminus 8×16 / 16×32 glyphs |
+| `TEXT` | `text` + generated fonts | UTF-8, word wrap, Terminus 8×16 / 16×32 glyphs (12×24 `font_mid`: the runner's own) |
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
 | `GL` | `gfx`, `hud`, `img` | gf + EGL bring-up, FPS counter, BMP/PNG writer |
 | `IMG` | `img` | PNG/BMP writer (stb_image_write) |
@@ -229,13 +230,16 @@ planning. A FAIL on the car is then the car, not the code.
 `copie_scr.sh` on the card (XOR-encoded by `builder/encoder.py`) → it runs
 `core/copie_scr_plain.sh` → `cd $SDPATH; exec ksh ./run.sh $SDPATH`.
 
-**`sd/run.sh`** (ksh; no native runner needed):
+**`sd/run.sh`** (ksh) copies `bin/*` (the runner and the unit tools the
+apps use) to `/tmp/mmi_apps/` and starts the runner from there (FAT32 has
+no exec bit, and the card can be pulled mid-run). Its own log is
+`var/run.log`.
 
-- copies `bin/*` to `/tmp/mmi_apps/` and runs from there (FAT32 has no
-  exec bit, and the card can be pulled mid-run);
-- a start screen, then per app: the app with stdout/stderr in
-  `var/<app>_out.log` → its result screen. Screens are drawn on the car: `screens.sh` prints a
-  layout, `bin/pngondemand` renders a PNG, `showScreen -t` shows it;
+**The runner** ([src/runner/README.md](../src/runner/README.md)), per app
+started from its menu:
+
+- copies the app from `apps/` to `/tmp/mmi_apps/`, runs it with
+  stdout/stderr in `var/<app>_out.log`;
 - enforces the `apps.conf` timeout (TERM, KILL 15 s later);
 - saves `sloginfo` to `var/<app>_slog.txt` and moves core files to `var/`;
 - writes verdicts to `var/summary.txt`: `OK` (exit 0, no `FAIL` line),
@@ -245,16 +249,12 @@ planning. A FAIL on the car is then the car, not the code.
 Apps get the card path as `argv[1]`: inputs (`clips/`, `beep.wav`, `aa/`)
 are read from there, and everything they write goes to `<card>/var/`
 (`var_dir()` in `src/common/log.c`): logs, screenshots, recordings, their
-`hello6/` / `hello9/` folders. `run.sh` runs them with `var/` as the
-working directory, so files the unit's tools drop there (e.g.
+`hello6/` / `hello9/` folders. They run with `var/` as the working
+directory, so files the unit's tools drop there (e.g.
 `testapp-cmdline.history`) land in `var/` too.
-`sd/apps.conf` holds each app's timeout, arguments and title; the start
-and result screens last `PRE_S`/`POST_S` (Makefile). Screen rendering time
-counts towards them, and if pngondemand or showScreen fails, `run.sh`
-sleeps the rest, so timing never changes (errors in `var/run.log` and
-`var/showscreen.log`). When `showScreen -t` ends the HMI comes back, and the
-next app can take the screen at once (confirmed). If neither
-the apps' output nor `var/run.log` appears, `copie_scr.sh` didn't run.
+`sd/apps.conf` holds each app's timeout, arguments and menu text. If
+neither `var/runner.log` nor `var/run.log` appears, `copie_scr.sh` didn't
+run.
 
 **Crashes.** The unit runs the "Audi 3G+ dumper"
 (`dumper -m -w -z 1 -c -d /HBpersistence/core -d /mnt/persistence -f …`).
@@ -423,8 +423,6 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
   VFBs, **never GL output**. `v-level` / `s-level` also exist; meaning
   unknown.
 - Pictures: `img.c` (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
-  `pngondemand` renders a small text-layout language to PNG
-  ([src/pngondemand/README.md](../src/pngondemand/README.md)).
 
 ## 9. GPU: 2D and 3D with OpenGL ES 1.0
 

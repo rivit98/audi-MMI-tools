@@ -17,7 +17,7 @@ the **navigation map** underneath, car parked.
 hello2, hello3 and hello4 have answered their questions and are not in the
 default run. hello4's default stress steps stop at 12 tori; 16, 32 and 64 are
 commented out in `opts_default`, and its `sd/apps.conf` line is commented
-out. Run it with `make sd SD_APPS="hello4 ..."` after uncommenting that line.
+out. Run it from the runner's menu after uncommenting that line.
 
 ---
 
@@ -33,8 +33,7 @@ stencil 8), `GL_RENDERER NVIDIA EMBEDDED Build 6.0180/NV18`.
   hardcode it.
 - **Hand-back to the HMI works.** Teardown (`updateVfb` → unregister →
   show `{40,16,19}`) returns 0 every time, and the video shows the nav map
-  back on screen after each app and between the `showScreen -t` status
-  screens.
+  back on screen after each app.
 
 ## 2. Screen captures: only `glReadPixels` sees what GL draws
 

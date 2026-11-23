@@ -1,5 +1,5 @@
-// test_runner.cpp - src/runner/: apps.conf as run.sh reads it, run.sh's
-// verdicts, and the knob-driven menu.
+// test_runner.cpp - src/runner/: apps.conf parsing, the verdicts, and the
+// knob-driven menu.
 #include "check.h"
 #include "types.h"
 
@@ -17,13 +17,13 @@ void test_conf()
 	const std::string text =
 		"# a comment\n"
 		"\n"
-		"hello|30||Toolchain smoke test|Nothing on screen.\n"
-		"hello4|160|step=10 trace=1|3D test|Probes; if the picture stops: reboot.\n"
-		"hello5|540|pd|MMI connections|text with | a bar | in it\r\n"
-		"hello7|||\n"
+		"hello|30||Nothing on screen.\n"
+		"hello4|160|step=10 trace=1|Probes; if the picture stops: reboot.\n"
+		"hello5|540|pd|text with | a bar | in it\r\n"
+		"hello7||\n"
 		"bad||\n"
-		"|10|x|no name|\n"
-		"hello|45|again||replaced\n"
+		"|10|x|no name\n"
+		"hello|45|again|replaced\n"
 		"last|7";                               // no newline at the end
 	std::vector<AppConf> a = parse_conf(text);
 
@@ -32,7 +32,6 @@ void test_conf()
 	CHECK_EQ(a[0].timeout_s, 45);
 	CHECK_EQ(a[0].args.size(), 1);
 	CHECK_STR(a[0].args[0].c_str(), "again");
-	CHECK_STR(a[0].title.c_str(), "hello");     // empty title: the name
 	CHECK_STR(a[0].text.c_str(), "replaced");
 
 	CHECK_STR(a[1].name.c_str(), "hello4");
@@ -40,12 +39,12 @@ void test_conf()
 	CHECK_EQ(a[1].args.size(), 2);
 	CHECK_STR(a[1].args[0].c_str(), "step=10");
 	CHECK_STR(a[1].args[1].c_str(), "trace=1");
-	CHECK_STR(a[1].title.c_str(), "3D test");
+	CHECK_STR(a[1].text.c_str(), "Probes; if the picture stops: reboot.");
 
 	CHECK_STR(a[2].text.c_str(), "text with | a bar | in it");   // CR dropped too
 	CHECK_STR(a[2].args[0].c_str(), "pd");
 
-	CHECK_STR(a[3].name.c_str(), "hello7");     // empty timeout: run.sh's 120
+	CHECK_STR(a[3].name.c_str(), "hello7");     // empty timeout: 120
 	CHECK_EQ(a[3].timeout_s, 120);
 	CHECK_EQ(a[3].args.size(), 0);
 	CHECK_STR(a[4].name.c_str(), "bad");
@@ -65,7 +64,7 @@ void test_verdict()
 	CHECK_STR(verdict(true, false, 2, 0), "FAIL");
 	CHECK_STR(verdict(true, false, 0, 3), "WARN");
 	CHECK_STR(verdict(true, false, 0, 0), "OK");
-	CHECK_STR(verdict(true, false, 128, 0), "FAIL");   // run.sh: only > 128 is a signal
+	CHECK_STR(verdict(true, false, 128, 0), "FAIL");   // only > 128 is a signal
 
 	CHECK_EQ(count_fail_lines(""), 0);
 	CHECK_EQ(count_fail_lines("ok\nFAIL x\n"), 1);
@@ -93,9 +92,9 @@ void test_discovery()
 	CHECK(!is_elf(txt, sizeof(txt)));
 
 	std::vector<AppConf> conf = parse_conf(
-		"hello5|540|pd|MMI connections|text\n"
-		"hello7|940||Knob tester|text\n"
-		"hello11|1860||Camera|text\n");
+		"hello5|540|pd|text\n"
+		"hello7|940||text\n"
+		"hello11|1860||Camera\n");
 	// found on the card: two described, two not (any order from readdir)
 	std::vector<AppConf> m = menu_apps({"zeta", "hello11", "alpha", "hello5", "alpha"}, conf);
 	CHECK_EQ(m.size(), 4);
@@ -103,9 +102,9 @@ void test_discovery()
 	CHECK_STR(m[0].args[0].c_str(), "pd");
 	CHECK_EQ(m[0].timeout_s, 540);
 	CHECK_STR(m[1].name.c_str(), "hello11");
-	CHECK_STR(m[1].title.c_str(), "Camera");
+	CHECK_STR(m[1].text.c_str(), "Camera");
 	CHECK_STR(m[2].name.c_str(), "alpha");      // then the rest by name, once
-	CHECK_STR(m[2].title.c_str(), "alpha");
+	CHECK_STR(m[2].text.c_str(), "");
 	CHECK_EQ(m[2].timeout_s, kDefaultTimeoutS);
 	CHECK_EQ(m[2].args.size(), 0);
 	CHECK_STR(m[3].name.c_str(), "zeta");

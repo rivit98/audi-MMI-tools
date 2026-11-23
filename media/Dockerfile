@@ -1,6 +1,6 @@
 # mmi-media - ffmpeg for hello6's test videos (media/mkclips.sh), python3
 # for media/csmp4.py.
-# Built by `make clips` / `make sd SD_APPS=hello6` (Makefile: build/.media-image).
+# Built by `make clips` / `make sd` (Makefile: build/.media-image).
 FROM debian:bookworm-slim
 
 RUN apt-get update \

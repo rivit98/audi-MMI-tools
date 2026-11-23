@@ -43,10 +43,10 @@ std::vector<AppConf> parse_conf(const std::string &text)
 		if (line.empty() || line[0] == '#')
 			continue;
 
-		std::string f[5];
+		std::string f[4];
 		usize start = 0;
-		for (int k = 0; k < 5; k++) {
-			usize bar = k < 4 ? line.find('|', start) : std::string::npos;
+		for (int k = 0; k < 4; k++) {
+			usize bar = k < 3 ? line.find('|', start) : std::string::npos;
 			if (bar == std::string::npos) {
 				f[k] = start <= line.size() ? line.substr(start) : "";
 				start = line.size() + 1;
@@ -66,8 +66,7 @@ std::vector<AppConf> parse_conf(const std::string &text)
 				a.timeout_s = (unsigned)t;
 		}
 		a.args = split_ws(f[2]);
-		a.title = f[3].empty() ? f[0] : f[3];
-		a.text = f[4];
+		a.text = f[3];
 
 		bool replaced = false;
 		for (AppConf &old : apps)
@@ -117,7 +116,6 @@ std::vector<AppConf> menu_apps(const std::vector<std::string> &files,
 	for (const std::string &f : rest) {
 		AppConf a;
 		a.name = f;
-		a.title = f;
 		a.timeout_s = kDefaultTimeoutS;
 		out.push_back(a);
 	}

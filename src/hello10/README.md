@@ -157,8 +157,8 @@ second io-media-nvidia from RAM and leaves the HMI's alone.
 
 ## Running
 
-- **Run:** `hello10 <sd_path> [test,test,...]`, e.g. `crop`. `make sd
-  SD_APPS="hello10 ..."` puts the clips (c5, c12) on the card.
+- **Run:** `hello10 <sd_path> [test,test,...]`, e.g. `crop`. `make sd`
+  puts the clips (c5, c12) on the card.
 - **Output** (in `var/` on the card):
   - `hello10.log`: the SPS as sent and after the rewrite, a status line per
     second for the live tests (frames pushed, skips, reads, position, TIME

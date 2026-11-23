@@ -296,7 +296,7 @@ Every button on ch8 is named (src/common/buttons/README.md); the touch pad bytes
 
 Two test apps on the car, both run outside the HMI:
 
-- **hello6** (`src/hello6`, `make sd SD_APPS=hello6`, ~6 min, parked):
+- **hello6** (`src/hello6`, from the runner's menu, ~6 min, parked):
   plays clips from `media/mkclips.sh` through the unit's own
   `testapp-file`, and runs throughput benchmarks. Results: `hello6.log`
   (`RESULT` lines and a summary) and `hello6/`, in `var/` on the card.

@@ -9,10 +9,6 @@
 #                        (src/runner/README.md). Copy it with tools/sync_sd.sh
 #                        <card>: rsync, unchanged files keep their times, so
 #                        only changes go.
-#   make sd SD_APPS="hello hello3"
-#                        the same card, but run.sh runs those apps in turn
-#                        instead of the menu, with status screens (showScreen)
-#                        in between, rendered on the car by pngondemand
 #   make test            host-side unit tests (tests/) in the SDK container
 #   make apk             build the Android sender: android/out/audi_streaming.apk
 #                        (= make -C android; see android/Makefile)
@@ -116,12 +112,11 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
 # APPS is everything `make` builds, and `make sd` puts all of them in the
-# card's apps/ (settings: sd/apps.conf). SD_APPS is what run.sh starts on
-# insert, in this order: by default only the runner, the menu of apps/.
+# card's apps/ (settings: sd/apps.conf); run.sh starts the runner, the
+# menu of apps/.
 # The notes below say which apps still have open questions on the car.
 #
-# hello is still built but no longer run: it proved the toolchain produces
-# binaries the MMI runs. Run it with `make sd SD_APPS="hello ..."`.
+# hello: it proved the toolchain produces binaries the MMI runs.
 # lmprobe proved the layer-manager / VFB sequence and read the layer
 # manager's state dump on the car (docs/platform-notes.md §3.1), so it is
 # no longer in the default run.
@@ -177,23 +172,16 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player camera vou
 # until the SD card is pulled, like audi_stream_receiver. It connects and
 # receives video but can't show it (the DM642 refuses 800 wide), so it is
 # no longer in the default run: the phone app's Android Auto mode streams
-# through audi_stream_receiver instead. Run it with SD_APPS=android_auto.
+# through audi_stream_receiver instead.
 #
 # runner (src/runner/README.md) is the menu of apps/, chosen with the main
-# knob; run.sh starts it by default.
+# knob; run.sh starts it, and it is the only app in the card's bin/.
 APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
            audi_stream_receiver android_auto runner
 CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto runner
-# Tools run.sh uses, also built for the car and put in bin/ on the card.
-TOOLS   := pngondemand
-SD_APPS ?= runner
-# Seconds each status screen is shown: the start screen, and the result
-# screen after each app.
-PRE_S   := 3
-POST_S  := 3
 
 .PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan aa-sources
-all: $(addprefix build/,$(APPS) $(TOOLS))
+all: $(addprefix build/,$(APPS))
 
 build/hello:  $(wildcard src/hello/*.c)
 # lmprobe: layer manager only (no GL).
@@ -285,19 +273,15 @@ build/android_auto: src/android_auto/main.cpp $(AA_CORE) $(call commonxx,aoa_hos
 LIBS_android_auto := -Lbuild/mbedtls-sh4 -lmbedtls -lusbdi -lgf
 CXXFLAGS_android_auto := -Wno-ignored-attributes $(AA_INC)
 
-# runner: C++. The test menu: the main knob chooses, its press runs the app
-# as run.sh would. Input from BUTTONS (src/common/buttons: ch8 decoding + observers,
+# runner: C++. The test menu: the main knob chooses, its press runs the app.
+# Input from BUTTONS (src/common/buttons: ch8 decoding + observers,
 # fed by quit.c); conf.cpp (apps.conf, verdicts) and menu.cpp are pure
 # (tests/test_runner.cpp).
 BUTTONS := $(wildcard src/common/buttons/*.cpp src/common/buttons/*.h) src/common/mono_cond.h
 build/runner: $(wildcard src/runner/*.cpp src/runner/*.h) $(BUTTONS) $(call commonxx,camera) \
-    src/common/camera_log.h $(BASE) $(SCREEN)
+    src/common/camera_log.h $(BASE) $(SCREEN) build/gen/font_mid.h
 LIBS_runner := -lgf
 CXXFLAGS_runner := -Isrc/common/buttons
-
-# pngondemand: layout text -> PNG (src/pngondemand/README.md), for run.sh's
-# status screens. Text drawing + PNG writer, no device libraries.
-build/pngondemand: $(wildcard src/pngondemand/*.c src/pngondemand/*.h) $(TEXT) $(IMG)
 
 build/gen/font_big.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold32x16.psf.gz
 	mkdir -p build/gen
@@ -305,6 +289,9 @@ build/gen/font_big.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold32x16.psf.gz
 build/gen/font_small.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold16.psf.gz
 	mkdir -p build/gen
 	$(RUN) python3 -I sdk/mkfont.py sdk/fonts/Uni2-TerminusBold16.psf.gz font_small $@
+build/gen/font_mid.h: sdk/mkfont.py sdk/fonts/Uni2-TerminusBold24x12.psf.gz
+	mkdir -p build/gen
+	$(RUN) python3 -I sdk/mkfont.py sdk/fonts/Uni2-TerminusBold24x12.psf.gz font_mid $@
 
 # --- third-party sources for android_auto, fetched once into third_party/
 # (gitignored), checked against pinned SHA-256s.
@@ -389,8 +376,7 @@ $(addprefix build/,$(CXX_APPS)):
 check: build/$(APP)
 	$(RUN) sh -c 'file build/$(APP); sh4-linux-gnu-readelf -h -l -d build/$(APP) | grep -E "Type:|Entry|interpreter|LOAD|NEEDED|HASH|FLAGS|Flags"'
 
-# What each app needs on the card besides its binary; `make sd` takes only
-# the SD_APPS' share.
+# What each app needs on the card besides its binary.
 #   CLIPS_<app>    test videos from build/clips/ (media/mkclips.sh), to
 #                  card:/clips. The set is generated whole, once, when any
 #                  SD app has clips.
@@ -410,11 +396,6 @@ FWTOOLS_hello9 := testapp-cmdline
 FWTOOLS_hello10 := testapp-cmdline
 FILES_hello5   := src/hello5/beep.wav
 
-ifneq ($(filter sd,$(MAKECMDGOALS)),)
-ifneq ($(filter-out $(APPS),$(SD_APPS)),)
-$(error SD_APPS: not an app: $(filter-out $(APPS),$(SD_APPS)) (APPS: $(APPS)))
-endif
-endif
 # The card always gets every app (in apps/; the runner only in bin/) and
 # everything they need.
 SD_MENU   := $(filter-out runner,$(APPS))
@@ -423,24 +404,20 @@ SD_CLIPS  := $(call per_app,CLIPS)
 SD_FWTOOLS := $(wildcard $(addprefix $(FWEFS)/bin/,$(call per_app,FWTOOLS)))
 SD_FILES  := $(call per_app,FILES)
 
-# Every app is built and copied, plus run.sh's own tools (TOOLS, showScreen).
-# cp -p keeps each file's time, so an rsync of build/sd/ to the card (size +
-# time) copies only what changed; run.sh and copie_scr.sh are written anew
-# every time (both tiny).
-sd: $(addprefix build/,$(APPS) $(TOOLS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
+# Every app is built and copied. cp -p keeps each file's time, so an rsync of
+# build/sd/ to the card (size + time) copies only what changed; copie_scr.sh
+# is written anew every time (tiny).
+sd: $(addprefix build/,$(APPS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	rm -rf build/sd && mkdir -p build/sd/bin build/sd/apps build/sd/var
-	cp -p $(addprefix build/,$(SD_APPS) $(TOOLS)) $(SD_FWTOOLS) $(REPO)/core/bin/showScreen build/sd/bin/
+	cp -p build/runner $(SD_FWTOOLS) build/sd/bin/
 	cp -p $(addprefix build/,$(SD_MENU)) build/sd/apps/
-	cp -p sd/apps.conf sd/screens.sh $(SD_FILES) build/sd/
+	cp -p sd/apps.conf sd/run.sh $(SD_FILES) build/sd/
 	$(if $(SD_CLIPS),mkdir -p build/sd/clips && cp -p $(addprefix build/clips/,$(SD_CLIPS)) build/sd/clips/)
 	mkdir -p build/sd/aa && cp -p $(AA_CERT)/headunit.crt $(AA_CERT)/headunit.key build/sd/aa/
-	sed -e 's/@APPS@/$(SD_APPS)/' -e 's/@PRE_S@/$(PRE_S)/' \
-	    -e 's/@POST_S@/$(POST_S)/' sd/run.sh > build/sd/run.sh
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root:"
 	@echo "  tools/sync_sd.sh <card mount point>   (rsync: only changes, keeps the card's var/)"
-	@echo "  run by run.sh: $(SD_APPS)"
 	@echo "  in apps/ (the runner's menu): $(SD_MENU)"
 	@echo "  clips: $(or $(SD_CLIPS),none)"
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"
@@ -466,7 +443,7 @@ addr: build/$(APP)
 # Host-side unit tests of the pure parts (protocol, UTF-8/wrap/draw), built
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
-TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png build/test_layout \
+TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png \
            build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_swdec build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
@@ -508,9 +485,6 @@ TESTLIBS_test_lz4 := -llz4
 # into build/test_png.d/, tests/check_png.py decodes them with Python's zlib.
 build/test_png:    tests/test_png.c tests/check.h src/common/img.c src/common/img.h \
                    src/common/stb_image_write.h src/common/text.c
-build/test_layout: tests/test_layout.c tests/check.h src/pngondemand/layout.c \
-                   src/pngondemand/layout.h src/common/text.c \
-                   build/gen/font_big.h build/gen/font_small.h
 # screen.c's full / changed-span VFB copy
 build/test_vfbcopy: tests/test_vfbcopy.c tests/check.h src/common/vfbcopy.c src/common/vfbcopy.h
 # common/swdec.c (h264bsd) against ffmpeg's decode of the same clips
@@ -602,7 +576,7 @@ build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
 $(filter-out build/test_swdec build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
-	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/pngondemand -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
+	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
 
 # gUSA atomic sequences left in the built apps (tools/gusa-scan.awk): the
 # SDK builds with LL/SC, so only what is precompiled into libstdc++.a /

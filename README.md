@@ -11,7 +11,6 @@ rule: [docs/native-apps.md](docs/native-apps.md).
 ```sh
 make sdk                        # once: the mmi-sdk Docker image (toolchain + QNX sysroot)
 make sd                         # build every app + lay out build/sd/ (all apps in apps/)
-make sd SD_APPS="hello5 hello9" # same card, but run.sh runs these in turn instead of the menu
 make test                       # host unit tests
 tools/sync_sd.sh /media/$USER/CARD   # copy build/sd/ to the card
 ```
@@ -50,8 +49,7 @@ and what doesn't). Shared code is in [src/common/](src/common/); the knob and bu
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
 | [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
-| [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/`; the main knob chooses, its press runs it as run.sh would (run.sh starts it by default) |
-| [pngondemand](src/pngondemand/README.md) | text layout → PNG, draws the run's status screens |
+| [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/` by file name; the main knob chooses, its press runs it (run.sh starts it) |
 
 Which apps a card gets by default, their timeouts and arguments:
 [sd/apps.conf](sd/apps.conf).
