@@ -1,6 +1,6 @@
 #!/bin/bash
-# mkclips.sh <outdir> - hello6's, hello9's and hello10's test videos (runs in the
-# mmi-media image).
+# mkclips.sh <outdir> - hello6's, hello9's and hello10's test videos and hello12's
+# SBC audio (runs in the mmi-media image).
 #
 # Every clip is D seconds of ffmpeg's moving testsrc2 pattern with its own
 # name and a frame counter burnt in, so the driver can tell what is on the
@@ -96,6 +96,15 @@ drawtext=fontfile=$FONT:text='CUT':x=730:y=(h-th)/2:fontsize=28:fontcolor=white"
 ff -f lavfi -i "$C12_VF" -c:v libx264 -profile:v baseline -level:v 3.1 -pix_fmt yuv420p \
   -preset veryfast -b:v 1500k -maxrate 1500k -bufsize 400k -g "$FPS" -keyint_min "$FPS" \
   -sc_threshold 0 -bf 0 -refs 1 -an -f h264 "$OUT/c12_h264_800.h264"
+
+# a1, a2: hello12's SBC audio (raw SBC frames, ffmpeg's encoder: 44.1 kHz
+# stereo, bitpool 54, 120-byte frames, ~331 kbit/s), 20 s each at -12 dBFS.
+# a1: a 0.5 s 880 Hz ping every 2 s. a2: a tone rising from 440 Hz for 2 s,
+# then again, so a gap or a jump in a live stream is easy to hear.
+ff -f lavfi -i "aevalsrc=exprs=0.25*sin(2*PI*880*t)*lt(mod(t\\,2)\\,0.5):s=44100:c=stereo:d=20" \
+  -c:a sbc -b:a 328k -f sbc "$OUT/a1_sbc_ping.sbc"
+ff -f lavfi -i "aevalsrc=exprs=0.25*sin(2*PI*(440*mod(t\\,2)+220*mod(t\\,2)*mod(t\\,2))):s=44100:c=stereo:d=20" \
+  -c:a sbc -b:a 328k -f sbc "$OUT/a2_sbc_sweep.sbc"
 
 # what came out
 for f in "$OUT"/*.*; do

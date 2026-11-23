@@ -171,9 +171,9 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 #
 # runner (src/runner/README.md) is the menu of apps/, chosen with the main
 # knob; run.sh starts it, and it is the only app in the card's bin/.
-APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 \
+APPS    := hello lmprobe hello2 hello3 hello4 hello5 hello6 hello7 hello8 hello9 hello10 hello11 hello12 \
            audi_stream_receiver android_auto runner
-CXX_APPS := hello7 hello8 hello9 hello10 hello11 audi_stream_receiver android_auto runner
+CXX_APPS := hello7 hello8 hello9 hello10 hello11 hello12 audi_stream_receiver android_auto runner
 
 .PHONY: all sdk check sd addr shell clean test apk apk-test apk-install aoa-host aoa-host-test aa-host clips gusa-scan aa-sources
 all: $(addprefix build/,$(APPS))
@@ -245,6 +245,14 @@ CXXFLAGS_hello10 := -Wno-ignored-attributes
 build/hello11: $(wildcard src/hello11/*.cpp src/hello11/*.h) $(CAMERA) $(BASE) $(SCREEN) $(UI)
 LIBS_hello11 := -lgf
 CXXFLAGS_hello11 := -Wno-ignored-attributes
+# hello12: C++. Live SBC audio through io-media's Bluetooth reader on the DSP
+# (docs/bt-audio-path.md): io-media's "sbc:" input, fed by hello12's own
+# resource manager (sbcsrv.cpp), plus a read-only look at the Bluetooth
+# stack's /dev/wms (wmsprobe.cpp, in a child). Pure: sbc.cpp,
+# tests/test_hello12.cpp.
+build/hello12: $(wildcard src/hello12/*.cpp src/hello12/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(IOM)
+LIBS_hello12 := -lgf
+CXXFLAGS_hello12 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn status screen, no GL.
 # The phone's H.264 stream plays on the unit's DM642 through LIVE (hwvideo.cpp).
 build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(LIVE)
@@ -364,6 +372,7 @@ CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
 CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
 CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264 c3_h264_480.mp4 c4_h264_800.mp4
+CLIPS_hello12  := a1_sbc_ping.sbc a2_sbc_sweep.sbc
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs
 FWTOOLS_hello9 := testapp-cmdline
@@ -418,7 +427,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_hello12 build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -519,6 +528,11 @@ build/test_hello11: tests/test_hello11.cpp tests/check.h src/common/camera/ipc4.
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/common/camera -Isrc/hello11 -o $@ $(filter %.cpp,$^)
+# hello12's SBC headers, frame index, live release and read answers
+build/test_hello12: tests/test_hello12.cpp tests/check.h src/hello12/sbc.cpp src/hello12/sbc.h
+	mkdir -p build
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/hello12 -o $@ $(filter %.cpp,$^)
 # src/common/buttons: ch8 decoding on the car's messages, the hub and its queue
 # (hub.cpp stamps quit.c's messages with log.c's clock)
 build/test_buttons: tests/test_buttons.cpp tests/check.h $(BUTTONS) $(call common,log)
@@ -540,7 +554,7 @@ build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -Isrc/common/camera -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello11 build/test_hello12 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
