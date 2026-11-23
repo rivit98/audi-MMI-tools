@@ -33,7 +33,7 @@ library.
 - Under the list: the selected app's last run (verdict, exit, seconds) and
   its `apps.conf` text (what to do).
 - Main knob clockwise moves down, anticlockwise up, by the detents turned;
-  it stops at either end. A main knob press runs the selected app.
+  it wraps around at either end (down from the last line is the first). A main knob press runs the selected app.
 - The last line, **Leave the menu**, gives the screen back to the MMI and
   ends the runner (and the run).
 - The menu re-shows itself every second (the HMI takes the screen on some

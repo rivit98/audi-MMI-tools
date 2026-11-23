@@ -138,20 +138,29 @@ void test_menu()
 	Menu m(10, 4);
 
 	CHECK_EQ(m.selected(), 0);
-	CHECK(m.on_event(turn(-1)) == A::None);       // at the top already
+	CHECK(m.on_event(turn(-1)) == A::Moved);      // up from the top: the last
+	CHECK_EQ(m.selected(), 9);
+	CHECK_EQ(m.top(), 6);
+	CHECK(m.on_event(turn(1)) == A::Moved);        // and back down: the first
+	CHECK_EQ(m.selected(), 0);
+	CHECK_EQ(m.top(), 0);
 	CHECK(m.on_event(turn(1)) == A::Moved);
 	CHECK_EQ(m.selected(), 1);
 	CHECK_EQ(m.top(), 0);
 	CHECK(m.on_event(turn(3)) == A::Moved);        // a fast turn: 3 at once
 	CHECK_EQ(m.selected(), 4);
 	CHECK_EQ(m.top(), 1);                          // the window follows
-	CHECK(m.on_event(turn(20)) == A::Moved);
-	CHECK_EQ(m.selected(), 9);                     // stops at the end, no wrap
+	CHECK(m.on_event(turn(5)) == A::Moved);
+	CHECK_EQ(m.selected(), 9);
 	CHECK_EQ(m.top(), 6);
-	CHECK(m.on_event(turn(1)) == A::None);
-	CHECK(m.on_event(turn(-7)) == A::Moved);
+	CHECK(m.on_event(turn(3)) == A::Moved);        // past the end: wraps
 	CHECK_EQ(m.selected(), 2);
 	CHECK_EQ(m.top(), 2);
+	CHECK(m.on_event(turn(10)) == A::None);        // a whole round: back where it was
+	CHECK(m.on_event(turn(-25)) == A::Moved);      // more than a round up
+	CHECK_EQ(m.selected(), 7);
+	CHECK(m.on_event(turn(5)) == A::Moved);
+	CHECK_EQ(m.selected(), 2);
 
 	CHECK(m.on_event(ev(Key::MainKnob, Action::Press)) == A::Start);
 	CHECK(m.on_event(ev(Key::MainKnob, Action::Release)) == A::None);

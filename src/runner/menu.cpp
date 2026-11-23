@@ -33,7 +33,8 @@ Menu::Act Menu::on_event(const buttons::Event &e)
 	if (e.action != buttons::Action::Turn)
 		return Act::None;
 	int was = sel_;
-	select(sel_ + e.detents);
+	int to = (sel_ + e.detents) % count_;
+	select(to < 0 ? to + count_ : to);
 	return sel_ != was ? Act::Moved : Act::None;
 }
 

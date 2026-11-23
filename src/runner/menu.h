@@ -16,8 +16,9 @@ public:
 	// count items; rows of them fit on the screen.
 	Menu(int count, int rows);
 
-	// Main knob turn: clockwise moves down, by the detents, stopping at
-	// either end. Main knob press: Start the selected item. Anything else:
+	// Main knob turn: clockwise moves down, by the detents, wrapping
+	// around at either end (past the last item comes the first). Main knob
+	// press: Start the selected item. Anything else:
 	// None.
 	Act on_event(const buttons::Event &e);
 
