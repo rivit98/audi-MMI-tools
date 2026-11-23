@@ -1148,7 +1148,7 @@ How to get the patches onto a running unit (efs-system stays untouched):
   **doesn't work**. The file opens `O_RDWR` and the three width words
   read back 720 at 0x0818a190 / 0x0818a26e / 0x0818ad20 (the addresses are
   right), but the first `pwrite` fails with `ESRVRFAULT` ("Server fault on
-  msg pass") and nothing changes [confirmed, hello10 `seq`]. procnto's
+  msg pass") and nothing changes [confirmed, hello10]. procnto's
   write handler only binds to the target's address space and copies the
   bytes in (openqnx `pathmgr/procfs.c`, `procfs_write`): it never makes a
   private copy of a page, so any page without `PROT_WRITE` faults, code

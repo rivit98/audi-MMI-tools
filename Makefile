@@ -152,8 +152,8 @@ LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_st
 # driver watching for about 4.5 minutes and puts ~70 MB of test videos on
 # the card.
 #
-# hello10 (docs/phone-mirroring.md 7.14): the capture-width probe (read only)
-# and a second io-media (src/hello10/README.md). The capture tests run by name. It puts ~6 MB of test videos on the card.
+# hello10 (docs/phone-mirroring.md 7.14): a second io-media from RAM, patched
+# to capture 800 wide (src/hello10/README.md); the read-only probe by name.
 #
 # hello11 (src/hello11/README.md): read only. Which ch4 telegrams, BAP
 # functions, ch5 records and slog lines change with the light switch, the
@@ -233,8 +233,7 @@ LIBS_hello9 := -lgf
 # with __aligned__ at their natural alignment, which g++ reports for every
 # std::vector<uint8_t> / std::atomic<uint32_t>. Nothing is lost.
 CXXFLAGS_hello9 := -Wno-ignored-attributes
-# hello10: C++. 800x480 cropped to 720 in the SPS (h264::crop_sps), pushed
-# through LIVE's HwStream like hello9's live tests.
+# hello10: C++. A patched io-media copy plays c3 through LIVE's Player.
 build/hello10: $(wildcard src/hello10/*.cpp src/hello10/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(LIVE)
 LIBS_hello10 := -lgf
 CXXFLAGS_hello10 := -Wno-ignored-attributes
@@ -371,7 +370,7 @@ check: build/$(APP)
 CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
 CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
-CLIPS_hello10  := c5_h264_336.mp4 c12_h264_800.h264 c3_h264_480.mp4 c4_h264_800.mp4
+CLIPS_hello10  := c3_h264_480.mp4
 CLIPS_hello12  := a1_sbc_ping.sbc a2_sbc_sweep.sbc
 FWTOOLS_hello5 := testapp-file
 FWTOOLS_hello6 := testapp-file testapp-cmdline mmecli ShowVideoMemory memusage hbhogs

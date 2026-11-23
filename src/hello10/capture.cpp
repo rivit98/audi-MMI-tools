@@ -47,13 +47,6 @@ constexpr u64 kPage = 4096;
 // The mov.w instructions that read the words, for the probe's check.
 const u32 kLoads[] = {0x0818a13c, 0x0818a180, 0x0818a1d0, 0x0818a1f4, 0x0818ab70};
 
-// Each word we changed, with the value it had.
-struct Changed {
-	u32 addr;
-	u16 old;
-};
-Changed g_changed[sizeof(kWords) / sizeof(kWords[0])];
-int g_nchanged = 0;
 int g_fd = -1;
 int g_pid = -1;
 
@@ -62,7 +55,7 @@ std::string errstr(const char *what)
 	return std::string(what) + ": " + std::strerror(errno);
 }
 
-// Open /proc/<pid>/as for reading and writing.
+// Open /proc/<pid>/as, read only.
 std::string open_as(int pid)
 {
 	if (g_fd >= 0 && g_pid == pid)
@@ -71,7 +64,7 @@ std::string open_as(int pid)
 		close(g_fd);
 	char path[64];
 	std::snprintf(path, sizeof(path), "/proc/%d/as", pid);
-	g_fd = open(path, O_RDWR);
+	g_fd = open(path, O_RDONLY);
 	if (g_fd < 0)
 		return errstr(path);
 	g_pid = pid;
@@ -84,14 +77,6 @@ std::string read_u16(int fd, u32 addr, u16 &out)
 	if (pread(fd, b, 2, (off_t)addr) != 2)
 		return errstr("read");
 	out = (u16)(b[0] | (b[1] << 8));          // SH-4 is little endian
-	return "";
-}
-
-std::string write_u16(int fd, u32 addr, u16 v)
-{
-	u8 b[2] = {(u8)(v & 0xff), (u8)(v >> 8)};
-	if (pwrite(fd, b, 2, (off_t)addr) != 2)
-		return errstr("write");
 	return "";
 }
 
@@ -145,7 +130,7 @@ std::string probe(int pid)
 				return err;
 		}
 		log_msg("probe: 0x%08x = %u, next %u, %u  %s", w.addr, v[0], v[1], v[2], w.what);
-		if (v[0] != kWidthFrom)
+		if (v[0] != 720)
 			bad++;
 	}
 	for (u32 pc : kLoads) {
@@ -163,62 +148,8 @@ std::string probe(int pid)
 			bad++;
 	}
 	log_msg("probe: %s", bad == 0 ? "all three words read 720 and every load points at one"
-	                              : "MISMATCH, see above; apply() would refuse");
+	                              : "MISMATCH, see above");
 	return bad == 0 ? "" : "probe mismatch";
-}
-
-std::string apply(int pid)
-{
-	if (g_nchanged != 0)
-		return "already applied";
-	std::string err = open_as(pid);
-	if (!err.empty())
-		return err;
-	// Check every word first, so a mismatch changes nothing.
-	u16 old[sizeof(kWords) / sizeof(kWords[0])];
-	for (usize i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
-		err = read_u16(g_fd, kWords[i].addr, old[i]);
-		if (!err.empty())
-			return err;
-		if (old[i] != kWidthFrom)
-			return "word at " + std::to_string(kWords[i].addr) + " is not 720 (" +
-			       std::to_string(old[i]) + "); not patched";
-	}
-	for (usize i = 0; i < sizeof(kWords) / sizeof(kWords[0]); i++) {
-		err = write_u16(g_fd, kWords[i].addr, kWidthTo);
-		if (!err.empty()) {
-			log_msg("capture: write at 0x%08x failed: %s", kWords[i].addr, err.c_str());
-			restore();               // undo the ones already written
-			return err;
-		}
-		g_changed[g_nchanged++] = {kWords[i].addr, old[i]};
-		u16 back = 0;
-		err = read_u16(g_fd, kWords[i].addr, back);
-		log_msg("capture: 0x%08x 720 -> 800, read back %u%s", kWords[i].addr, back,
-		        back == kWidthTo ? "" : " (MISMATCH)");
-		if (!err.empty() || back != kWidthTo) {
-			restore();
-			return err.empty() ? "read back differs" : err;
-		}
-	}
-	return "";
-}
-
-void restore()
-{
-	if (g_fd < 0)
-		return;
-	for (int i = g_nchanged - 1; i >= 0; i--) {
-		std::string err = write_u16(g_fd, g_changed[i].addr, g_changed[i].old);
-		log_msg("capture: restore 0x%08x -> %u: %s", g_changed[i].addr, g_changed[i].old,
-		        err.empty() ? "ok" : err.c_str());
-	}
-	g_nchanged = 0;
-}
-
-bool applied()
-{
-	return g_nchanged != 0;
 }
 
 namespace {

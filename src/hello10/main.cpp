@@ -1,57 +1,27 @@
-// hello10 - can the DM642 show an 800-wide H.264 stream cropped to 720 in
-// its SPS? Android Auto's smallest video is 800x480; io-media refuses
-// anything wider than 720 (docs/android-auto.md 4.1). With a width margin
-// of 80 px the phone keeps its UI in the left 720 columns, and the MMI
-// rewrites the SPS (h264::crop_sps) so the stream says 720x480, Level 3.0.
-// The coded picture stays 800 wide (50 macroblocks): whether the DSP
-// decodes it, trips its width assertion or garbles it is what hello10
-// answers.
+// hello10 - can io-media capture an 800-sample line? io-media-nvidia
+// captures the DSP's video signal at a literal 720 wide (three 16-bit
+// words, docs/phone-mirroring.md 7.14). Writing them in the running process
+// is refused (ESRVRFAULT), so hello10 runs a second io-media from RAM next
+// to the HMI's own (iomcopy.h) and plays c3 (720x480) three times:
 //
-// The clip, c12 (media/mkclips.sh), is raw 800x480 Baseline Level 3.1 as
-// the phone sends it: the moving picture (label, counter) in the left 720
-// columns, a red "CUT" band in the right 80, a blue band in the bottom 64
-// lines. hello10 rewrites every SPS in it and pushes it frame by frame
-// through HwStream, the code audi_stream_receiver uses (CS-MP4, resource
-// manager, gap fill, VCAP 0 input 1). Tests, in order:
+//   copy720  an unchanged copy: can a second io-media run at all?
+//   copy800  only if copy720 played: the copy with the width words at 800.
+//            Right edge black or frozen = the capture stops at the line's
+//            end (800 possible); garbled or slanted = it counts pixels
+//   orig720  the HMI's io-media again: still fine?
 //
-//   c5       control: a plain MP4 (720x336) from the card, plays every run
-//   crop     800x480 cropped to 720x480, 25 fps, 30 s. Red band visible =
-//            the DSP ignores the crop
-//   cropnav  cropped to 720x416, 20 s: the blue band gone too, the picture
-//            stretched to the full height? (cutting Android Auto's bar)
-//   slow     720x480 crop, frames at 15 fps, gap fill to 25, 20 s: skip
-//            frames on an 800-wide coded picture (a paced phone)
+// probe (read only, by name): io-media's width words through
+// /proc/<pid>/as, its arguments and environment, its segment list
+// (capture::maps) and the physical address of the width page as our own
+// shared mapping of the file sees it (capture::phys).
 //
 // The driver turns the knob once when the moving picture appears and films
-// the screen (the bands are only on video).
-//
-// iomcopy (last in the default run): a second io-media-nvidia from RAM next
-// to the HMI's (iomcopy.h): an unchanged copy plays c3, then one with the
-// capture width at 800 plays it, then the original plays it again.
-//
-// The default run is probe, then iomcopy. seq (by name): three plays in a row. (1) c3, 720x480, as the unit
-// plays it now. (2) io-media's capture width set to 800 in memory, c4 (800x480
-// MP4) played, width put back. (3) c3 again. The crop tests above are answered
-// and run only by name.
-//
-// probe (read only, in the default run): io-media's three capture-width
-// words through /proc/<pid>/as, its arguments and environment, its segment
-// list with the flags of the width words' segment (capture::maps), and the
-// physical address of that page as our own shared mapping of the file sees
-// it (capture::phys).
-//
-// Not in the default run (name them to run them):
-//
-//   cap800   c3 (720x480 MP4, plays on every unit) with io-media's capture
-//            width changed in memory from 720 to 800 for 30 s, then put back.
-//            Right edge black or frozen: the capture follows the signal's line
-//            markers. Garbled or slanted: it counts pixels.
-//            (docs/phone-mirroring.md 7.14; src/hello10/capture.h)
+// the screen.
 //
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
-// <sd>/var/hello10/ (io-media queries, the system log after the tests).
+// <sd>/var/hello10/ (io-media queries, the copy's output, the system log).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: probe,iomcopy)
+// usage: hello10 <sd_path> [test,test,...]   (default: iomcopy)
 #include "types.h"
 
 extern "C" {
@@ -63,10 +33,7 @@ extern "C" {
 }
 
 #include "capture.h"
-#include "csmp4.h"
 #include "iomcopy.h"
-#include "h264.h"
-#include "hw_stream.h"
 #include "player.h"
 #include "ui.h"
 #include "vout.h"
@@ -88,83 +55,39 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 720;    // the default run is ~3 min
+constexpr unsigned kWatchdogS = 420;    // the default run is ~2 min
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
 constexpr unsigned kQueryMs = 2500;
 constexpr unsigned kPageMs = 12000;
-constexpr unsigned kFps = 25;
-constexpr u8 kLevel = 30;          // what the stream says after the rewrite
-constexpr const char *kLivePath = "/dev/hello10/live.mp4";
-constexpr const char *kRawClip = "c12_h264_800.h264";
-constexpr const char *kFooter = "hello10 - 800 wide cropped to 720. Pull the SD card to stop.";
+constexpr const char *kFooter = "hello10 - capture 800 wide. Pull the SD card to stop.";
 
-enum class Kind { File, Live, Probe, Patched, Sequence, Copy };
+enum class Kind { File, Probe, Copy };
 
 struct Test {
 	const char *name;
 	const char *title;
 	const char *what;
 	Kind kind;
-	const char *clip;                 // File: the MP4 to play
+	const char *clip;                 // the MP4 to play
 	unsigned watch_ms;
-	f64 fps;                       // Live: the rate frames come at
-	unsigned crop_w, crop_h;          // Live: what the SPS says after the rewrite
 };
 
 const char kSeen[] = "\n\nFilm the screen. Turn the main knob ONE click when you see the moving "
                      "test picture (its name and a counting number).";
 
 const std::vector<Test> kTests = {
-	{"c5", "Control: plain MP4", "The 720x336 video seen on every run.", Kind::File,
-	 "c5_h264_336.mp4", 8000, 0, 0, 0},
-	{"crop", "800 wide, cropped to 720 (30 s)",
-	 "An 800x480 stream that says 720x480. Is there a RED band with \"CUT\" on the right "
-	 "edge? It should not be there.",
-	 Kind::Live, nullptr, 30000, kFps, 720, 480},
-	{"cropnav", "Cropped to 720x416 (20 s)",
-	 "The same, with the bottom 64 lines cut too. Is the BLUE band at the bottom gone, and "
-	 "does the picture fill the screen's height?",
-	 Kind::Live, nullptr, 20000, kFps, 720, 416},
-	{"slow", "Cropped, 15 frames a second (20 s)",
-	 "As the first, with frames coming at 15 a second: the counter runs slower, but should "
-	 "not stop or break up.",
-	 Kind::Live, nullptr, 20000, 15, 720, 480},
-	{"probe", "Probe io-media's capture width (no change)",
-	 "Reads io-media's width words, how its code is mapped and where that page sits. "
-	 "Nothing changes; nothing to do.",
-	 Kind::Probe, nullptr, 0, 0, 0, 0},
-	{"cap800", "720-wide clip, capture at 800 (30 s)",
-	 "io-media's capture width is 800 for this test. Is the RIGHT edge of the picture black "
-	 "or frozen? Or garbled or slanted?",
-	 Kind::Patched, "c3_h264_480.mp4", 30000, 0, 0, 0},
-	{"seq", "Normal, 800 wide, normal (about 1 min)",
-	 "Three videos in a row. Turn the main knob ONE click whenever the moving picture appears.",
-	 Kind::Sequence, nullptr, 0, 0, 0, 0},
-	// last in the default run: it may take the radio or the screen until a restart
 	{"iomcopy", "A second io-media (about 2 min)",
 	 "A copy of the MMI's media service starts next to the original, plays a video, then a "
 	 "copy that captures 800 wide plays it, then the original plays it again. If the radio "
 	 "goes quiet or the screen stops: note when, then restart the MMI (MENU + main knob + "
 	 "top-right key).",
-	 Kind::Copy, "c3_h264_480.mp4", 0, 0, 0, 0},
-};
-
-// The steps of seq: the 800-wide capture is set only for step 2.
-struct SeqStep {
-	const char *name;
-	const char *clip;
-	bool patch;
-	const char *what;
-};
-const SeqStep kSeq[] = {
-	{"seq1", "c3_h264_480.mp4", false,
-	 "1 of 3: 720x480, the unit's own capture width (720)."},
-	{"seq2", "c4_h264_800.mp4", true,
-	 "2 of 3: 800x480, with io-media's capture width set to 800 in its memory."},
-	{"seq3", "c3_h264_480.mp4", false,
-	 "3 of 3: 720x480 again, the capture width put back to 720."},
+	 Kind::Copy, "c3_h264_480.mp4", 0},
+	{"probe", "Probe io-media's capture width (no change)",
+	 "Reads io-media's width words, how its code is mapped and where that page sits. "
+	 "Nothing changes; nothing to do.",
+	 Kind::Probe, nullptr, 0},
 };
 
 const char *sd_path;
@@ -224,147 +147,6 @@ std::string tool_path(const char *name)
 	std::string p = std::string(bin_dir) + "/" + name;
 	return access(p.c_str(), X_OK) == 0 ? p : "";
 }
-
-// ---- the raw clip, as the phone would send it, and cropped ----
-
-struct Clip {
-	std::vector<u8> data;
-	std::vector<h264::Range> frames;
-	std::vector<u8> sps, pps;
-	u32 sample_size = 0;          // S: the biggest frame + filler, in 4 KB steps
-};
-
-std::string read_file(const std::string &path, std::vector<u8> &out)
-{
-	FILE *f = std::fopen(path.c_str(), "rb");
-	if (f == nullptr)
-		return path + ": " + std::strerror(errno);
-	std::fseek(f, 0, SEEK_END);
-	long size = std::ftell(f);
-	std::fseek(f, 0, SEEK_SET);
-	out.resize(size > 0 ? (usize)size : 0);
-	usize got = std::fread(out.data(), 1, out.size(), f);
-	std::fclose(f);
-	if (got != out.size() || out.empty())
-		return path + ": short read";
-	return "";
-}
-
-// Split into frames; SPS / PPS and S from them.
-std::string index_clip(Clip &c)
-{
-	c.frames = h264::split_access_units(c.data.data(), c.data.size());
-	c.sps.clear();
-	c.pps.clear();
-	usize biggest = 0;
-	for (const h264::Range &r : c.frames) {
-		usize bytes = 0;
-		for (const h264::Nal &n : h264::split_annexb(c.data.data() + r.begin, r.end - r.begin)) {
-			if (n.type() == h264::kSps && c.sps.empty())
-				c.sps.assign(n.p, n.p + n.n);
-			if (n.type() == h264::kPps && c.pps.empty())
-				c.pps.assign(n.p, n.p + n.n);
-			if (n.type() != h264::kAud)
-				bytes += 4 + n.n;
-		}
-		biggest = std::max(biggest, bytes);
-	}
-	if (c.sps.empty() || c.pps.empty() || c.frames.empty())
-		return "no SPS/PPS or no frames";
-	c.sample_size = (u32)((biggest + csmp4::kFillerMin + 4095) / 4096 * 4096);
-	return "";
-}
-
-// The clip with every SPS rewritten: shows w x h, says kLevel.
-std::string crop_clip(const Clip &in, unsigned w, unsigned h, Clip &out)
-{
-	out = Clip();
-	std::vector<u8> au;
-	for (const h264::Range &r : in.frames) {
-		std::string err = h264::crop_sps_annexb(in.data.data() + r.begin, r.end - r.begin, w, h,
-		                                        kLevel, au);
-		if (!err.empty())
-			return err;
-		out.data.insert(out.data.end(), au.begin(), au.end());
-	}
-	return index_clip(out);
-}
-
-std::string sps_str(const std::vector<u8> &sps)
-{
-	h264::Sps s;
-	std::string err = h264::parse_sps(sps.data(), sps.size(), s);
-	if (!err.empty())
-		return err;
-	char b[120];
-	std::snprintf(b, sizeof(b), "%ux%u coded %ux%u, profile %u level %u.%u, POC type %u, %zu bytes",
-	              s.width, s.height, s.width_mbs * 16, s.height_mbs * 16, s.profile, s.level / 10,
-	              s.level % 10, s.poc_type, sps.size());
-	return b;
-}
-
-// Pushes the clip's frames (looped: frame 0 is an IDR) at a steady rate,
-// from its own thread, as the receiver's USB thread would.
-class Feeder {
-public:
-	Feeder(HwStream &hw, const Clip &clip, f64 fps) : hw_(hw), clip_(clip), fps_(fps) {}
-	~Feeder() { stop(); }
-
-	void start()
-	{
-		t0_ = log_ms();
-		thread_ = std::thread([this] { run(); });
-	}
-	void stop()
-	{
-		stop_ = true;
-		if (thread_.joinable())
-			thread_.join();
-	}
-	u32 pushed() const { return pushed_; }
-	u32 refused() const { return refused_; }
-	std::string first_refusal()
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		return why_;
-	}
-
-private:
-	void run()
-	{
-		while (!stop_) {
-			// frame k is due at k / fps
-			u64 due = (u64)((f64)(log_ms() - t0_) * fps_ / 1000.0) + 1;
-			while (next_ < due && !stop_) {
-				const h264::Range &r = clip_.frames[next_ % clip_.frames.size()];
-				std::string why;
-				live::Push p = hw_.push(clip_.data.data() + r.begin, r.end - r.begin, &why);
-				if (p == live::Push::Ok) {
-					pushed_++;
-				} else {
-					refused_++;
-					std::lock_guard<std::mutex> lock(mu_);
-					if (why_.empty())
-						why_ = "frame " + std::to_string(next_) + ": " + live::push_name(p) +
-						       (why.empty() ? "" : " (" + why + ")");
-				}
-				next_++;
-			}
-			usleep(2000);
-		}
-	}
-
-	HwStream &hw_;
-	const Clip &clip_;
-	f64 fps_;
-	unsigned t0_ = 0;
-	u64 next_ = 0;
-	std::atomic<u32> pushed_{0}, refused_{0};
-	std::atomic<bool> stop_{false};
-	std::thread thread_;
-	std::mutex mu_;
-	std::string why_;
-};
 
 // ---- io-media's own view of the graph (testapp-cmdline), in the background ----
 
@@ -457,12 +239,11 @@ void result_line(const Test &t, const Outcome &o)
 	char line[160];
 	std::snprintf(line, sizeof(line), "%-7s TIME %3u pos %5.1fs knob %zu%s%s%s", t.name,
 	              ps.time_events, ps.max_pos_ms < 0 ? 0.0 : ps.max_pos_ms / 1000.0, knobs.size(),
-	              ps.error_events ? " ERRORS" : "", t.kind == Kind::Live ? "  lag " : "",
-	              t.kind == Kind::Live ? o.lags.str().c_str() : "");
+	              ps.error_events ? " ERRORS" : "", "  lag ", o.lags.str().c_str());
 	summary.push_back(line);
 }
 
-// c5: an MP4 file on the card. *time_events: the TIME events seen (did it play).
+// An MP4 file on the card. *time_events: the TIME events seen (did it play).
 bool run_file(const Test &t, const std::string &graph, unsigned *time_events = nullptr)
 {
 	// testapp-cmdline only knows /dev/io-media: no query of another instance
@@ -511,119 +292,6 @@ bool run_file(const Test &t, const std::string &graph, unsigned *time_events = n
 	return quit_poll() == QUIT_NONE;
 }
 
-// crop / cropnav / slow: the cropped clip pushed frame by frame through
-// HwStream, as audi_stream_receiver pushes the phone's.
-bool run_live(const Test &t, const std::string &graph, const Clip &raw)
-{
-	Clip clip;
-	std::string err = crop_clip(raw, t.crop_w, t.crop_h, clip);
-	if (err.empty()) {
-		h264::Sps s;
-		h264::parse_sps(clip.sps.data(), clip.sps.size(), s);
-		err = live::check_decodable(s, kFps);
-	}
-	if (!err.empty()) {
-		log_msg("FAIL %s: crop to %ux%u: %s", t.name, t.crop_w, t.crop_h, err.c_str());
-		summary.push_back(std::string(t.name) + ": " + err);
-		return quit_poll() == QUIT_NONE;
-	}
-	log_msg("  SPS after the rewrite: %s; sample size %u", sps_str(clip.sps).c_str(),
-	        clip.sample_size);
-
-	HwOptions o;
-	o.cfg.sps = clip.sps;
-	o.cfg.pps = clip.pps;
-	o.cfg.fps = kFps;
-	o.cfg.sample_size = clip.sample_size;
-	o.cfg.declared = 600 * kFps;
-	// frames kept for io-media: 8 MB, as audi_stream_receiver (hwvideo.cpp)
-	o.cfg.ring_frames = std::min<u32>(128, std::max<u32>(16, (8u << 20) / o.cfg.sample_size));
-	o.cfg.fill = true;
-	o.path = kLivePath;
-	o.graph = graph;
-	o.video_after_ms = kStartMs;
-
-	HwStream hw;
-	err = hw.start(o);
-	if (!err.empty()) {
-		log_msg("FAIL %s: %s", t.name, err.c_str());
-		summary.push_back(std::string(t.name) + ": " + err);
-		return quit_poll() == QUIT_NONE;
-	}
-	log_msg("  feeder: %zu frames in the clip (looped), %.0f fps", clip.frames.size(), t.fps);
-	Feeder feeder(hw, clip, t.fps);
-	feeder.start();
-
-	Outcome out;
-	auto on_time = [&](unsigned, i64 pos) {
-		i64 lag = hw.lag_ms(pos);
-		if (lag != INT64_MIN)
-			out.lags.add(lag);
-	};
-	std::thread query;
-	unsigned last_stats = 0;
-	bool stop = false;
-	const unsigned t_feed = log_ms();
-	while (!stop) {
-		err = hw.poll(on_time);
-		if (!err.empty()) {
-			log_msg("FAIL %s: %s", t.name, err.c_str());
-			summary.push_back(std::string(t.name) + ": " + err);
-			break;
-		}
-		if (hw.video_on() && !out.video_on) {
-			out.video_on = true;
-			out.t_video = hw.video_ms();
-			query = std::thread([&out, graph, &t] {
-				out.q = query_graph(graph, std::string("query_") + t.name + ".log");
-			});
-		}
-		for (const std::string &n : hw.server().take_notes())
-			log_msg("  server: %s", n.c_str());
-		unsigned now = log_ms() - t_feed;
-		if (now - last_stats >= 1000) {
-			last_stats = now;
-			StreamStats s = hw.server().stats();
-			live::Stats ls = hw.stream().stats();
-			log_msg("  t=%5.1f s: pushed %u (+%u skips), %u reads (%u waited, max %u ms), "
-			        "%u waiting, pos %lld ms, TIME %u, errors %u, lag %lld ms",
-			        now / 1000.0, ls.real, ls.skips, s.reads, s.waited, s.wait_ms_max,
-			        s.waiting_now, (long long)hw.player().stats().max_pos_ms,
-			        hw.player().stats().time_events, hw.player().stats().error_events,
-			        (long long)out.lags.last);
-		}
-		if (hw.playing() && log_ms() - hw.play_ms() >= kStartMs + t.watch_ms)
-			break;
-		if (!hw.playing() && now > 10000) {
-			log_msg("FAIL %s: no graph after 10 s (first IDR never accepted?)", t.name);
-			break;
-		}
-		stop = sleep_quit(20);
-	}
-
-	feeder.stop();
-	out.t_play = hw.play_ms();
-	hw.poll(on_time);
-	hw.stop();
-	if (query.joinable())
-		query.join();
-	for (const std::string &n : hw.server().take_notes())
-		log_msg("  server: %s", n.c_str());
-
-	StreamStats s = hw.server().stats();
-	live::Stats ls = hw.stream().stats();
-	out.ps = &hw.player().stats();
-	result_line(t, out);
-	log_msg("RESULT %s stream: reads=%u bytes=%llu waited=%u wait_max=%u ms unblocked=%u far=%u",
-	        t.name, s.reads, (unsigned long long)s.bytes, s.waited, s.wait_ms_max, s.unblocked, s.far);
-	log_msg("RESULT %s frames: pushed=%u refused=%u%s%s real=%u idr=%u skips=%u too_big=%u "
-	        "bad=%u max_frame=%u sample=%u",
-	        t.name, feeder.pushed(), feeder.refused(), feeder.refused() ? " first: " : "",
-	        feeder.first_refusal().c_str(), ls.real, ls.idr, ls.skips, ls.too_big, ls.bad,
-	        ls.max_frame, hw.stream().sample_size());
-	return quit_poll() == QUIT_NONE;
-}
-
 // probe: io-media's width words, read through /proc/<pid>/as. Nothing changes.
 bool run_probe(const Test &t)
 {
@@ -647,26 +315,6 @@ bool run_probe(const Test &t)
 	std::string perr = capture::phys("/mnt/efs-system/sbin/io-media-nvidia");
 	summary.push_back(std::string("phys: ") + (perr.empty() ? "see the phys: line" : perr));
 	return !sleep_quit(1000);
-}
-
-// cap800: the capture width is 800 in io-media's memory while the clip plays;
-// it is put back afterwards, whatever happened.
-bool run_patched(const Test &t, const std::string &graph)
-{
-	int pid = -1;
-	std::string err = capture::find_io_media(out_path("pidin.txt").c_str(), pid);
-	if (err.empty())
-		err = capture::apply(pid);
-	if (!err.empty()) {
-		log_msg("FAIL %s: %s", t.name, err.c_str());
-		summary.push_back(std::string(t.name) + ": " + err);
-		return quit_poll() == QUIT_NONE;
-	}
-	log_msg("%s: io-media capture width 800 in memory (%s)", t.name, t.clip);
-	bool go = run_file(t, graph);
-	capture::restore();
-	log_msg("%s: capture width put back", t.name);
-	return go;
 }
 
 // iomcopy: a second io-media from RAM (iomcopy.h), next to the HMI's.
@@ -762,91 +410,24 @@ bool run_iomcopy(const Test &t)
 	return quit_poll() == QUIT_NONE;
 }
 
-// seq: play, play at 800 with the capture patched in memory, play again.
-// Each step gets its own screen; the patch is put back after step 2 whatever
-// happened.
-bool run_sequence(const Test &t)
+bool run_test(int n, int total, const Test &t)
 {
-	static unsigned seqs;
-	bool go = true;
-	for (const SeqStep &s : kSeq) {
-		if (access(clip_path(s.clip).c_str(), R_OK) != 0) {
-			log_msg("FAIL %s: %s missing", s.name, clip_path(s.clip).c_str());
-			summary.push_back(std::string(s.name) + ": clip missing");
-			continue;
-		}
-		ui::show(s.name, std::string(s.what) + kSeen, kFooter);
-		if (sleep_quit(kLabelMs / 2))
-			return false;
-		ui::hide();
-
-		Test step = t;
-		step.name = s.name;
-		step.title = s.what;
-		step.kind = Kind::File;
-		step.clip = s.clip;
-		step.watch_ms = 8000;
-
-		char gname[48];
-		std::snprintf(gname, sizeof(gname), "hello10_%d_seq%u", (int)getpid(), ++seqs);
-		if (!s.patch) {
-			go = run_file(step, gname);
-		} else {
-			go = run_patched(step, gname);
-		}
-		if (!go)
-			return false;
-	}
-	return go;
-}
-
-bool run_test(int n, int total, const Test &t, const Clip *clip, const std::string &clip_err)
-{
-	static unsigned graphs;
 	char title[96];
 	std::snprintf(title, sizeof(title), "Test %d/%d: %s", n, total, t.title);
-	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title,
-	        t.kind == Kind::Live ? kRawClip : (t.clip ? t.clip : "no clip"));
-	if (t.kind == Kind::Sequence)
-		return run_sequence(t);
-	if (t.kind == Kind::Copy) {
-		ui::show(title, t.what, kFooter);
-		if (sleep_quit(kLabelMs))
-			return false;
-		return run_iomcopy(t);
-	}
-
-	if ((t.kind == Kind::File || t.kind == Kind::Patched) &&
-	    access(clip_path(t.clip).c_str(), R_OK) != 0) {
-		log_msg("FAIL %s: %s missing", t.name, clip_path(t.clip).c_str());
-		summary.push_back(std::string(t.name) + ": clip missing");
-		return true;
-	}
-	if (t.kind == Kind::Live && clip == nullptr) {
-		log_msg("FAIL %s: %s", t.name, clip_err.c_str());
-		summary.push_back(std::string(t.name) + ": " + clip_err);
-		return true;
-	}
-
-	ui::show(title, std::string(t.what) + kSeen, kFooter);
+	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title, t.clip ? t.clip : "no clip");
+	ui::show(title, t.what, kFooter);
 	if (sleep_quit(kLabelMs))
 		return false;
+	if (t.kind == Kind::Copy)
+		return run_iomcopy(t);
 	ui::hide();
-
-	if (t.kind == Kind::Probe)
-		return run_probe(t);
-
-	char gname[48];
-	std::snprintf(gname, sizeof(gname), "hello10_%d_%u", (int)getpid(), ++graphs);
-	if (t.kind == Kind::Patched)
-		return run_patched(t, gname);
-	return t.kind == Kind::File ? run_file(t, gname) : run_live(t, gname, *clip);
+	return run_probe(t);
 }
 
 bool selected(const char *only, const Test &t)
 {
 	if (only == nullptr)   // the default run
-		return t.kind == Kind::Probe || t.kind == Kind::Copy;
+		return t.kind == Kind::Copy;
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }
@@ -889,42 +470,25 @@ int main(int argc, char *argv[])
 	log_msg("testapp-cmdline: %s", tool_path("testapp-cmdline").c_str());
 
 	std::vector<const Test *> run;
-	bool live = false;
 	for (const Test &t : kTests)
-		if (selected(only, t)) {
+		if (selected(only, t))
 			run.push_back(&t);
-			live = live || t.kind == Kind::Live;
-		}
-
-	Clip clip;
-	std::string clip_err;
-	if (live) {
-		clip_err = read_file(clip_path(kRawClip), clip.data);
-		if (clip_err.empty())
-			clip_err = index_clip(clip);
-		if (clip_err.empty())
-			log_msg("clip %s: %zu bytes, %zu frames, SPS as sent: %s", kRawClip, clip.data.size(),
-			        clip.frames.size(), sps_str(clip.sps).c_str());
-		else
-			log_msg("FAIL clip: %s", clip_err.c_str());
-	}
 
 	char intro[600];
 	std::snprintf(intro, sizeof(intro),
-	              "Park the car and film the screen. %zu test videos, one after the other, with "
-	              "a screen before each. Turn the main knob ONE click whenever you see the "
-	              "moving test picture.\n\nIf the radio or the screen stops working afterwards, "
+	              "Park the car, radio on, and film the screen. %zu test(s), each with a screen "
+	              "before it. Turn the main knob ONE click whenever you see the moving test "
+	              "picture.\n\nIf the radio or the screen stops working afterwards, "
 	              "restart the MMI (MENU + main knob + top-right key).",
 	              run.size());
 	ui::show("hello10: capture width", intro, kFooter);
 	if (!sleep_quit(kIntroMs)) {
 		int n = 0;
 		for (const Test *t : run)
-			if (!run_test(++n, (int)run.size(), *t, clip_err.empty() ? &clip : nullptr, clip_err))
+			if (!run_test(++n, (int)run.size(), *t))
 				break;
 	}
 	vout::close_all();
-	capture::restore();              // in case a test ended without putting it back
 	log_msg("== system log after the tests -> %s: %s", out_path("slog.txt").c_str(),
 	        proc_status_str(proc_shell(out_path("slog.txt").c_str(), 30, "sloginfo")));
 
