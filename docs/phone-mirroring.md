@@ -1188,14 +1188,15 @@ How to get the patches onto a running unit (efs-system stays untouched):
   `d0 02` → `20 03` at file offsets 0x14a190, 0x14a26e, 0x14ad20, run from
   the card with the same arguments and environment.
 
-  **Beside the original instead** [inferred, not yet run]: the config's
+  **Beside the original instead** [confirmed not to work]: the config's
   `global-options` `mountpoint` replaces `/dev/io-media` (option parsing
   at `0x080892b0`), and `-B` keeps io-media in the foreground (otherwise
   `procmgr_daemon`). io-media doesn't load the DSP: NvElfLoader does that
   once at boot, and io-media is a client of `devg-NVTS` (`/dev/nvdsprm0`).
   So a copy with its own mountpoint can run without slaying the original;
-  whether `devg-NVTS` serves two clients is open. hello10 `iomcopy` does
-  this (src/hello10/README.md).
+  It doesn't: the copy fails to open the DSP's zlib encoder (`8000000B`)
+  and dies of SIGSEGV, so the DSP side serves one io-media only
+  [inferred from hello10 `iomcopy`, src/hello10/README.md].
 - **DSP:** NvElfLoader must load the patched image. Options: a procnto
   path-space link (`ln -sP <sd>/NvDspCodecs.elf /etc/NvDspCodecs.elf`)
   plus a DSP reload (io-media has crash recovery that runs NvElfLoader

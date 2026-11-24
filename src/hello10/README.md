@@ -87,6 +87,12 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 - **`probe`** [confirmed]: the width page is RAM shared by every io-media
   process, not flash; its physical address is unknown (phone-mirroring
   §7.14).
+- **A second io-media can't run beside the original** [confirmed]: the copy
+  (`iom-copy`, own mountpoint) logs `nv_dsp: Failed to open
+  m_pNvmZlibEncoder` / `error returned is 8000000B` and dies of SIGSEGV
+  (ip `0x08157ff0`) within ~3 s; `/dev/hello10-iom` never appears. The
+  DSP side serves one io-media only [inferred]. The original io-media
+  is unharmed: c3 played after it (720×480, lag median ~320 ms).
 - An 800×480 stream with its SPS cropped to 720 stays black
   ([docs/android-auto.md](../../docs/android-auto.md) §4.1). Software
   decoding on the SH4 gets the picture on screen at ~5 fps at best
@@ -94,9 +100,10 @@ The `RESULT` lines have hello9's fields (its README): `playing_ms`,
 
 ## State
 
-`probe` has run on the car; `iomcopy` has not. Open: whether a second
-io-media can run beside the original, and whether the media port captures
-an 800-sample line (`copy800`).
+`probe` and `iomcopy` have run on the car; both are answered (above).
+`copy800` (does the media port capture an 800-sample line) can't run
+through a second io-media; it would need the running one patched, which
+the kernel refuses.
 
 `probe` output: `maps:` lines (each width word's segment: flags, dev, ino,
 offset, what a `/proc` write there does; the same for hello10's own code,

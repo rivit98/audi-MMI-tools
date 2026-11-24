@@ -79,6 +79,11 @@ Run on the car once [confirmed]:
 - **Lights and light sensor: no.** Nothing on ch4 or ch5 changed only with
   the light switch or the covered sensor; `DA01.0C0D` steps like a counter,
   also in quiet steps. `/dev/ndr/.../ReverseGear` is not readable (ENOSYS).
+- **Light sensor with the switch at 0:** nothing follows covering the
+  sensor. `DD01.0333/C` flips byte 1 between 0 and 1 every ~10–25 s in
+  every step, covered or not; `FB01.0D06/C` and ch5 `0f.03` (temperature)
+  only drift. The headlights can't react with the switch at 0, so a run
+  with the switch at AUTO is still needed [confirmed: hello11.log].
 - Side finds: BAP `0A.12` / `0A.13` / `0A.15` change with reverse (the
   parking aid's LSG), BAP `11.11` is the clock (`0d 0e 1d` = 13:14:29).
 - The camera came up during the quiet and lights steps as well, so the

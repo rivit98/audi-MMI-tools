@@ -41,4 +41,21 @@ first 30 reads (size, offset, wait), every devctl code (answered by
 
 ## Results
 
-Built, not yet run on the car.
+All four steps work [confirmed: hello12.log, a video with sound]:
+
+- `w`: `/dev/wms` holds `headphone1` and `player1`. On `player1`,
+  `0x4004051e` answers 0 (no phone streaming) and `0x40100520` answers
+  state 1, codec 1 (SBC), rate 0 (44100 Hz).
+- `f`, `s`, `S`: io-media plays all three on `mixer:DSPOUT_TDM1_20_SAD`:
+  `FINISHED`, 31 `TIME` events, first after ~140 ms, ~20.1–20.3 s for a
+  19,998 ms clip. On the video the pings and both rising tones are heard
+  without gaps; the radio is muted while they play (as for every
+  `TDM1_20_SAD` sound, hello5).
+- io-media reads a live stream in **512-byte reads**, never `pread`. It
+  opens the file twice (ioflag `0x8001`, then `0x8880`, closed at once),
+  sends one devctl `0x40600c00` (96 bytes), and plays on when it gets
+  `ENOSYS`. Short reads are fine: 2,827 of 2,846 reads were short with no
+  audible effect; held reads (up to 22 ms) are fine too.
+
+So a resource manager can feed io-media live SBC through the `sbc:` input,
+which is what a stand-in for `/dev/wms/player1` needs.
