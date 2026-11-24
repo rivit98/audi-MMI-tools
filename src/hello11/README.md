@@ -38,12 +38,13 @@ without a click ends after its time limit (`TIMEOUT` in the log).
 | 1 | parked in P, ignition on, light switch at 0, touch nothing | quiet | 20 s |
 | 2, 4 | headlights on | lights on | 60 s |
 | 3, 5 | light switch to 0 | lights off | 60 s |
-| 6 | light switch to AUTO (it is light: the headlights stay off) | switch AUTO | 60 s |
-| 7, 9 | light sensor covered until the headlights come on, +10 s | sensor covered | 120 s |
-| 8, 10 | sensor uncovered until the headlights go off | sensor free | 180 s |
-| 11, 13 | R, until the camera picture is on | reverse | 150 s |
-| 12, 14 | P, until the camera picture is gone | camera off | 150 s |
-| 15 | touch nothing | quiet | 20 s |
+| 6 | light switch to AUTO | switch AUTO | 60 s |
+| 7, 9 | light sensor dark until the headlights come on, +10 s (daylight: covered; night: as it is) | sensor dark | 120 s |
+| 8, 10 | sensor bright until the headlights go off (daylight: uncovered; night: phone torch on it) | sensor bright | 180 s |
+| 11 | touch nothing | quiet | 20 s |
+
+The rear camera's signal is answered (State, below), so there are no
+reverse steps; the camera, ndr and slog readers still log what they see.
 
 Every step's instruction is on the screen while it runs, with the live
 values (light flag, RainSens, camera, the last brightness slog line).
@@ -54,8 +55,7 @@ shows the camera (never hide the camera) and comes back after it.
 **The answer** is the summary (last screen and `hello11.log`): per kind, the
 keys that changed in **every** step of that kind and in **no** quiet step,
 with their first change. "lights on: DA01.0C0D/C" with `[00 ..] -> [01 ..]`
-would confirm §5.2; "reverse: BAP 0B.1A" that the camera's session can be
-read natively. A key under "sensor covered" that is not under "lights on" follows
+would confirm §5.2. A key under "sensor dark" that is not under "lights on" follows
 the sensor, not the headlights: the darkness signal.
 
 ## Output
@@ -79,7 +79,7 @@ Run on the car once [confirmed]:
 - **Lights and light sensor: no.** Nothing on ch4 or ch5 changed only with
   the light switch or the covered sensor; `DA01.0C0D` steps like a counter,
   also in quiet steps. `/dev/ndr/.../ReverseGear` is not readable (ENOSYS).
-- **Light sensor with the switch at 0:** nothing follows covering the
+- **Light sensor with the switch at 0** (steps then named covered / free): nothing follows covering the
   sensor. `DD01.0333/C` flips byte 1 between 0 and 1 every ~10–25 s in
   every step, covered or not; `FB01.0D06/C` and ch5 `0f.03` (temperature)
   only drift. The headlights can't react with the switch at 0, so a run

@@ -19,9 +19,9 @@
 // guard, the camera library stops reading ch4 if its counters show gaps.
 //
 // The driver goes through steps (lights on / off twice, the light sensor
-// covered / free twice with the switch at AUTO, reverse in / out twice,
-// quiet steps before and after) and turns the main knob once at the end of
-// each. The summary names the keys that changed in every step of a kind and
+// dark / bright twice with the switch at AUTO, quiet steps before and
+// after; the camera's signal is answered, so there are no reverse steps)
+// and turns the main knob once at the end of each. The summary names the keys that changed in every step of a kind and
 // in no quiet step.
 //
 // Output: <sd>/var/hello11.log (steps, the watched keys, summary),
@@ -62,10 +62,9 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 1800;  // the intro's and steps' time limits add up to ~26 min
+constexpr unsigned kWatchdogS = 1260;  // the intro's and steps' time limits add up to ~17 min
 constexpr unsigned kQuietMs = 20000;
 constexpr unsigned kLightMs = 60000;    // a step's time limit
-constexpr unsigned kReverseMs = 150000; // the camera's follow-up time is up to ~90 s
 constexpr unsigned kDarkMs = 120000;    // auto headlights come on within seconds
 constexpr unsigned kBrightMs = 180000;  // and go off only after a delay
 constexpr unsigned kScreenMs = 1000;
@@ -94,29 +93,18 @@ const StepDef kSteps[] = {
 	{"lights off 2", "lights off", kLightMs, true,
 	 "Light switch to 0 again. Then turn the main knob ONE click."},
 	{"switch to AUTO", "switch AUTO", kLightMs, true,
-	 "Turn the light switch to AUTO. Then turn the main knob ONE click. "
-	 "(The headlights stay off: it is light outside.)"},
-	{"sensor covered 1", "sensor covered", kDarkMs, true,
-	 "Cover the light sensor (top of the windscreen, behind the mirror) with your hand or a "
-	 "cloth and keep it covered. When the headlights come on, wait 10 more seconds (does the "
-	 "screen dim?), then turn the main knob ONE click, still covering."},
-	{"sensor free 1", "sensor free", kBrightMs, true,
-	 "Uncover the sensor. Wait until the headlights go OFF again (can take a minute or two), "
-	 "then turn the main knob ONE click."},
-	{"sensor covered 2", "sensor covered", kDarkMs, true,
-	 "Once more: cover the sensor. Headlights on, 10 more seconds, then ONE click."},
-	{"sensor free 2", "sensor free", kBrightMs, true,
-	 "Uncover the sensor. Headlights off, then ONE click. Leave the switch at AUTO."},
-	{"reverse 1", "reverse", kReverseMs, true,
-	 "Foot on the brake, select R. When the camera picture is on, turn the main knob ONE click. "
-	 "(This screen goes away while the camera is shown.)"},
-	{"camera off 1", "camera off", kReverseMs, true,
-	 "Select P. Wait until the camera picture is GONE (it can stay up to a minute or more), "
-	 "then turn the main knob ONE click."},
-	{"reverse 2", "reverse", kReverseMs, true,
-	 "Once more: select R, and when the camera picture is on, ONE click."},
-	{"camera off 2", "camera off", kReverseMs, true,
-	 "Select P, wait until the camera picture is gone, then ONE click."},
+	 "Turn the light switch to AUTO. Then turn the main knob ONE click."},
+	{"sensor dark 1", "sensor dark", kDarkMs, true,
+	 "Make the light sensor (top of the windscreen, behind the mirror) see DARK and keep it so. "
+	 "Daylight: cover it with your hand or a cloth. Night: take the torch away. When the "
+	 "headlights come on, wait 10 more seconds (does the screen dim?), then ONE click."},
+	{"sensor bright 1", "sensor bright", kBrightMs, true,
+	 "Make the sensor see LIGHT. Daylight: uncover it. Night: shine the phone torch on it. Wait "
+	 "until the headlights go OFF (can take a minute or two), then ONE click."},
+	{"sensor dark 2", "sensor dark", kDarkMs, true,
+	 "Once more: sensor DARK. Headlights on, 10 more seconds, then ONE click."},
+	{"sensor bright 2", "sensor bright", kBrightMs, true,
+	 "Sensor LIGHT again. Headlights off, then ONE click. Leave the switch at AUTO."},
 	{"quiet 2", "", kQuietMs, false, "Touch nothing for 20 seconds."},
 };
 
@@ -462,10 +450,10 @@ const char kIntro[] =
 	"Parked in P, ignition on, light switch at 0. \"Click\" = turn the main knob ONE notch.\n"
 	"1. 20 s: touch nothing.\n"
 	"2. Headlights ON, click. Switch to 0, click. Twice.\n"
-	"3. Switch to AUTO, click. Cover the light sensor (behind the mirror) until the headlights "
-	"come on + 10 s, click. Uncover until they go off, click. Twice.\n"
-	"4. R: when the camera is on, click. P: when it is gone (can take 1-2 min), click. Twice.\n"
-	"5. 20 s: touch nothing, then the results.\n"
+	"3. Switch to AUTO, click. Light sensor (behind the mirror) DARK until the headlights come "
+	"on + 10 s, click; LIGHT until they go off, click. Twice. Daylight: cover / uncover it. "
+	"Night: no torch / phone torch on it.\n"
+	"4. 20 s: touch nothing, then the results.\n"
 	"Each step is also shown on screen. Click to start.";
 
 // The whole test on one screen, until a click (or kIntroMs). false: stop requested.
@@ -477,7 +465,7 @@ bool intro()
 	for (;;) {
 		unsigned now = log_ms();
 		if (first || now - shown_at >= kScreenMs) {
-			screen("hello11: rear camera, lights, light sensor (~10 min)", kIntro, false);
+			screen("hello11: lights, light sensor (~8 min)", kIntro, false);
 			shown_at = now;
 			first = false;
 		}
