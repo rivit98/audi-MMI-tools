@@ -50,6 +50,15 @@ AA_CERT_SHA := 85b5043a09b1ba9464f745e6917bdbaa2bc582fe48cb727a7787c1a832a773e4 
 # (tests/check_aa_proto.py checks our hand-written protobuf against them).
 AA_PROTO     := third_party/aasdk-proto
 AA_PROTO_SHA := 095c1088225c88032b1b29a415df13a0b12a87bf80e07747d872aaa4151501f4
+# BlueZ's SBC codec (LGPL-2.1): the phone app encodes its audio with it
+# (android/app/src/main/cpp), the host tests check our SBC parser against it
+SBC_VER := 2.0
+SBC     := third_party/sbc-$(SBC_VER)
+SBC_SHA := 8f12368e1dbbf55e14536520473cfb338c84b392939cc9b64298360fd4a07992
+# its portable C (the SIMD files only build on their own targets)
+SBC_SRC := $(SBC)/sbc/sbc.c $(SBC)/sbc/sbc_primitives.c $(SBC)/sbc/sbc_primitives_mmx.c \
+           $(SBC)/sbc/sbc_primitives_iwmmxt.c $(SBC)/sbc/sbc_primitives_neon.c \
+           $(SBC)/sbc/sbc_primitives_armv6.c $(SBC)/sbc/sbc_primitives_sse.c
 # mbedTLS for an app: its headers + our config (src/common/mbedtls/)
 MBEDTLS_INC := -Isrc/common/mbedtls -I$(MBEDTLS)/include '-DMBEDTLS_CONFIG_FILE="mbedtls_config.h"'
 AA_INC      := -Isrc/android_auto $(MBEDTLS_INC)
@@ -78,6 +87,7 @@ CXXFLAGS := $(CFLAGS)
 #           (cpustat.c); slogmark.c: our markers in the system log
 #   IOM     iom.c: our own io-media client (graph, input, output, play, events)
 #   UI      C++: ui.cpp, the test apps' full-screen text pages (on SCREEN)
+#   SBCPARSE C++: sbc.cpp, SBC frame headers + CRC, a live SBC stream's release (pure)
 #   LIVE    C++ (CXX_APPS only): a live H.264 stream through the unit's
 #           io-media and DM642 (hw_stream.cpp, docs/phone-mirroring.md 7.10):
 #           h264 + csmp4 + live_stream (pure, tests/test_live.cpp),
@@ -103,6 +113,7 @@ CPUMON := $(call common,cpumon cpustat slogmark)
 IOM    := $(call common,iom)
 HBDSI  := $(call common,hbdsi hbdsi_wire)
 UI     := $(call commonxx,ui)
+SBCPARSE := $(call commonxx,sbc)
 CAMERA := $(wildcard src/common/camera/*.cpp src/common/camera/*.h)
 LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_stream) $(CAMERA) $(IOM)
 
@@ -247,14 +258,14 @@ CXXFLAGS_hello11 := -Wno-ignored-attributes
 # hello12: C++. Live SBC audio through io-media's Bluetooth reader on the DSP
 # (docs/bt-audio-path.md): io-media's "sbc:" input, fed by hello12's own
 # resource manager (sbcsrv.cpp), plus a read-only look at the Bluetooth
-# stack's /dev/wms (wmsprobe.cpp, in a child). Pure: sbc.cpp,
-# tests/test_hello12.cpp.
-build/hello12: $(wildcard src/hello12/*.cpp src/hello12/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(IOM)
+# stack's /dev/wms (wmsprobe.cpp, in a child) and a stand-in for it. Pure:
+# common/sbc.cpp, wms.cpp, tests/test_hello12.cpp.
+build/hello12: $(wildcard src/hello12/*.cpp src/hello12/*.h) $(BASE) $(SCREEN) $(UI) $(PROC) $(IOM) $(SBCPARSE)
 LIBS_hello12 := -lgf
 CXXFLAGS_hello12 := -Wno-ignored-attributes
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn status screen, no GL.
 # The phone's H.264 stream plays on the unit's DM642 through LIVE (hwvideo.cpp).
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(LIVE)
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(LIVE) $(SBCPARSE)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 CXXFLAGS_audi_stream_receiver := -Wno-ignored-attributes
 
@@ -306,6 +317,16 @@ $(MBEDTLS)/.done: src/common/mbedtls/utctime-offset.patch
 	tar -xjf third_party/mbedtls.tar.bz2.part -C third_party
 	rm third_party/mbedtls.tar.bz2.part
 	patch -p1 -d $(MBEDTLS) < src/common/mbedtls/utctime-offset.patch
+	touch $@
+#   BlueZ sbc (LGPL-2.1): the phone app's SBC encoder, a reference for tests.
+$(SBC)/.done:
+	rm -rf $(SBC)
+	mkdir -p third_party
+	curl -fsSL -o third_party/sbc.tar.xz.part \
+	    https://www.kernel.org/pub/linux/bluetooth/sbc-$(SBC_VER).tar.xz
+	echo "$(SBC_SHA)  third_party/sbc.tar.xz.part" | sha256sum -c -
+	tar -xJf third_party/sbc.tar.xz.part -C third_party
+	rm third_party/sbc.tar.xz.part
 	touch $@
 $(AA_CERT)/.done:
 	mkdir -p $(AA_CERT)
@@ -426,7 +447,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_hello12 build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_hello12 build/test_audio_rx build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -456,6 +477,16 @@ test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
 # audi_stream_receiver's wire protocol, picture reassembly and ack batches (C++, below)
 build/test_proto: tests/test_proto.cpp tests/check.h src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.h src/audi_stream_receiver/ack_batch.h
+# phone audio: our SBC parser + CRC against BlueZ's encoder, AUDIO_CONFIG,
+# the receiver's stream checks (audio_rx.h)
+build/test_audio_rx: tests/test_audio_rx.cpp tests/check.h src/common/sbc.cpp src/common/sbc.h \
+                     src/audi_stream_receiver/audio_rx.cpp src/audi_stream_receiver/audio_rx.h \
+                     src/audi_stream_receiver/proto.h $(SBC)/.done
+	mkdir -p build
+	mkdir -p build/sbc-host
+	$(RUN) sh -c 'cd build/sbc-host && gcc -O1 -g -w -fsanitize=address,undefined -c $(addprefix /src/,$(SBC_SRC))'
+	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
+	    -Isrc/audi_stream_receiver -I$(SBC) -o $@ $(filter %.cpp,$^) build/sbc-host/*.o
 build/test_cpustat: tests/test_cpustat.c tests/check.h $(call common,cpustat)
 build/test_text:  tests/test_text.c tests/check.h $(call common,text)
 # lz4mini against the reference liblz4 (liblz4-dev in the SDK image)
@@ -529,7 +560,7 @@ build/test_hello11: tests/test_hello11.cpp tests/check.h src/common/camera/ipc4.
 	    -Isrc/common/camera -Isrc/hello11 -o $@ $(filter %.cpp,$^)
 # hello12's SBC headers, frame index, live release and read answers; the
 # /dev/wms stand-in's devctl answers and looped stream
-build/test_hello12: tests/test_hello12.cpp tests/check.h src/hello12/sbc.cpp src/hello12/sbc.h \
+build/test_hello12: tests/test_hello12.cpp tests/check.h src/common/sbc.cpp src/common/sbc.h \
                     src/hello12/wms.cpp src/hello12/wms.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
@@ -555,7 +586,7 @@ build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -Isrc/common/camera -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello11 build/test_hello12 build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello11 build/test_hello12 build/test_audio_rx build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))
@@ -574,7 +605,7 @@ gusa-scan: $(addprefix build/,$(APPS))
 # Android sender: its own Makefile (android/Makefile), everything in Docker.
 # Its Android Auto mode needs mbedTLS and the head unit certificate:
 # android/Makefile asks for them with aa-sources.
-aa-sources: $(MBEDTLS)/.done $(AA_CERT)/.done
+aa-sources: $(MBEDTLS)/.done $(AA_CERT)/.done $(SBC)/.done
 apk:
 	$(MAKE) -C android
 apk-test:

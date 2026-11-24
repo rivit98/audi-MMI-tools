@@ -14,6 +14,8 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Output** (`var/`): `audi_stream_receiver.log` (previous run kept as `.prev.log`),
   `usb_slog_<time>.txt` at a failed handshake / removal / io-media error (up to 6),
   `usb_slog_periodic_<time>.txt` every 60 s while streaming. `<time>` is time since boot.
+  `phone_audio_<n>.sbc`: the first ~20 s of each phone audio stream (up to 3
+  a run), raw SBC frames: `ffplay -f sbc phone_audio_1.sbc` on the desk.
 - **Build:**
 
   ```sh
@@ -42,7 +44,8 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Protocol** (`proto.h` = `android/.../Proto.kt`): `type u8 | len u16 LE | payload`,
   max 2048 B. `HELLO`, `VIDEO_CAPS` (boxes, formats, limits), `VIDEO_START` +
   `VIDEO_DATA`, batched `VIDEO_ACKS`, `VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`
-  (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only).
+  (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only),
+  `AUDIO_CAPS` / `AUDIO_CONFIG` / `AUDIO_DATA` / `AUDIO_STOP` (the phone's audio as SBC).
   **Retired, never reuse:** `0x02` TEXT, `0x03` ACK, `0x08` VIDEO_ACK, `0x0A` status bar,
   format 1 (JPEG) and 2 (PNG).
 - **H.264** (`hwvideo.cpp`, `src/common/hw_stream.h`): 720×432 Baseline from
@@ -57,6 +60,15 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   camera (the slog and its BAP session on ch4); while it is up the app writes nothing to VP1 and shows
   nothing, and retakes the screen 1 s after it ends
   ([docs/rear-camera.md §9](../../docs/rear-camera.md)).
+- **Phone audio** (`audio_rx.h`, pure, `tests/test_audio_rx.cpp`): the phone
+  app captures what the phone plays, encodes it with BlueZ's SBC encoder
+  (44.1 kHz joint stereo, bitpool 53, 119-byte frames, ~328 kbit/s) and
+  sends 17 frames per `AUDIO_DATA`. The receiver announces SBC in
+  `AUDIO_CAPS` with "not played", checks every frame (header as
+  configured, CRC: `src/common/sbc.h`), counts gaps and the arrival against
+  the phone's capture clock, and saves the first ~20 s. Nothing is played
+  yet: the next step is serving it to io-media's `sbc:` input (hello12
+  shows that plays) or as the Bluetooth stand-in (hello12 `W`).
 - **Screen:** while no stream plays, a CPU-drawn status screen (`ui.cpp`):
   link state and what to do next. The stream's video replaces it.
 - **Logging:** per-frame paths only count in RAM; `h264:` summaries every
@@ -75,6 +87,9 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | `h264: at the error:` | on an io-media ERROR: last 32 reads, last 16 events, slog snapshot |
 | `h264: tx H264_STATUS REFUSED (reason)` | why H.264 was refused |
 | `camera:` / `videoctrl` | rear camera on/off, VCAP changes |
+| `rx AUDIO_CONFIG` | the phone's SBC settings (or why refused) |
+| `audio: 10.0 s:` | good frames and how much of real time they cover, kbit/s, bad (header/CRC), missing (gaps in the frame numbers), silent frames, messages and the longest gap, `lag min/max/last` (arrival vs the phone's capture clock, from the first message) |
+| `audio: stream ended (why)` | totals; `audio: capture ->` the saved file |
 
 `lag` is MMI-side only (io-media's queue); the phone's capture, encoder and USB are not in it.
 

@@ -10,7 +10,7 @@ import android.widget.TextView
 
 /**
  * One copy of the H.264 stream settings (res/layout/stream_options.xml):
- * "Max fps", "H.264 rate" and "Keep screen on". Both pages
+ * "Max fps", "H.264 rate", "Keep screen on" and "Send phone audio". Both pages
  * have one, and both modes use the same values ([Streaming]): the screen
  * mirroring ([CaptureService]) and Android Auto ([AaService]). A change in
  * one copy is saved in [prefs], and [onChange] lets the owner [show] it in
@@ -26,6 +26,7 @@ class StreamOptions(
     private val fps: SeekBar = root.findViewById(R.id.fps)
     private val bitRate: Spinner = root.findViewById(R.id.bit_rate)
     private val keepScreenOn: CompoundButton = root.findViewById(R.id.keep_screen_on)
+    private val sendAudio: CompoundButton = root.findViewById(R.id.send_audio)
     private var showing = false                    // set from [Streaming]: no echo
 
     init {
@@ -53,6 +54,13 @@ class StreamOptions(
                 onChange()
             }
         }
+        sendAudio.setOnCheckedChangeListener { _, on ->
+            if (!showing) {
+                Streaming.sendAudio = on
+                prefs.edit().putBoolean(PREF_SEND_AUDIO, on).apply()
+                onChange()
+            }
+        }
     }
 
     /** The controls from [Streaming]. */
@@ -63,6 +71,7 @@ class StreamOptions(
         // animate = false: the selection is set now, not on the next layout
         bitRate.setSelection(CaptureService.BIT_RATES.indexOf(Streaming.bitRate).coerceAtLeast(0), false)
         keepScreenOn.isChecked = Streaming.keepScreenOn
+        sendAudio.isChecked = Streaming.sendAudio
         showing = false
     }
 
@@ -81,6 +90,7 @@ class StreamOptions(
         private const val PREF_FPS = "max_fps"
         private const val PREF_BIT_RATE = "bit_rate"
         private const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
+        private const val PREF_SEND_AUDIO = "send_audio"
 
         /** [Streaming]'s settings from [prefs], once at the start. */
         fun load(prefs: SharedPreferences) {
@@ -89,6 +99,7 @@ class StreamOptions(
             Streaming.bitRate = prefs.getInt(PREF_BIT_RATE, CaptureService.DEFAULT_BIT_RATE)
                 .takeIf { it in CaptureService.BIT_RATES } ?: CaptureService.DEFAULT_BIT_RATE
             Streaming.keepScreenOn = prefs.getBoolean(PREF_KEEP_SCREEN_ON, false)
+            Streaming.sendAudio = prefs.getBoolean(PREF_SEND_AUDIO, true)
         }
     }
 }

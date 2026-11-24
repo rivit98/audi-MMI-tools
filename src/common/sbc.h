@@ -1,12 +1,15 @@
-// sbc.h - SBC frame headers, a clip's frame index, and the real-time
-// release of a live SBC stream (pure: tests/test_hello12.cpp).
+// sbc.h - SBC frame headers and their CRC, a clip's frame index, and the
+// real-time release of a live SBC stream (pure: tests/test_hello12.cpp,
+// tests/test_audio_rx.cpp checks the parser and the CRC against BlueZ's
+// encoder). hello12 and audi_stream_receiver use it.
 //
 // SBC frame header (A2DP spec 12.6): sync 0x9C; byte 1 = sampling frequency
 // (2 bits: 16, 32, 44.1, 48 kHz), blocks (2 bits: 4, 8, 12, 16), channel
 // mode (2 bits: mono, dual, stereo, joint), allocation (1 bit), subbands
-// (1 bit: 4, 8); byte 2 = bitpool; byte 3 = CRC.
-#ifndef HELLO12_SBC_H
-#define HELLO12_SBC_H
+// (1 bit: 4, 8); byte 2 = bitpool; byte 3 = CRC-8 (x^8+x^4+x^3+x^2+1, start
+// 0x0F) over bytes 1-2, the join bits (joint stereo) and the scale factors.
+#ifndef COMMON_SBC_H
+#define COMMON_SBC_H
 
 #include "types.h"
 
@@ -32,6 +35,13 @@ struct Header {
 // Parse the header at p (n bytes available). False: no sync byte, too
 // short, or a frame length that cannot be.
 bool parse(const u8 *p, usize n, Header &h);
+
+// The CRC byte the frame at p (h parsed from it, n bytes available) should
+// carry; -1 if n is too short to hold what the CRC covers.
+int crc(const u8 *p, usize n, const Header &h);
+
+// The frame at p has a valid header, all of its bytes and the right CRC.
+bool frame_ok(const u8 *p, usize n, Header *h = nullptr);
 
 // Frame length in bytes from the header fields (A2DP spec 12.9).
 usize frame_len(u8 mode, u8 subbands, u8 blocks, u8 bitpool);

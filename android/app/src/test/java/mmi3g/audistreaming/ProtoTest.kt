@@ -164,4 +164,20 @@ class ProtoTest {
         assertEquals(Proto.H264_SYNC, Proto.h264StatusOrNull(byteArrayOf(1)))
         assertNull(Proto.h264StatusOrNull(ByteArray(0)))
     }
+
+    @Test
+    fun audioMessages() {
+        // = proto.h's AUDIO_CONFIG: SBC 44100 Hz, 2 ch, 16 blocks, 8 subbands,
+        // joint, loudness, bitpool 53, 119-byte frames
+        val c = Proto.audioConfig(44100, 2, 16, 8, 3, true, 53, 119)
+        assertArrayEquals(byteArrayOf(0x10, 13, 0, 1, 0x44, 0xAC.toByte(), 0, 0, 2, 16, 8, 3, 1, 53, 119, 0), c)
+        val frames = byteArrayOf(9, 9, 1, 2, 3, 9)
+        val d = Proto.audioData(0x01020304, 0x7fffffff, frames, 2, 3)
+        assertArrayEquals(byteArrayOf(0x11, 11, 0, 4, 3, 2, 1, -1, -1, -1, 0x7f, 1, 2, 3), d)
+        val caps = Proto.audioCapsOrNull(byteArrayOf(1, 0))!!
+        assertEquals(true, caps.sbc)
+        assertEquals(false, caps.plays)
+        assertEquals(false, Proto.audioCapsOrNull(byteArrayOf(2, 1))!!.sbc)
+        assertNull(Proto.audioCapsOrNull(byteArrayOf(1)))
+    }
 }

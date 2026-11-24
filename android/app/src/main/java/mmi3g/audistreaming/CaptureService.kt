@@ -116,6 +116,11 @@ class CaptureService : Service() {
     private var fpsChangeAt = 0L
     private var portrait = false                      // the notice is up instead of the screen
 
+    // the phone's playback to the MMI as SBC ([PhoneAudio]), while
+    // Streaming.sendAudio is on (capture thread)
+    private var audio: PhoneAudio? = null
+    private var audioRefused = false                  // said once: no permission / too old
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -199,6 +204,8 @@ class CaptureService : Service() {
         handler.removeCallbacksAndMessages(null)
         handler.post {
             screenLock.release()
+            audio?.stop()
+            audio = null
             display?.release()
             scaler?.release()
             scaler = null
@@ -223,6 +230,7 @@ class CaptureService : Service() {
             AppLog.i("keep screen on: ${Streaming.keepScreenOn}")
         }
         logStatus()
+        followAudio()
         try {
             sendSettings()
             next = h264Tick()
@@ -233,6 +241,27 @@ class CaptureService : Service() {
         if (projection != null) handler.postDelayed(::tick, next)
     }
 
+    /** The phone's audio capture on or off with [Streaming.sendAudio]. */
+    private fun followAudio() {
+        val p = projection ?: return
+        if (!Streaming.sendAudio) {
+            if (audio != null) AppLog.i("audio: switched off")
+            audio?.stop()
+            audio = null
+            return
+        }
+        if (audio != null) return
+        val allowed = Build.VERSION.SDK_INT >= 29 &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!allowed) {
+            if (!audioRefused) AppLog.i("audio: off (${if (Build.VERSION.SDK_INT < 29) "needs Android 10" else "no RECORD_AUDIO permission"})")
+            audioRefused = true
+            return
+        }
+        audio = PhoneAudio(p).also { it.start() }
+    }
+
     /** What streaming runs with, for the MMI's log (STREAM_SETTINGS) and ours:
      * the user's settings and the frame size. */
     private fun settingsText(): String {
@@ -240,6 +269,7 @@ class CaptureService : Service() {
         return "max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
             "sharp=${on(Streaming.sharp)} " +
             "hide_nav_bar=${on(Streaming.hideNavBar)} keep_screen_on=${on(Streaming.keepScreenOn)} " +
+            "audio=${on(Streaming.sendAudio)} " +
             "frame_kb=${mmi.frameBytes / 1024} android=${Build.VERSION.SDK_INT}"
     }
 
@@ -575,5 +605,8 @@ object Streaming {
     @Volatile var hideNavBar = true
     /** Hold the screen on while streaming, set by the activity (its checkbox). */
     @Volatile var keepScreenOn = false
+    /** Send the phone's audio (SBC) to the MMI while mirroring, set by the
+     * activity (its checkbox). The MMI only logs it for now. */
+    @Volatile var sendAudio = true
 }
 

@@ -1,5 +1,6 @@
 package mmi3g.audistreaming
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.PendingIntent
@@ -7,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.hardware.usb.UsbAccessory
 import android.hardware.usb.UsbManager
@@ -217,10 +219,29 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             CaptureService.stop(this)
         } else {
             AaService.stop(this)
-            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            @Suppress("DEPRECATION")
-            startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
+            // "Send phone audio" needs the record permission: asked first, once
+            if (Streaming.sendAudio && Build.VERSION.SDK_INT >= 29 &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
+                return
+            }
+            askCapture()
         }
+    }
+
+    private fun askCapture() {
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        @Suppress("DEPRECATION")
+        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>,
+                                            grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_AUDIO) return
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        AppLog.i("record permission (phone audio): ${if (granted) "granted" else "refused"}")
+        askCapture()                    // the screen streams either way
     }
 
     /** The tabs, the pages and the Android Auto page's controls; the
@@ -435,6 +456,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
     companion object {
         private const val ACTION_PERMISSION = "mmi3g.audistreaming.USB_PERMISSION"
         private const val REQ_CAPTURE = 1
+        private const val REQ_AUDIO = 2
         private const val PREF_SHARP = "sharp_h264"
         private const val PREF_HIDE_NAV_BAR = "hide_nav_bar"
         private const val PREF_MODE = "mode"
@@ -454,6 +476,7 @@ class MainActivity : Activity(), AccessoryLink.Listener {
             Triple(R.id.info_fps, R.string.info_fps_title, R.string.info_fps),
             Triple(R.id.info_bit_rate, R.string.info_bit_rate_title, R.string.info_bit_rate),
             Triple(R.id.info_keep_screen_on, R.string.info_keep_screen_on_title, R.string.info_keep_screen_on),
+            Triple(R.id.info_send_audio, R.string.info_send_audio_title, R.string.info_send_audio),
         )
     }
 }

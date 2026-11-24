@@ -26,6 +26,44 @@ usize frame_len(u8 mode, u8 subbands, u8 blocks, u8 bitpool)
 	return 4 + (4u * subbands * ch) / 8 + (bits + 7) / 8;
 }
 
+int crc(const u8 *p, usize n, const Header &h)
+{
+	// bits after the header: the join bits, then 4 per scale factor
+	usize bits = (h.mode == kJoint ? h.subbands : 0) + 4u * h.subbands * h.channels;
+	if (n < 4 + (bits + 7) / 8)
+		return -1;
+	u8 c = 0x0F;
+	auto feed = [&c](u8 byte, unsigned nbits) {
+		for (unsigned i = 0; i < nbits; i++) {
+			unsigned bit = (byte >> (7 - i)) & 1;
+			unsigned top = (c >> 7) & 1;
+			c = (u8)(c << 1);
+			if (top ^ bit)
+				c ^= 0x1D;
+		}
+	};
+	feed(p[1], 8);
+	feed(p[2], 8);
+	for (usize i = 0; bits > 0; i++) {
+		unsigned k = bits < 8 ? (unsigned)bits : 8;
+		feed(p[4 + i], k);
+		bits -= k;
+	}
+	return c;
+}
+
+bool frame_ok(const u8 *p, usize n, Header *out)
+{
+	Header h;
+	if (!parse(p, n, h) || n < h.frame_len)
+		return false;
+	if (crc(p, n, h) != p[3])
+		return false;
+	if (out != nullptr)
+		*out = h;
+	return true;
+}
+
 bool parse(const u8 *p, usize n, Header &h)
 {
 	static const u32 kRates[4] = {16000, 32000, 44100, 48000};

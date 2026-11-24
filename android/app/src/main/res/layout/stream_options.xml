@@ -72,4 +72,20 @@
             android:id="@+id/info_keep_screen_on"
             style="@style/InfoButton" />
     </LinearLayout>
+
+    <LinearLayout
+        style="@style/OptionRow"
+        android:paddingStart="12dp">
+
+        <CheckBox
+            android:id="@+id/send_audio"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/send_audio" />
+
+        <ImageButton
+            android:id="@+id/info_send_audio"
+            style="@style/InfoButton" />
+    </LinearLayout>
 </LinearLayout>

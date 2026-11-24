@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "Send phone audio": capturing other apps' playback (with the screen
+         projection) needs the record permission -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- "Keep screen on": a screen wake lock while streaming -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
