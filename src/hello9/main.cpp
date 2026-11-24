@@ -23,7 +23,7 @@
 //   f30     15 s, the stream timed at 30 fps (frames pushed at 30 fps)
 //           s56 / s112 / f30 vs live: is io-media's ~0.5 s delay a queue
 //           of bytes or of frames? (docs/phone-mirroring.md 7.10)
-// and, on request only:
+// and also (every test runs by default):
 //   c9      constant-size MP4 file (plays)
 //   stall   the gap test without gap fill (the "stall")
 //
@@ -35,7 +35,7 @@
 // <sd>/hello9/ (io-media queries, the system log after the tests).
 //
 // usage: hello9 <sd_path> [test,test,...]
-//        (default: c5,live,gap,slow,burst,s56,s112,f30)
+//        (default: all, c5,live,gap,slow,burst,s56,s112,f30,c9,stall)
 #include "types.h"
 extern "C" {
 #include "log.h"
@@ -69,7 +69,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 480;    // ~4.5 min run
+constexpr unsigned kWatchdogS = 600;    // ~5.5 min run (every test)
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -134,11 +134,11 @@ const std::vector<Test> kTests = {
 	 "The stream timed at 30 frames a second: the counter runs a little fast.", Kind::Live, true,
 	 nullptr, 15000, 30, {}, 1, true, 600, 1, 30},
 	{"c9", "Constant-size MP4", "A file with every frame padded to the same size (plays).",
-	 Kind::File, false, "c9_h264_336_cs.mp4", 8000, 0, {}, 1, false, 0},
+	 Kind::File, true, "c9_h264_336_cs.mp4", 8000, 0, {}, 1, false, 0},
 	{"stall", "Live stream with pauses, no fill (36 s)",
 	 "As the pause test, without the MMI filling the pauses. The picture freezes: that is "
 	 "part of the test.",
-	 Kind::Live, false, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, false, 600},
+	 Kind::Live, true, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, false, 600},
 };
 
 const char *sd_path;

@@ -27,10 +27,10 @@
  * decompressed by inflator) or, failing that, from the copies `make sd`
  * puts next to hello6 on the card.
  *
- * Default: v only, every clip through both capture paths (~6 min). The
- * rest only costs the driver's time (and g can freeze the unit).
+ * Default: all four phases, s c v g (~8 min). g runs last because it can
+ * freeze the unit.
  *
- * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default "v")
+ * usage: hello6 <sd_path> [phases]     phases: any of "scgv" (default "scgv")
  */
 #include "types.h"
 #include <errno.h>
@@ -48,7 +48,7 @@
 #include "quit.h"
 #include "texts.h"
 
-#define WATCHDOG_S   900     /* v alone ~6 min (10 clips x 30-38 s) */
+#define WATCHDOG_S   1200    /* v ~6 min (10 clips x 30-38 s), s c g a few min */
 #define INTRO_MS     12000   /* 8 s is too short */
 #define PAGE_MS      12000   /* per results page */
 #define MAX_SUMMARY  48
@@ -178,12 +178,12 @@ static void restore_screen(void)
 
 int main(int argc, char *argv[])
 {
-	const char *phases = "v";
+	const char *phases = "scgv";
 	char path[300], *slash;
 	int i;
 
 	if (argc < 2) {
-		fprintf(stderr, "usage: %s <sd_path> [phases: any of scgv, default v]\n", argv[0]);
+		fprintf(stderr, "usage: %s <sd_path> [phases: any of scgv, default scgv]\n", argv[0]);
 		return 2;
 	}
 	sd_path = argv[1];

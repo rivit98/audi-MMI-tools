@@ -15,10 +15,10 @@ the file patched, next to the HMI's own.
 
 | Test | What | Question |
 |---|---|---|
-| `iomcopy` (default) | an unchanged copy plays c3 (720×480, 10 s); only if it played, a copy with the capture width at 800 plays it (20 s); then the original plays it (8 s) | Can a copy run beside the original? Does the port capture an 800-sample line? |
-| `probe` (by name) | read only: io-media-nvidia's three capture-width words through `/proc/<pid>/as`; its `pidin arg` / `env`; its segment list (`DCMD_PROC_MAPINFO`, flags named by `mapinfo.cpp`); the width word's page mapped `MAP_SHARED` from `/mnt/efs-system/sbin/io-media-nvidia` in our own process and its `posix_mem_offset64` | Are the addresses right? How is io-media's code mapped? |
+| `iomcopy` | an unchanged copy plays c3 (720×480, 10 s); only if it played, a copy with the capture width at 800 plays it (20 s); then the original plays it (8 s) | Can a copy run beside the original? Does the port capture an 800-sample line? |
+| `probe` | read only: io-media-nvidia's three capture-width words through `/proc/<pid>/as`; its `pidin arg` / `env`; its segment list (`DCMD_PROC_MAPINFO`, flags named by `mapinfo.cpp`); the width word's page mapped `MAP_SHARED` from `/mnt/efs-system/sbin/io-media-nvidia` in our own process and its `posix_mem_offset64` | Are the addresses right? How is io-media's code mapped? |
 
-The default run is about 2 minutes. It may leave the radio or the screen
+Both run by default, about 3 minutes. It may leave the radio or the screen
 broken until the MMI restarts (MENU + main knob + top-right key); hello10
 says so on its first screen.
 

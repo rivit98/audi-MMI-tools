@@ -5,7 +5,7 @@ system info, CPU and GPU benchmarks, and 10 clips played through the DM642
 DSP onto a video displayable (VCAP 0 input 1 and VCAP 1). Retired: every run
 gives the same answer.
 
-- **Run:** `hello6 <sd_path> [phases]` (`s` sysinfo, `c` CPU, `g` GPU, `v` video; default `v`)
+- **Run:** `hello6 <sd_path> [phases]` (`s` sysinfo, `c` CPU, `g` GPU, `v` video; default all, `g` last: it can freeze the unit)
 - **Output:** `var/hello6.log` (`RESULT` lines), `var/hello6/` (sysinfo, player logs, slog)
 
 ![MPEG-2 720×576 clip decoded by the DSP, on screen via VCAP 0 input 1](img/mpeg2-on-screen.jpg)

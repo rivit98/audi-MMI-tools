@@ -2,7 +2,7 @@
  * hello5 - sound from our app: which audio output reaches the speakers and
  * how it behaves there. (Its knob/button log, stage 2, is hello7 now.)
  *
- * hello5 runs a list of steps (argument "steps", default "mntv"), in
+ * hello5 runs a list of steps (argument "steps", default "pmntgv"), in
  * order. Steps m, n, v and t play a ping train that hello5 renders itself
  * (pulse.c: a 0.5 s ping every 2 s) on the one output heard so far, mixer
  * m2 DSPOUT_TDM1_20_SAD: m, v and t through the unit's testapp-file, n
@@ -85,7 +85,7 @@
  *   groups 3-5 (m6, m4, m7)    silent.
  *   All five attach and play every chime to INPUT_EOF (exit after ~2.5 s
  *   each); io-media sees no difference between them.
- * That answers the survey, so g is not in the default steps: m, n, v and t
+ * That answers the survey (g still runs by default, before v): m, n, v and t
  * ask what the TDM1 2.0 SAD output does next to the radio, the volume knob
  * and the music, and whether our own client can drive it. The phone video's
  * sound (880 Hz band) is a better witness for them than the listener:
@@ -97,7 +97,7 @@
  *      sends one FINISHED per queue, not per file.
  *   v  the pings follow the volume knob (~21 dB down, then ~12 dB up
  *      again). With the knob far down the later pings are not recorded and
- *      t is silent, so v runs last (default "mntv").
+ *      t is silent, so v runs last (default "pmntgv": every step but d).
  *   t  Bluetooth music is muted for the whole train, audible the moment it
  *      ends.
  *
@@ -130,7 +130,7 @@
  * (src/common/quit.c). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
- *   steps: any of "mnvtdpg", run in that order (default mntv)
+ *   steps: any of "mnvtpg", run in that order (default pmntgv; d is disabled)
  *   outputs: step g's groups, comma-separated, one group each: mK =
  *   mixers[K], a number = an io-audio dindex (default m2,m1,m6,m4,m7)
  * Step g plays <sd_path>/beep.wav.
@@ -158,7 +158,7 @@
 #include "ipcprobe.h"
 #include "pulse.h"
 
-#define DEFAULT_STEPS   "mntv"
+#define DEFAULT_STEPS   "pmntgv"
 #define DEFAULT_OUTPUTS "m2,m1,m6,m4,m7"
 #define MAX_GROUPS      6
 #define LEAD_MS         2000    /* silence before the first group */

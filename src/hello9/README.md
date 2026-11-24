@@ -5,7 +5,7 @@ receiver's code (`src/common/hw_stream.h`: CS-MP4 header, own resource
 manager, gap fill) fed from a clip on the card, the way a phone would feed
 it. C++. Retired: all answered.
 
-- **Run:** `hello9 <sd_path> [test,test,...]` (default `c5,live,gap,slow,burst,s56,s112,f30`)
+- **Run:** `hello9 <sd_path> [test,test,...]` (default: every test, `c5,live,gap,slow,burst,s56,s112,f30,c9,stall`)
 - **Output:** `var/hello9.log` (`RESULT` lines, lag), `var/hello9/` (io-media queries, slog)
 
 ## Verifies

@@ -4,7 +4,7 @@ Sound from an app. Plays a generated ping train (`pulse.c`: 0.5 s ping every
 2 s) on io-media's `mixer:DSPOUT_TDM1_20_SAD`, one step at a time, each with
 an on-screen question for the listener.
 
-- **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `mntv`; the card runs `p`; step `d` is disabled)
+- **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `pmntgv`, every step but `d`, which is disabled)
 - **Output:** `var/hello5.log` (`RESULT` lines), `hello5_<step>.log`, step `p`/`d` dumps
   (`hello5_ipc.txt`, `hello5_pidin.txt`, `hello5_broker.txt`, `hello5_helper.log`, …)
 - **Screen:** steps `p` and `d` show what they are doing now. Step `p`:

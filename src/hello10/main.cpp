@@ -10,7 +10,7 @@
 //            end (800 possible); garbled or slanted = it counts pixels
 //   orig720  the HMI's io-media again: still fine?
 //
-// probe (read only, by name): io-media's width words through
+// probe (read only): io-media's width words through
 // /proc/<pid>/as, its arguments and environment, its segment list
 // (capture::maps) and the physical address of the width page as our own
 // shared mapping of the file sees it (capture::phys).
@@ -21,7 +21,7 @@
 // Output: <sd>/var/hello10.log (every step, RESULT lines, the summary) and
 // <sd>/var/hello10/ (io-media queries, the copy's output, the system log).
 //
-// usage: hello10 <sd_path> [test,test,...]   (default: iomcopy)
+// usage: hello10 <sd_path> [test,test,...]   (default: all)
 #include "types.h"
 
 extern "C" {
@@ -55,7 +55,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 420;    // the default run is ~2 min
+constexpr unsigned kWatchdogS = 480;    // the default run (every test) is ~3 min
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -426,8 +426,8 @@ bool run_test(int n, int total, const Test &t)
 
 bool selected(const char *only, const Test &t)
 {
-	if (only == nullptr)   // the default run
-		return t.kind == Kind::Copy;
+	if (only == nullptr)   // the default run: every test
+		return true;
 	std::string list = std::string(",") + only + ",";
 	return list.find(std::string(",") + t.name + ",") != std::string::npos;
 }
