@@ -4,7 +4,7 @@ Sound from an app. Plays a generated ping train (`pulse.c`: 0.5 s ping every
 2 s) on io-media's `mixer:DSPOUT_TDM1_20_SAD`, one step at a time, each with
 an on-screen question for the listener.
 
-- **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `mntv`; the card runs `pd`)
+- **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `mntv`; the card runs `p`; step `d` is disabled)
 - **Output:** `var/hello5.log` (`RESULT` lines), `hello5_<step>.log`, step `p`/`d` dumps
   (`hello5_ipc.txt`, `hello5_pidin.txt`, `hello5_broker.txt`, `hello5_helper.log`, …)
 - **Screen:** steps `p` and `d` show what they are doing now. Step `p`:
@@ -25,8 +25,9 @@ an on-screen question for the listener.
 - `g`: which mixer outputs / io-audio devices are audible (N chimes on output N).
 - `p`: which channels MMI3GApplication, MMI3GNavigation and the servicebroker
   connect to and receive on (`ipcprobe.c`).
-- `d`: sound over a lowered radio: ask audio management for the nav voice
-  channel over HBDSI, as the navigation does, and play on io-audio `navi`.
+- `d` (**disabled**, hello5 refuses it): sound over a lowered radio: ask audio
+  management for the nav voice channel over HBDSI, as the navigation does, and
+  play on io-audio `navi`.
 
 ## Results
 
@@ -60,20 +61,21 @@ an on-screen question for the listener.
 **Not explained**
 - In `t` and `v` the first ping can come ~12 dB under the rest (amplifier fade-in? [inferred]).
 
-**Step `d` can no longer hang the run** [confirmed: the helper was killed at
-its deadline, hello5 played the control pings and exited, the runner's menu
-came back]. hello5 sends nothing to the MMI itself: it spawns a copy of itself
-without a screen (`hello5 <sd_path> @duck`, `duckhelper.c`) that does
-every HBDSI send, and talks to it over two pipes (`ducklink.c`, protocol in
-`ducklink.h`). Before each send the helper says how long it may take; a
-helper that misses that deadline (+2 s) is killed and left behind, and the
-step goes on to the control pings. The helper only tries the channels
-MMI3GApplication shares with the navigation, minus 6 and 13
-(`DUCK_SKIP_CHIDS`): that leaves chid 14, with `0x00020027` then
-`0x00010027` (built, not yet run: the earlier helper spent its time
-limit on the memory scan). Its log is
-`var/hello5_helper.log`; hello5's log has every line exchanged
-(`helper <-` / `helper ->`).
+**Step `d` breaks MMI3GApplication, so it is disabled** (the log lines
+[confirmed]; that our sends caused them [inferred]: nothing else wrote to the
+process). The
+ConnectRequest to chid 14 with `0x00020027` gets an all-zero reply; the one
+with `0x00010027` times out. Minutes later, at the next on/off state change
+(`OnOff new system state is 4`, `6`), MMI3GApplication logs `failed to
+allocate 977613627 bytes` and `terminating thread "Receive"`. "Receive" is
+the thread that takes HBDSI messages from the other native processes (the
+standard `Receive / Send / Trace / MainThread / DSIReceive / DSISend` set,
+thread-name table at `0x8A308EC`; the log line comes from `operator new`,
+`0x807F11A`). Without it the nav layer stays on screen and the unit does not
+power down when the ignition goes off and the door opens; a reboot fixes it.
+hello5 now refuses step `d` and its helper (`@duck`). The helper code
+(`duckhelper.c`, `ducklink.c`) is kept for reference: every HBDSI send ran in
+a copy of hello5 without a screen, with a per-send deadline.
 
 Details: [docs/platform-notes.md §9](../../docs/platform-notes.md) (audio),
 [docs/hbdsi.md](../../docs/hbdsi.md) (step `d`), knob/button decoding moved to [hello7](../hello7/).

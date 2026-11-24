@@ -9,8 +9,9 @@ The Java HMI uses a different path: `/dev/dsi/data`, a resource manager
 in MMI3GApplication that is exclusive per direction and held by the JVM.
 
 Everything below is read from the P1001 binaries (MMI3GApplication,
-MMI3GNavigation and servicebroker, rev `51`). The test that checks it on the
-car is hello5 step `d` ([src/hello5/README.md](../src/hello5/README.md)).
+MMI3GNavigation and servicebroker, rev `51`). The test that checked it on the
+car was hello5 step `d` ([src/hello5/README.md](../src/hello5/README.md)),
+now disabled because it breaks MMI3GApplication (end of §6.1).
 Our client is [`src/common/hbdsi.c`](../src/common/hbdsi.c). The wire structs
 are in [`src/common/hbdsi_wire.h`](../src/common/hbdsi_wire.h) with
 `_Static_assert`s, host-tested by `tests/test_hbdsi.c`.
@@ -310,7 +311,17 @@ on it forever, so no later app runs. Radio sound and the volume knob kept
 working, so MMI3GApplication's audio side was alive [confirmed on video].
 So step `d` sends from a helper process that owns no screen, with a
 deadline on each send (src/hello5/README.md), and run.sh and the runner
-leave behind an app that is still there 5 s after the KILL. Of the
-channels the navigation uses, only 14 is untried; step `d` sends to
-nothing else. In the one run with the helper, its time limit for the
-memory scan (25 s) ran out first, so chid 14 is still untried.
+leave behind an app that is still there 5 s after the KILL.
+
+**Chid 14 kills MMI3GApplication's "Receive" thread** [inferred; the log lines [confirmed]]. The
+ConnectRequest with `0x00020027` gets an all-zero reply (no connect-back);
+the one with `0x00010027` times out. At the next on/off state change,
+minutes later, MMI3GApplication logs `failed to allocate 977613627 bytes`
+(`operator new`, `0x807F11A`; the size is ASCII `;3E:`, a garbage length)
+and `terminating thread "Receive"`. "Receive" is the HBDSI receiver every
+MMI3G process has (thread-name table at `0x8A308EC`: `Receive`, `Send`,
+`Trace`, `MainThread`, `DSIReceive`, `DSISend`). The process keeps
+handling keys, but the nav layer stays on screen and the unit no longer
+powers down at ignition off + door open, until a reboot. That stale state
+is [inferred] to come from our sends: nothing else wrote to the process.
+So no raw HBDSI is sent to MMI3G processes any more: step `d` is disabled.

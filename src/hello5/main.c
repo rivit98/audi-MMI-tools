@@ -1645,9 +1645,15 @@ int main(int argc, char *argv[])
 	}
 	sd_path = argv[1];
 	self_path = argv[0];
-	/* step d's helper: no screen, no keys, no sound (duckhelper.h) */
-	if (argc > 2 && strcmp(argv[2], DUCK_HELPER_ARG) == 0)
-		return duck_helper_main(sd_path);
+	/* Step d is disabled: its raw HBDSI ConnectRequests into
+	 * MMI3GApplication's channels killed that process's "Receive" thread
+	 * (bad_alloc on a garbage length) minutes later, which left the nav
+	 * layer stuck and kept the unit from powering down. The helper is
+	 * refused too, so nothing can send them. */
+	if (argc > 2 && strcmp(argv[2], DUCK_HELPER_ARG) == 0) {
+		fprintf(stderr, "hello5: step d is disabled, no helper\n");
+		return 2;
+	}
 	out_dir = var_dir(sd_path);
 	if (argc > 2)
 		steps = argv[2];
@@ -1663,6 +1669,12 @@ int main(int argc, char *argv[])
 	log_msg("hello5 start, pid=%d, steps=%s, outputs=%s, player=%s",
 	        getpid(), steps, outspec, player ? player : "NOT FOUND");
 
+	if (strchr(steps, 'd') != NULL) {
+		log_msg("hello5: step d is disabled (it broke MMI3GApplication's "
+		        "Receive thread), refusing steps \"%s\"", steps);
+		log_close();
+		return 2;
+	}
 	nout = parse_outputs(outspec, outputs);
 	nsteps = (int)strlen(steps);
 	for (c = steps; *c != '\0' && (*c == 'g' || find_step(*c) != NULL); c++)
