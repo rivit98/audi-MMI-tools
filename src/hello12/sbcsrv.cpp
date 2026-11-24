@@ -4,6 +4,7 @@
 #include "sbcsrv.h"
 #include "sbc.h"
 #include "types.h"
+#include "wms.h"
 
 extern "C" {
 #include "log.h"
@@ -23,6 +24,7 @@ extern "C" {
 #include <sys/dispatch.h>
 #include <sys/neutrino.h>
 #include <sys/resmgr.h>
+#include <devctl.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
@@ -64,6 +66,10 @@ struct SbcServer::Impl {
 	u32 samples = 0, rate = 0;
 	unsigned prebuffer = 0;
 	bool partial = true;
+	bool loop = false;               // stand-in mode: the clip repeats, no end
+	SbcWms wms{-1, 0};
+	usize flen = 0;                  // stand-in mode: every frame's length
+	std::vector<u8> scratch;         // stand-in mode: a looped reply
 
 	dispatch_t *dpp = nullptr;
 	dispatch_context_t *ctp = nullptr;
@@ -96,15 +102,23 @@ struct SbcServer::Impl {
 			notes.emplace_back(line);
 	}
 
-	u64 total() const { return data->size(); }
-	bool complete() const { return out >= offs->size(); }
-	u64 avail() const { return complete() ? total() : (u64)(*offs)[out]; }
+	static constexpr usize kLoopFrames = 0x7fffffff;  // "endless": ~13 days of SBC
+
+	u64 total() const { return loop ? (u64)kLoopFrames * flen : data->size(); }
+	bool complete() const { return out >= (loop ? kLoopFrames : offs->size()); }
+	u64 avail() const
+	{
+		if (loop)
+			return (u64)out * flen;
+		return complete() ? total() : (u64)(*offs)[out];
+	}
 
 	void release()
 	{
 		if (t0_us == 0)
 			return;
-		out = sbc::released(offs->size(), samples, rate, prebuffer, mono_us() - t0_us);
+		out = sbc::released(loop ? kLoopFrames : offs->size(), samples, rate, prebuffer,
+		                    mono_us() - t0_us);
 		std::lock_guard<std::mutex> lock(mu);
 		st.frames_out = (unsigned)out;
 	}
@@ -115,7 +129,13 @@ struct SbcServer::Impl {
 		u32 n = 0;
 		if (!sbc::answer(p.off, p.nbytes, avail(), total(), complete(), partial, &n))
 			return false;
-		MsgReply(p.rcvid, (int)n, n ? data->data() + p.off : nullptr, (int)n);
+		if (loop && n > 0) {
+			scratch.resize(n);
+			wms::copy_looped(data->data(), data->size(), p.off, scratch.data(), n);
+			MsgReply(p.rcvid, (int)n, scratch.data(), (int)n);
+		} else {
+			MsgReply(p.rcvid, (int)n, n ? data->data() + p.off : nullptr, (int)n);
+		}
 		if (!p.pread)
 			p.ocb->offset = (off_t)(p.off + n);
 		if (p.off + n > served_end)
@@ -200,13 +220,29 @@ struct SbcServer::Impl {
 	int on_devctl(resmgr_context_t *c, io_devctl_t *msg, iofunc_ocb_t *ocb)
 	{
 		unsigned dcmd = (unsigned)msg->i.dcmd, nbytes = (unsigned)msg->i.nbytes;
-		int rc = iofunc_devctl_default(c, msg, ocb);
 		unsigned seq;
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			seq = ++st.devctls;
 		}
-		if (seq <= kNoteDevctls)
+		if (loop) {
+			wms::Answer a = wms::devctl(dcmd, nbytes, wms.codec, wms.rate);
+			if (a.handled) {
+				{
+					std::lock_guard<std::mutex> lock(mu);
+					st.devctls_answered++;
+				}
+				note("devctl #%u: dcmd 0x%08x (%s), %u bytes, from pid %d -> answered, %u bytes",
+				     seq, dcmd, a.name, nbytes, c->info.pid, a.len);
+				std::memset(&msg->o, 0, sizeof(msg->o));
+				msg->o.ret_val = 0;
+				msg->o.nbytes = (int)a.len;
+				std::memcpy(_DEVCTL_DATA(msg->o), a.out, a.len);
+				return _RESMGR_PTR(c, &msg->o, sizeof(msg->o) + a.len);
+			}
+		}
+		int rc = iofunc_devctl_default(c, msg, ocb);
+		if (seq <= kNoteDevctls || loop)
 			note("devctl #%u: dcmd 0x%08x, %u bytes, from pid %d -> %s", seq, dcmd, nbytes,
 			     c->info.pid, rc == (int)_RESMGR_DEFAULT ? "not handled (ENOSYS)" : std::strerror(rc));
 		return rc;
@@ -270,6 +306,12 @@ struct SbcServer::Impl {
 			serve_pending();
 		}
 		// end of stream for whoever still waits
+		if (loop) {
+			for (const Pending &p : pending)
+				MsgReply(p.rcvid, 0, nullptr, 0);
+			pending.clear();
+			return;
+		}
 		out = offs->size();
 		serve_pending();
 	}
@@ -337,7 +379,7 @@ SbcServer::~SbcServer()
 
 std::string SbcServer::start(const char *path, const std::vector<u8> *data,
                              const std::vector<u32> *offs, u32 samples, u32 rate,
-                             unsigned prebuffer_frames, bool partial)
+                             unsigned prebuffer_frames, bool partial, const SbcWms *wms)
 {
 	if (impl_ != nullptr)
 		return "already serving";
@@ -351,6 +393,16 @@ std::string SbcServer::start(const char *path, const std::vector<u8> *data,
 	d->prebuffer = prebuffer_frames;
 	d->partial = partial;
 	d->st.frames = (unsigned)offs->size();
+	if (wms != nullptr) {
+		// every frame the same length: the looped stream's offsets are k * flen
+		d->flen = (offs->size() > 1 ? (*offs)[1] - (*offs)[0] : data->size());
+		if (d->flen == 0 || data->size() != d->flen * offs->size()) {
+			delete d;
+			return "stand-in mode needs frames of one length";
+		}
+		d->loop = true;
+		d->wms = *wms;
+	}
 
 	d->dpp = dispatch_create();
 	if (d->dpp == nullptr) {
@@ -364,8 +416,9 @@ std::string SbcServer::start(const char *path, const std::vector<u8> *data,
 	d->io_funcs.devctl = io_devctl;
 	d->io_funcs.unblock = io_unblock;
 	d->io_funcs.close_ocb = io_close_ocb;
-	iofunc_attr_init(&d->attr.io, S_IFREG | 0444, nullptr, nullptr);
-	d->attr.io.nbytes = (off_t)data->size();
+	// stand-in: the stack's node is mode 050666 (S_IFNAM), size 0
+	iofunc_attr_init(&d->attr.io, d->loop ? (S_IFNAM | 0666) : (S_IFREG | 0444), nullptr, nullptr);
+	d->attr.io.nbytes = d->loop ? 0 : (off_t)data->size();
 	d->attr.impl = d;
 
 	resmgr_attr_t ra;

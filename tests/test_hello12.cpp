@@ -1,9 +1,12 @@
 // test_hello12.cpp - hello12's SBC header parser, frame index, live release
-// and read answers (src/hello12/sbc.h).
+// and read answers (src/hello12/sbc.h); the /dev/wms stand-in's answers and
+// looped stream (src/hello12/wms.h).
 #include "check.h"
 #include "sbc.h"
 #include "types.h"
+#include "wms.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -96,6 +99,40 @@ int main()
 	CHECK_EQ(n, 0);
 	CHECK(sbc::answer(1200, 512, 400, 1000, false, false, &n));   // past the end: EOF
 	CHECK_EQ(n, 0);
+
+	// stand-in devctls: the stack's answers, little endian, cut to the room given
+	wms::Answer a = wms::devctl(0x4004051eu, 4, wms::kCodecSbc, wms::kRate44100);
+	CHECK(a.handled);
+	CHECK_EQ(a.len, 4);
+	CHECK_EQ(a.out[0], 1);
+	CHECK_EQ(a.out[1] | a.out[2] | a.out[3], 0);
+	a = wms::devctl(0x40100520u, 16, wms::kCodecSbc, wms::kRate48000);
+	CHECK(a.handled);
+	CHECK_EQ(a.len, 16);
+	CHECK_EQ(a.out[0], 1);     // streaming
+	CHECK_EQ(a.out[4], 1);     // SBC
+	CHECK_EQ(a.out[8], 1);     // 48 kHz
+	CHECK_EQ(a.out[12], 0);
+	a = wms::devctl(0x40100520u, 8, wms::kCodecPcm, wms::kRate44100);
+	CHECK_EQ(a.len, 8);        // never more than asked
+	CHECK_EQ(a.out[4], 0);     // PCM
+	a = wms::devctl(0x532u, 0, wms::kCodecSbc, wms::kRate44100);
+	CHECK(a.handled);
+	CHECK_EQ(a.len, 0);
+	CHECK(!wms::devctl(0x40040525u, 4, 1, 0).handled);   // known to the stack, meaning unknown
+	CHECK(!wms::devctl(0x40600c00u, 96, 1, 0).handled);  // io-media's open-time devctl
+
+	// the looped stream: data repeated, from any offset, across the seam
+	const u8 d[5] = {1, 2, 3, 4, 5};
+	u8 out[12];
+	wms::copy_looped(d, 5, 3, out, 12);
+	const u8 want[12] = {4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5};
+	CHECK(std::memcmp(out, want, 12) == 0);
+	wms::copy_looped(d, 5, 5000000003ull, out, 2);        // past 4 GB
+	CHECK_EQ(out[0], 4);
+	CHECK_EQ(out[1], 5);
+	wms::copy_looped(d, 0, 0, out, 3);                    // nothing to loop: zeros
+	CHECK_EQ(out[0] | out[1] | out[2], 0);
 
 	printf("test_hello12: %d checks, %d failed\n", check_count, check_failures);
 	return check_failures != 0;

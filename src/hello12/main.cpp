@@ -13,6 +13,14 @@
 //   s  live: the sweep clip (a2) served by hello12's resource manager in
 //      real time, reads answered with what is out (short reads)
 //   S  the same, each read held until all it asked for is out
+//   W  stand-in for the Bluetooth stack: hello12's resource manager takes
+//      /dev/wms/player1 (newest attach wins) and serves the sweep clip in a
+//      loop with the stack's devctl answers (wms.h). With a phone playing
+//      music over Bluetooth, the driver switches Media to another source
+//      and back: the MME's a2dp_player graph opens the path again and
+//      should play the rising tone instead of the music. After 2 minutes
+//      the path is detached (the stack's own node is back), and the driver
+//      switches once more: the phone's music should return.
 //
 // The listener says what was heard for each step (on the phone video:
 // the screen names the step and the sound). Every io-media event, every
@@ -20,8 +28,8 @@
 // devctl codes) and the system log go to var/hello12.log and
 // var/hello12/.
 //
-// usage: hello12 <sd_path> [steps]
-//        hello12 <sd_path> @wms      (the step w child)
+// usage: hello12 <sd_path> [steps]       (default wfsSW)
+//        hello12 <sd_path> @wms      (the step w child; @wmsW: step W's)
 #include "types.h"
 extern "C" {
 #include "iom.h"
@@ -34,6 +42,7 @@ extern "C" {
 #include "sbc.h"
 #include "sbcsrv.h"
 #include "ui.h"
+#include "wms.h"
 #include "wmsprobe.h"
 
 #include <cerrno>
@@ -48,7 +57,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 300;
+constexpr unsigned kWatchdogS = 600;
 constexpr unsigned kIntroMs = 10000;
 constexpr unsigned kLabelMs = 5000;
 constexpr unsigned kTailMs = 8000;       // after the clip's length: wait for FINISHED
@@ -56,10 +65,14 @@ constexpr unsigned kWmsDeadlineMs = 6000;
 constexpr unsigned kPrebufferFrames = 69; // ~200 ms of 44.1 kHz SBC
 constexpr const char *kOutput = "mixer:DSPOUT_TDM1_20_SAD?delay=130";
 constexpr const char *kLivePath = "/dev/mmi_apps/live.sbc";
+constexpr const char *kWmsPath = "/dev/wms/player1";
+constexpr unsigned kStandInMs = 120000;  // the stand-in serves this long
+constexpr unsigned kStandInLeadMs = 20000; // its instructions, before our screen goes
+constexpr unsigned kBackMs = 40000;      // after the detach: the driver switches back
 constexpr const char *kPingClip = "a1_sbc_ping.sbc";
 constexpr const char *kSweepClip = "a2_sbc_sweep.sbc";
 constexpr const char *kFooter = "hello12 - Bluetooth audio path test. Pull the SD card to stop.";
-constexpr const char *kDefaultSteps = "wfsS";
+constexpr const char *kDefaultSteps = "wfsSW";
 
 const char *sd_path = "";
 std::vector<std::string> summary;
@@ -282,12 +295,14 @@ bool play(const char *step, const char *url, unsigned clip_ms, SbcServer *srv, s
 	return !stop;
 }
 
-// Step w: the read-only /dev/wms probe in a child with a deadline.
-void step_wms(const char *self)
+// Step w: the read-only /dev/wms probe in a child with a deadline. Its log
+// is hello12/wms.log, or hello12/wms_W.log for step W's look before the
+// stand-in (W true).
+void step_wms(const char *self, bool W = false)
 {
-	std::string log = out_path("wms_out.log");
+	std::string log = out_path(W ? "wms_W_out.log" : "wms_out.log");
 	char *argv[] = {const_cast<char *>(self), const_cast<char *>(sd_path),
-	                const_cast<char *>("@wms"), nullptr};
+	                const_cast<char *>(W ? "@wmsW" : "@wms"), nullptr};
 	pid_t pid = proc_spawn(log.c_str(), argv, nullptr);
 	if (pid < 0) {
 		log_msg("FAIL w: spawn: %s", std::strerror(errno));
@@ -295,17 +310,92 @@ void step_wms(const char *self)
 		return;
 	}
 	log_msg("w: child pid %d, deadline %u ms, its log: %s", (int)pid, kWmsDeadlineMs,
-	        out_path("wms.log").c_str());
+	        out_path(W ? "wms_W.log" : "wms.log").c_str());
 	int status = 0;
 	if (proc_wait(pid, kWmsDeadlineMs, &status) == 0) {
 		log_msg("RESULT w: child %s", proc_status_str(status));
-		summary.push_back(std::string("w: probe ") + proc_status_str(status) + " (hello12/wms.log)");
+		summary.push_back(std::string(W ? "W: probe " : "w: probe ") + proc_status_str(status) +
+		                  (W ? " (hello12/wms_W.log)" : " (hello12/wms.log)"));
 	} else {
 		log_msg("RESULT w: child still running after %u ms (a server did not reply): killed",
 		        kWmsDeadlineMs);
 		kill(pid, SIGKILL);
-		summary.push_back("w: probe HUNG and was killed (hello12/wms.log)");
+		summary.push_back(W ? "W: probe HUNG and was killed" : "w: probe HUNG and was killed");
 	}
+}
+
+// Give the screen to the HMI (our cid 40 away, the HMI's displayables shown).
+void restore_screen();
+
+// Step W: the stand-in for /dev/wms/player1. Returns false if a stop was asked.
+bool step_standin(const char *self, const Clip &clip)
+{
+	log_msg("W: the stack's own node first (read only):");
+	step_wms(self, true);
+	SbcServer srv;
+	SbcWms w{wms::kCodecSbc, wms::kRate44100};
+	std::string err = srv.start(kWmsPath, &clip.data, &clip.offs, clip.h.samples, clip.h.rate,
+	                            kPrebufferFrames, true, &w);
+	if (!err.empty()) {
+		log_msg("FAIL W: stand-in: %s", err.c_str());
+		summary.push_back("W: stand-in not attached: " + err);
+		return true;
+	}
+	log_msg("W: stand-in attached at %s (SBC, 44100 Hz, the sweep looped, short reads)", kWmsPath);
+	ui::show("Bluetooth stand-in: switch now",
+	         "hello12 now answers for the phone's Bluetooth audio.\n\nPress MEDIA, choose another "
+	         "source (radio), then Bluetooth audio again. Instead of the phone's music you should "
+	         "hear the RISING TONE (again every 2 s).\n\nThis screen goes away in 20 s; the "
+	         "stand-in stays for 2 minutes.",
+	         kFooter);
+	bool stop = sleep_quit(kStandInLeadMs);
+	if (!stop) {
+		restore_screen();
+		log_msg("W: screen given to the HMI, serving for %u ms", kStandInMs);
+	}
+	unsigned t0 = log_ms(), last = t0;
+	while (!stop && log_ms() - t0 < kStandInMs) {
+		stop = sleep_quit(500);
+		log_notes(srv);
+		if (log_ms() - last >= 10000) {
+			last = log_ms();
+			SbcStats s = srv.stats();
+			log_msg("  srv: +%u ms: %u opens, %u closes, %u devctls (%u answered), %u reads "
+			        "(%u..%u bytes), %llu bytes sent, %u frames out, %u held (max %u ms), %u "
+			        "short, %u unblocks",
+			        last - t0, s.opens, s.closes, s.devctls, s.devctls_answered, s.reads, s.min_read,
+			        s.max_read, (unsigned long long)s.bytes, s.frames_out, s.waited, s.wait_ms_max,
+			        s.short_reads, s.unblocks);
+		}
+	}
+	SbcStats s = srv.stats();
+	srv.stop();
+	log_notes(srv);
+	log_msg("W: stand-in detached after %u ms: %s is the stack's again", log_ms() - t0, kWmsPath);
+	char line[260];
+	std::snprintf(line, sizeof(line),
+	              "W stand-in: %u opens, %u closes, %u devctls (%u answered), %u reads (%u..%u "
+	              "bytes), %llu bytes = %.1f s of SBC sent, %u held (max %u ms), %u short, %u "
+	              "unblocks, first read at %d ms (log clock)",
+	              s.opens, s.closes, s.devctls, s.devctls_answered, s.reads, s.min_read, s.max_read,
+	              (unsigned long long)s.bytes,
+	              (f64)s.bytes / (f64)clip.h.frame_len * clip.h.samples / clip.h.rate, s.waited,
+	              s.wait_ms_max, s.short_reads, s.unblocks,
+	              s.first_read_ms ? (int)s.first_read_ms : -1);
+	log_msg("RESULT %s", line);
+	summary.push_back(line);
+	if (stop)
+		return false;
+	ui::show("Bluetooth stand-in removed",
+	         "The phone's Bluetooth audio is the stack's again.\n\nPress MEDIA, choose another "
+	         "source, then Bluetooth audio again: does the phone's MUSIC come back?\n\nThis "
+	         "screen goes away in 10 s and comes back with the results.",
+	         kFooter);
+	if (sleep_quit(10000))
+		return false;
+	restore_screen();
+	log_msg("W: waiting %u ms for the switch back", kBackMs);
+	return !sleep_quit(kBackMs);
 }
 
 bool label(int n, int count, const char *title, const char *what)
@@ -333,15 +423,15 @@ void restore_screen()
 int main(int argc, char *argv[])
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s <sd_path> [steps|@wms]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <sd_path> [steps|@wms|@wmsW]\n", argv[0]);
 		return 2;
 	}
 	sd_path = argv[1];
 	const char *steps = argc > 2 && argv[2][0] ? argv[2] : kDefaultSteps;
 
-	if (std::strcmp(steps, "@wms") == 0) {
-		// the step w child: its own log (stdout goes to wms_out.log)
-		log_open(out_path("wms.log").c_str());
+	if (std::strcmp(steps, "@wms") == 0 || std::strcmp(steps, "@wmsW") == 0) {
+		// the step w / W child: its own log (stdout goes to wms[_W]_out.log)
+		log_open(out_path(steps[4] == 'W' ? "wms_W.log" : "wms.log").c_str());
 		int rc = wms_probe_main();
 		log_close();
 		return rc;
@@ -357,20 +447,21 @@ int main(int argc, char *argv[])
 	int count = (int)std::strlen(steps), n = 0;
 	char intro[600];
 	std::snprintf(intro, sizeof(intro),
-	              "Radio ON at a normal volume, and film with sound. %d steps, about 30 s each: "
-	              "each screen names the sound to listen for. The radio goes quiet while a "
+	              "Radio ON at a normal volume, and film with sound. %d steps, each screen "
+	              "names the sound to listen for. The last one needs the phone playing music "
+	              "over Bluetooth. The radio goes quiet while a "
 	              "sound plays; that is expected.\n\nSay out loud what you hear: clean, "
 	              "choppy, too fast or slow, or nothing.\n\nLeave the card in until the results "
 	              "screen has gone.",
 	              count);
-	ui::show("hello12: Bluetooth audio path (~2.5 min)", intro, kFooter);
+	ui::show("hello12: Bluetooth audio path (~6 min)", intro, kFooter);
 	bool go = !sleep_quit(kIntroMs);
 
 	Clip ping, sweep;
 	std::string ping_err, sweep_err;
 	if (std::strchr(steps, 'f'))
 		ping_err = load_clip(kPingClip, ping);
-	if (std::strchr(steps, 's') || std::strchr(steps, 'S'))
+	if (std::strchr(steps, 's') || std::strchr(steps, 'S') || std::strchr(steps, 'W'))
 		sweep_err = load_clip(kSweepClip, sweep);
 
 	for (const char *p = steps; go && *p; p++) {
@@ -448,6 +539,22 @@ int main(int argc, char *argv[])
 			srv.stop();
 			summary.push_back(result);
 			summary.push_back(line);
+			break;
+		}
+		case 'W': {
+			if (!label(n, count, "BLUETOOTH STAND-IN (phone music needed)",
+			           "Needs the phone connected over Bluetooth, playing music in Media -> "
+			           "Bluetooth audio. hello12 takes over the stream the phone sends, for 2 "
+			           "minutes: the next screen says when to switch.")) {
+				go = false;
+				break;
+			}
+			if (!sweep_err.empty()) {
+				log_msg("FAIL W: %s", sweep_err.c_str());
+				summary.push_back("W: clip missing: " + sweep_err);
+				break;
+			}
+			go = step_standin(argv[0], sweep);
 			break;
 		}
 		default:

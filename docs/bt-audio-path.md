@@ -149,8 +149,9 @@ output `mixer:DSPOUT_TDM1_20_SAD`. The reader only needs `open` and
 blocking `read`, as the H.264 stream server already serves
 ([phone-mirroring.md](phone-mirroring.md) §7.10). This is still our own
 graph on the one audible output, so it still replaces the radio. It solves
-live audio, not the source management. **[inferred: built in
-[hello12](../src/hello12/README.md), not yet run on the car]**
+live audio, not the source management. **[confirmed: [hello12](../src/hello12/README.md)
+`s` and `S` play a live stream from our resource manager, 512-byte reads,
+short reads fine]**
 
 **PCM is only reachable on a type-2 graph**: the codec comes from devctl
 `0x40100520`, and codec 0 is `PCM`. There is no `pcm:` prefix.
@@ -188,16 +189,16 @@ What that takes, and costs:
 - While we serve the path, the real stack's stream is not read. Detaching
   gives the path back to PSSBSSProcess for the next open. Nothing is
   killed or replaced, and nothing is written to the stack.
-- This writes into a name space the MMI owns, so it is not built yet: it
-  needs the owner's go-ahead.
+- hello12 step `W` does this with a looped test clip (built, not yet run
+  on the car).
 
 ## 6. Open questions
 
-- Does `sbc:` on a `trackplayer` graph play from a resource manager on
-  the car, with what read sizes and start delay (hello12)?
-- Does `/dev/wms/player1` exist with no phone connected, and what do the
-  two devctls return with and without a phone streaming (hello12 step
-  `w`, read-only)?
+- What the two devctls return while a phone streams (hello12 `w` / `W`
+  with music playing). With no phone streaming: connected 0, state 1,
+  codec 1 (SBC), rate 0 [confirmed: hello12 `w`].
+- Does the MME's graph take our stand-in, and does anything besides
+  io-media open or devctl `/dev/wms/player1` (hello12 `W`)?
 - What sets graph flag `0x40` (whether a direct `wms:` input is safe)?
 - The read framing on `/dev/wms/player1`: whole SBC frames, or with a
   header? The DSP's SBC demuxer syncs on the frame header, so plain

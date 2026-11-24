@@ -527,8 +527,10 @@ build/test_hello11: tests/test_hello11.cpp tests/check.h src/common/camera/ipc4.
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/common/camera -Isrc/hello11 -o $@ $(filter %.cpp,$^)
-# hello12's SBC headers, frame index, live release and read answers
-build/test_hello12: tests/test_hello12.cpp tests/check.h src/hello12/sbc.cpp src/hello12/sbc.h
+# hello12's SBC headers, frame index, live release and read answers; the
+# /dev/wms stand-in's devctl answers and looped stream
+build/test_hello12: tests/test_hello12.cpp tests/check.h src/hello12/sbc.cpp src/hello12/sbc.h \
+                    src/hello12/wms.cpp src/hello12/wms.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello12 -o $@ $(filter %.cpp,$^)

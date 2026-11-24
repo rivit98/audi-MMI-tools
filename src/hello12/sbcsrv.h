@@ -13,6 +13,13 @@
 //
 // One thread runs the resource manager with a 5 ms dispatch timeout; each
 // pass releases frames and answers the reads that can be answered.
+//
+// Stand-in mode (SbcWms given): a stand-in for the Bluetooth stack's
+// /dev/wms/player1 (wms.h). The clip loops for as long as the server runs,
+// the node looks like the stack's (S_IFNAM, 0666), and the devctls
+// io-media's a2dp_player graph sends get the stack's answers ("connected",
+// streaming, the codec and rate given here); other devctls get ENOSYS. On
+// stop, waiting reads get end of stream (0 bytes).
 #ifndef HELLO12_SBCSRV_H
 #define HELLO12_SBCSRV_H
 
@@ -30,6 +37,13 @@ struct SbcStats {
 	u64 bytes = 0;
 	unsigned first_read_ms = 0;   // log_ms() of the first read (0: none)
 	unsigned frames_out = 0, frames = 0;
+	unsigned devctls_answered = 0; // stand-in mode: devctls given the stack's answer
+};
+
+// Stand-in mode: what devctl 0x40100520 reports (wms::kCodec*, wms::kRate*).
+struct SbcWms {
+	i32 codec;
+	i32 rate;
 };
 
 class SbcServer {
@@ -41,9 +55,11 @@ public:
 
 	// Serve data (whole SBC frames at offs, kept by the caller) at path.
 	// partial: answer reads with what is out (short reads), else hold each
-	// read until its whole range is out. "" or what failed.
+	// read until its whole range is out. wms: stand-in mode (above), else
+	// nullptr. "" or what failed.
 	std::string start(const char *path, const std::vector<u8> *data, const std::vector<u32> *offs,
-	                  u32 samples, u32 rate, unsigned prebuffer_frames, bool partial);
+	                  u32 samples, u32 rate, unsigned prebuffer_frames, bool partial,
+	                  const SbcWms *wms = nullptr);
 	// Detach the path; waiting reads get EOF first. Safe to call twice.
 	void stop();
 

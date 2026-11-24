@@ -8,12 +8,13 @@ an app can play a live stream without the Bluetooth stack. Output:
 `mixer:DSPOUT_TDM1_20_SAD?delay=130`, so the radio goes quiet while a
 sound plays.
 
-- **Run:** `hello12 <sd_path> [steps]` (default `wfsS`). Needs
+- **Run:** `hello12 <sd_path> [steps]` (default `wfsSW`). Needs
   `clips/a1_sbc_ping.sbc` and `clips/a2_sbc_sweep.sbc` (`make sd`; made by
   `media/mkclips.sh` with ffmpeg's SBC encoder: 44.1 kHz stereo, bitpool
   54, 120-byte frames, 20 s each).
 - **Output:** `var/hello12.log` (`RESULT` lines, io-media events, the
-  stream server's notes and stats), `var/hello12/wms.log` (step `w`),
+  stream server's notes and stats), `var/hello12/wms.log` (step `w`), `var/hello12/wms_W.log` (step `W`'s look
+  at the stack before it takes the path),
   `var/hello12/slog.txt`.
 - **Screen:** a page before each step names the sound to listen for, then
   "Listening: …" while it plays, then the results. Given back on every exit.
@@ -33,6 +34,20 @@ sound plays.
   first read, ~200 ms ahead. A read past what is out gets what is there
   (a short read), or waits if nothing new is out yet.
 - `S`: the same, with each read held until everything it asked for is out.
+- `W`: **stand-in for the Bluetooth stack** (needs a phone connected over
+  Bluetooth, playing music in Media → Bluetooth audio). First the same
+  read-only look as `w`. Then hello12's resource manager attaches at
+  `/dev/wms/player1` (the newest attach of a path wins, so the MMI's next
+  open reaches us) and serves the rising-tone clip in a loop, live, with
+  short reads. It answers what io-media's `a2dp_player` graph asks
+  (`wms.h`): `0x4004051e` → 1 (connected), `0x40100520` → streaming, SBC,
+  44.1 kHz, `0x532` → EOK. Every other devctl gets `ENOSYS` and is logged
+  with the caller's pid. The driver switches Media to another source and
+  back: the graph opens the path again and should play the tone instead of
+  the music. After 2 minutes hello12 detaches (the stack's node is back;
+  a read still waiting gets end of stream), and the driver switches once
+  more: the phone's music should come back. Our screen is away while the
+  driver uses the HMI. Nothing is killed or written to the stack.
 
 The server logs what io-media asks of a stream: opens (pid, flags), the
 first 30 reads (size, offset, wait), every devctl code (answered by
