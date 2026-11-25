@@ -5,7 +5,7 @@ package mmi3g.audistreaming
  * tested): MediaCodec hands out Annex-B (start codes); the MMI wants SPS and
  * PPS without them in H264_CONFIG, and pads every frame to the config's
  * frameBytes after turning start codes into 4-byte lengths
- * (src/common/csmp4.cpp make_sample), so that is what a frame costs there.
+ * (src/common/video/csmp4.cpp make_sample), so that is what a frame costs there.
  */
 object H264 {
     const val NAL_SPS = 7

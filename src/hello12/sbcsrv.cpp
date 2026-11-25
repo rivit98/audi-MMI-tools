@@ -1,5 +1,5 @@
 // sbcsrv.cpp - see sbcsrv.h. The resource manager calls are the ones
-// common/stream_server.cpp uses (QNX 6.3 libc, all exported by the unit's
+// common/video/stream_server.cpp uses (QNX 6.3 libc, all exported by the unit's
 // libc.so.2).
 #include "sbcsrv.h"
 #include "sbc.h"

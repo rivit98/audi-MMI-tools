@@ -1,5 +1,5 @@
 // hello9 - the unit's DM642 decoder showing a live H.264 stream, through the
-// code audi_stream_receiver uses for the phone's frames (common/hw_stream.h:
+// code audi_stream_receiver uses for the phone's frames (common/video/hw_stream.h:
 // a CS-MP4 built on the MMI, a resource manager with blocking reads, gap
 // fill with skip frames, the unit's own unpatched io-media, VCAP 0 input 1).
 //

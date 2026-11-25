@@ -1,5 +1,5 @@
 // hwvideo.cpp - see hwvideo.h. The stream itself (CS-MP4, resource
-// manager, io-media graph, video displayable) is common/hw_stream.h, the
+// manager, io-media graph, video displayable) is common/video/hw_stream.h, the
 // code hello9 runs on the car with a clip instead of the phone.
 #include "hwvideo.h"
 #include "types.h"

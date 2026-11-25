@@ -778,7 +778,7 @@ skipped, including POC type 2 with several non-reference skips in a row, and
 in `slow` skips make a 15 fps sender up to 25 with a steady lag. Clumped
 arrival (`burst`) doesn't show.
 
-- **`src/common`, C++ (Makefile group `LIVE`):**
+- **`src/common/video/`, C++ (Makefile group `VIDEO`):**
   - `h264`: Annex-B → NAL units and frames; SPS / PPS / slice header
     fields; **skip frames**: a non-reference P slice with every macroblock
     skipped (`mb_skip_run` = all), `frame_num` = the last reference + 1,

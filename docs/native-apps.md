@@ -200,6 +200,7 @@ docs/                   this guide and the deep dives
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 | `BUTTONS` | `src/common/buttons/` (C++, add `-Isrc/common/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
+| `VIDEO` | `src/common/video/` (C++, on the include path for all), + `CAMERA`, `IOM` | a live H.264 stream on screen through io-media and the DM642 (§10, [README](../src/common/video/README.md)) |
 | `CAMERA` | `src/common/camera/` (C++, on the include path for all) | is the rear camera up (slog + its BAP session on ch4), change observers, the process's one ch4 reader ([README](../src/common/camera/README.md)) |
 
 Integer, size and float types use the short names from `src/common/types.h`
@@ -485,7 +486,7 @@ track never opened). io-media's own MP4 demuxer (`CDemuxMp4`) reads
 **32-bit box sizes only**, wants `moov` before `mdat`, loads every box but
 `mdat` at open, and has a 10 MB header budget.
 
-**Showing it** (`src/common/vout.cpp`):
+**Showing it** (`src/common/video/vout.cpp`):
 
 ```
 lm: unregister 41; register {41, 800, 480, flags 0x101}; show {41}; wait 500 ms
@@ -516,7 +517,7 @@ and ignores SIGTERM. Judge it by its `FINISHED` line.
 constant-sample-size MP4 (CS-MP4, `media/csmp4.py`): `ftyp`, `moov`, then a
 32-bit `mdat`; one constant `stsz` size; every frame padded to one size S
 with a filler NAL; `moov` declaring far more frames than exist. An app's own
-QNX resource manager serves it (`src/common/stream_server.cpp`, which
+QNX resource manager serves it (`src/common/video/stream_server.cpp`, which
 serves any `StreamSource` from `stream_source.h`: the live stream, or
 hello9's pre-built A/V file released on a clock;
 `src/common/qnx/sys/pm.h` makes `<sys/iofunc.h>` compile), with `st_size` =
@@ -525,8 +526,8 @@ reads it sequentially in 64 KB, ~2.7 frames ahead, waits out pauses of at
 least 5 s, and adds ~0.5 s of steady latency. After a pause the picture
 skips the ~9 frames that were queued, so a live source must keep a steady
 frame rate. A file growing on the card does not work (EIO). The
-whole path is one class, `src/common/hw_stream.h` (Makefile group
-`LIVE`, C++ apps only): push Annex-B frames, it builds the header from the
+whole path is one class, `src/common/video/hw_stream.h` (Makefile group
+`VIDEO`, C++ apps only): push Annex-B frames, it builds the header from the
 SPS/PPS, pads, serves, plays, shows, and fills gaps with skip frames.
 [phone-mirroring.md](phone-mirroring.md) §2, §7.8–7.10,
 [src/hello9/README.md](../src/hello9/README.md).

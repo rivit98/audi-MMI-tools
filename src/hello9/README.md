@@ -1,7 +1,7 @@
 # hello9
 
 Live H.264 streaming through the DM642 with io-media untouched. Runs the
-receiver's code (`src/common/hw_stream.h`: CS-MP4 header, own resource
+receiver's code (`src/common/video/hw_stream.h`: CS-MP4 header, own resource
 manager, gap fill) fed from a clip on the card, the way a phone would feed
 it. Also tests io-media's play speed and an audio track in the stream. C++.
 

@@ -30,7 +30,7 @@ gradle, adb or gcc.
 ## Layout
 
 - `src/<app>/`: one app's own logic + `README.md` (what it does, how to run it, state on the car).
-- `src/common/`: shared code linked **by group** (`BASE`, `SCREEN`, `LIVE`, ...; table in
+- `src/common/`: shared code linked **by group** (`BASE`, `SCREEN`, `VIDEO`, ...; table in
   native-apps.md §4 and the Makefile comment). Each app's rule names its groups.
 - Each app builds with **one compiler command** over all its sources (C files compiled as C,
   the rest as C++), so `build/` has no `.o` files. That is expected.

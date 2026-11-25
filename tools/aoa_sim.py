@@ -8,7 +8,7 @@ puts them back, as the phone sees them:
                    READ_BYTES_S. Too slow for the frames, so the reader falls behind.
                    Past the ring: the io-media error. With the
                    catch-up on, the MMI drops frames until io-media is back, then asks
-                   for an IDR (src/common/live_stream.h).
+                   for an IDR (src/common/video/live_stream.h).
     ErrorRestarts  after an io-media error the MMI restarts its stream, up to
                    RESTARTS_MAX per RESTARTS_WINDOW_S; one more and it sends REFUSED
                    (src/audi_stream_receiver/config_gate.h).
@@ -23,7 +23,7 @@ HOLD_S = 3.0
 SLOW_ACK_FPS = 5
 STALL_S = 3.0
 
-# = src/audi_stream_receiver/hwvideo.cpp, src/common/csmp4.h
+# = src/audi_stream_receiver/hwvideo.cpp, src/common/video/csmp4.h
 FPS = 25
 RING_BYTES = 8 << 20
 CATCH_UP_FRAMES = 12

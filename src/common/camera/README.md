@@ -91,7 +91,7 @@ clear in 1000 ms -> nobody`.
 runner (menu hides), audi_stream_receiver and android_auto (`Takeover`, hw
 video), `vout` / `hw_stream` (no VP1 writes while up), hello7 (`cam.cpp`, a C
 wrapper), hello11 (status and the ch4 telegrams). hello9 and hello10 link it
-through `LIVE` but don't start it: their tests run parked.
+through `VIDEO` but don't start it: their tests run parked.
 
 ## State
 

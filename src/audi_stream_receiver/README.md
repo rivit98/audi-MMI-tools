@@ -48,7 +48,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
   `AUDIO_CAPS` / `AUDIO_CONFIG` / `AUDIO_DATA` / `AUDIO_STOP` (the phone's audio as SBC).
   **Retired, never reuse:** `0x02` TEXT, `0x03` ACK, `0x08` VIDEO_ACK, `0x0A` status bar,
   format 1 (JPEG) and 2 (PNG).
-- **H.264** (`hwvideo.cpp`, `src/common/hw_stream.h`): 720×432 Baseline from
+- **H.264** (`hwvideo.cpp`, `src/common/video/hw_stream.h`): 720×432 Baseline from
   the phone's MediaCodec → CS-MP4 stream served by our own resource manager
   at `/dev/audi_stream/live.mp4` → io-media → VCAP 0 input 1. 25 fps stream
   clock with skip-frame gap fill; a clock cap (> 500 ms ahead) and an io-media

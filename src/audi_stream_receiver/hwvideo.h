@@ -1,5 +1,5 @@
 // hwvideo.h - the phone's H.264 stream on the screen through the unit's
-// DM642 decoder (common/hw_stream.h; protocol: proto.h H264_CONFIG, format
+// DM642 decoder (common/video/hw_stream.h; protocol: proto.h H264_CONFIG, format
 // kFmtH264, H264_STATUS). It runs its own thread ("hw"), which starts,
 // polls and stops the stream.
 //

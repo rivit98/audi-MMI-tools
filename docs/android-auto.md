@@ -93,9 +93,9 @@ touch, knob and button events back on the input channel.
 
 **The same pipeline as hardware mirroring.** This is the H.264 path of
 [phone-mirroring.md](phone-mirroring.md): there the phone app encodes
-H.264 and audi_stream_receiver feeds the frames through LIVE (`hw_stream`,
+H.264 and audi_stream_receiver feeds the frames through VIDEO (`hw_stream`,
 `csmp4`, `stream_server`, `player`, `vout`, the rear-camera handover) to
-the DM642, which plays a live CS-MP4 stream on screen [repo]. LIVE does not
+the DM642, which plays a live CS-MP4 stream on screen [repo]. VIDEO does not
 care where the frames come from, so android_auto can hand AA's frames to
 the same `HwStream`. What differs is who controls the encoder:
 
