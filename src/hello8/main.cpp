@@ -16,7 +16,7 @@
 // one PASS/FAIL line per check with its time and notes, RESULT counts.
 //
 // Stops after <seconds>, on SIGTERM/INT/HUP, SD removal or the watchdog
-// (src/common/quit.c).
+// (src/common/quit/quit.c).
 //
 // usage: hello8 <sd_path> [seconds] [check,check,...]
 //        seconds: how long the results stay up (default 20)
@@ -197,7 +197,7 @@ int main(int argc, char *argv[])
 	        only ? ", only: " : "", only ? only : "");
 	log_toolchain();
 
-	quit_init(argv[1], seconds + kWatchdogSlack);
+	quit_init(argv[1], seconds + kWatchdogSlack, nullptr, nullptr);
 	bool ui = screen_open() == 0;
 	if (!ui)
 		log_msg("FAIL hello8: no screen, logging only");

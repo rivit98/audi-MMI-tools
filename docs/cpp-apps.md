@@ -172,7 +172,7 @@ Plus hello8's deliberate `src/hello8/gusa.cpp`. The C apps have none.
 - **Don't install signal handlers** (`signal`, `sigaction`) in C++ apps.
   The precompiled gUSA sequences above can still be running when one
   arrives. Block the signals and `sigwait()` for them in a thread, as
-  `src/common/quit.c` does. A C app has no gUSA left, but `sigwait()` is
+  `src/common/quit/quit.c` does. A C app has no gUSA left, but `sigwait()` is
   still the simpler pattern.
 - `std::mutex` / `std::condition_variable` are QNX's pthread objects and
   safe as ever: a lock+unlock costs ~0.2 µs.

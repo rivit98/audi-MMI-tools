@@ -972,7 +972,7 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello9: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello9 start, pid=%d%s%s", (int)getpid(), only ? ", only: " : "", only ? only : "");
-	quit_init_ex(sd_path, kWatchdogS, on_key, nullptr);
+	quit_init(sd_path, kWatchdogS, on_key, nullptr);
 	log_msg("testapp-cmdline: %s", tool_path("testapp-cmdline").c_str());
 
 	std::vector<const Test *> run;

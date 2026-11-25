@@ -7,7 +7,7 @@
 // Plug the hub into it:
 //
 //     buttons::Hub &hub = *new buttons::Hub;   // never freed, see below
-//     quit_init_ex(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
+//     quit_init(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
 //
 // The hub must outlive quit.c's key thread, which runs until the process
 // exits (blocked in read(), not joined): allocate it once and never free it.
@@ -52,7 +52,7 @@ public:
 	// One raw ch8 message, from the reader thread. ms: the caller's clock.
 	void feed(const u8 *buf, int n, u32 ms);
 
-	// quit_key_cb for quit_init_ex(); arg is the Hub. Stamps with log_ms().
+	// quit_key_cb for quit_init(); arg is the Hub. Stamps with log_ms().
 	static void quit_cb(const u8 *buf, int n, void *arg);
 
 	// Log events and subscriptions (on by default).

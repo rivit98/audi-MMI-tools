@@ -507,7 +507,7 @@ int main(int argc, char *argv[])
 	// The hub lives as long as the process: quit.c's key thread keeps
 	// calling into it until exit.
 	buttons::Hub &hub = *new buttons::Hub;
-	quit_init_ex(argv[1], 0, buttons::Hub::quit_cb, &hub);
+	quit_init(argv[1], 0, buttons::Hub::quit_cb, &hub);
 	camera::start();
 
 	std::vector<std::string> found = find_apps(sd + "/" + runner::kAppsDir);

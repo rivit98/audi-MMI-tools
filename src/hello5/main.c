@@ -127,7 +127,7 @@
  * from the device's own libasound.so.2.
  *
  * Stops on SIGTERM/INT/HUP, SD removal, its own run timer, or the watchdog
- * (src/common/quit.c). No key or button stops it.
+ * (src/common/quit/quit.c). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
  *   steps: any of "mnvtpg", run in that order (default pmntgv; d is disabled)
@@ -1709,7 +1709,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* quit.c owns /dev/ipc/ch8; on_key() runs on its reader thread. */
-	quit_init_ex(sd_path, stage1_max_ms / 1000 + WATCHDOG_SLACK,
+	quit_init(sd_path, stage1_max_ms / 1000 + WATCHDOG_SLACK,
 	             on_key, NULL);
 
 	ui_open();

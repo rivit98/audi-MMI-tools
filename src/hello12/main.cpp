@@ -442,7 +442,7 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello12: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello12 start, pid=%d, steps %s", (int)getpid(), steps);
-	quit_init(sd_path, kWatchdogS);
+	quit_init(sd_path, kWatchdogS, nullptr, nullptr);
 
 	int count = (int)std::strlen(steps), n = 0;
 	char intro[600];

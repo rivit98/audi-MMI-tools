@@ -192,7 +192,7 @@ docs/                   this guide and the deep dives
 
 | Group | Files | Gives you |
 |---|---|---|
-| `BASE` | `log`, `quit`, `lmgr` | SD log, clean-stop sources, layer manager client |
+| `BASE` | `log`, `quit/`, `lmgr` | SD log, clean-stop sources, layer manager client |
 | `TEXT` | `text` + generated fonts | UTF-8, word wrap, Terminus 8×16 / 16×32 glyphs (12×24 `font_mid`: the runner's own) |
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
 | `GL` | `gfx`, `hud` | gf + EGL bring-up, FPS counter |
@@ -291,7 +291,7 @@ int main(int argc, char *argv[])
 	char path[256];
 	snprintf(path, sizeof path, "%s/myapp.log", argv[1]);
 	log_open(path);                        /* fsync per line */
-	quit_init_ex(argv[1], 60 + 20, NULL, NULL);  /* before any other thread */
+	quit_init(argv[1], 60 + 20, NULL, NULL);  /* before any other thread */
 	if (screen_open() != 0) {
 		log_msg("FAIL screen_open");
 		quit_request(QUIT_TIMER);
@@ -571,10 +571,10 @@ Details: [platform-notes.md](platform-notes.md) §9, [src/hello5/README.md](../s
 ## 12. Input: knobs and buttons
 
 All user input arrives as 27-byte state messages on `/dev/ipc/ch8`. `quit.c`
-reads it; pass a callback to `quit_init_ex()` to receive every message on
+reads it; pass a callback to `quit_init()` to receive every message on
 its thread. For events (knob turns with detents, button press / release by
 name), link the `BUTTONS` group and feed a `buttons::Hub` from
-`quit_init_ex` ([src/common/buttons/README.md](../src/common/buttons/README.md): the API
+`quit_init` ([src/common/buttons/README.md](../src/common/buttons/README.md): the API
 and the protocol).
 
 The **HMI still acts on every knob and button** while your app is on

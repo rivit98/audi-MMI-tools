@@ -38,7 +38,7 @@
  * stops at 12.
  *
  * Stops early, with the normal teardown, on SIGTERM/SIGINT/SIGHUP, SD
- * card removal or the watchdog (src/common/quit.c). A freeze of the whole
+ * card removal or the watchdog (src/common/quit/quit.c). A freeze of the whole
  * unit stops nothing: only the MMI reboot key combo helps then.
  *
  * Output on the card: hello4.log (GL limits, probe reads + verdicts,
@@ -831,7 +831,7 @@ int main(int argc, char *argv[])
 	for (; i < n; i++)
 		run_s += (seg[i].ms + 999) / 1000;
 	log_msg("plan: probes %s,%s trace=%d, %u s", o.probes ? "on" : "off", plan, o.trace, run_s);
-	quit_init(sd_path, run_s + WATCHDOG_SLACK);
+	quit_init(sd_path, run_s + WATCHDOG_SLACK, NULL, NULL);
 
 	if (gfx_init(&g, CID) == 0) {
 		log_gl_info();

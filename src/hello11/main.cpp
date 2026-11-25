@@ -577,7 +577,7 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello11: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello11 start, pid=%d", (int)getpid());
-	quit_init_ex(sd_path, kWatchdogS, on_key, nullptr);
+	quit_init(sd_path, kWatchdogS, on_key, nullptr);
 	camera::start();
 	int ch4_sub = camera::subscribe_ch4(on_ch4, "hello11");
 

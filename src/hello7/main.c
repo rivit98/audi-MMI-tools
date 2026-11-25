@@ -28,7 +28,7 @@
  * every prompt's start and result; RESULT lines.
  *
  * Stops at the end, on SIGTERM/INT/HUP, SD removal or the watchdog
- * (src/common/quit.c). No key or button stops it.
+ * (src/common/quit/quit.c). No key or button stops it.
  *
  * usage: hello7 <sd_path> [guide | <seconds>]   (default guide; a number:
  *        free mode for that long)
@@ -509,7 +509,7 @@ int main(int argc, char *argv[])
 		        guide_nprompts, watchdog);
 
 	/* quit.c owns /dev/ipc/ch8; on_key() runs on its reader thread. */
-	quit_init_ex(argv[1], watchdog, on_key, NULL);
+	quit_init(argv[1], watchdog, on_key, NULL);
 	cam_start();
 	ui = screen_open() == 0;
 	if (!ui)

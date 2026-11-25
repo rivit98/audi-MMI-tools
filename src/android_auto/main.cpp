@@ -618,7 +618,7 @@ int main(int argc, char *argv[])
 	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off",
 	        opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
 	        opt.cfg.video_fps ? " fps" : "");
-	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
+	quit_init(sd_path, 0, nullptr, nullptr);  // no watchdog: runs until SD pull / signal
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	aa::Tls::set_debug(1);            // mbedTLS errors into the log

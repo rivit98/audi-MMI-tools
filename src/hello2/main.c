@@ -7,7 +7,7 @@
  *     square, bouncing block, progress bar along the bottom.
  *  3. Hands the screen back like qnx-audi does and exits. Stops early, with
  *     the same clean teardown, on a button press, SIGTERM/SIGINT/SIGHUP,
- *     SD card removal or the watchdog (src/common/quit.c).
+ *     SD card removal or the watchdog (src/common/quit/quit.c).
  *
  * usage: hello2 <sd_path> [seconds]
  */
@@ -205,7 +205,7 @@ int main(int argc, char *argv[])
 	if (uname(&u) == 0)
 		log_msg("uname: %s %s %s %s %s", u.sysname, u.nodename, u.release,
 		        u.version, u.machine);
-	quit_init(sd_path, seconds + WATCHDOG_SLACK);
+	quit_init(sd_path, seconds + WATCHDOG_SLACK, NULL, NULL);
 
 	if (gfx_init(&g, CID) == 0) {
 		log_gl_info();

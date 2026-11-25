@@ -24,7 +24,7 @@ every app and never stops (an unread channel stalls every reader, see
 
 ```cpp
 buttons::Hub &hub = *new buttons::Hub;      // lives until exit: quit.c's thread calls it
-quit_init_ex(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
+quit_init(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
 
 buttons::EventQueue q(hub);                 // for a main loop
 buttons::Event e;
@@ -287,8 +287,8 @@ BACK and the source keys.
 
 **No key or button stops an app.** Runs end on their own timer, a signal,
 SD removal or the watchdog, so a stray press during a test cannot cut it
-short. `quit.c` reads ch8, logs the first messages raw and offers the
-bytes to an app observer (`quit_init_ex`): the hub, or a plain callback
+short. `quit.c` reads ch8 and offers the
+bytes to an app observer (`quit_init`): the hub, or a plain callback
 (hello5 counts volume detents that way). **hello7** is the input tester:
 its guided mode named the table above, one control per step, and now
 asks the open touch pad and steering wheel questions.

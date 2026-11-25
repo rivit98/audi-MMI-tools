@@ -14,8 +14,8 @@
  * Signals are taken by a sigwait() thread, never by a handler, so the
  * GL/gf calls in the main thread are not interrupted (no EINTR).
  */
-#ifndef COMMON_QUIT_H
-#define COMMON_QUIT_H
+#ifndef COMMON_QUIT_QUIT_H
+#define COMMON_QUIT_QUIT_H
 
 #include "types.h"
 
@@ -39,13 +39,11 @@ enum {
 typedef void (*quit_key_cb)(const u8 *buf, int n, void *arg);
 
 /* Call after log_open() and before any other thread exists. sd_path is
- * watched for card removal; watchdog_s arms alarm(). Returns 0, or -1 if
- * the signal thread could not be started (then only timer/SD work). */
-int  quit_init(const char *sd_path, unsigned watchdog_s);
-
-/* As quit_init(), plus a key observer. quit_init() is this with cb=NULL. */
-int  quit_init_ex(const char *sd_path, unsigned watchdog_s,
-                  quit_key_cb cb, void *cb_arg);
+ * watched for card removal; watchdog_s arms alarm() (0: none); cb gets
+ * every ch8 message (NULL: none). Returns 0, or -1 if the signal thread
+ * could not be started (then only timer/SD work). */
+int  quit_init(const char *sd_path, unsigned watchdog_s,
+               quit_key_cb cb, void *cb_arg);
 
 /* Ask for a stop; the first reason wins and is logged. */
 void quit_request(int reason);

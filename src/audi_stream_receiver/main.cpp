@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
 	log_msg("audi_stream_receiver start, pid=%d", getpid());
-	quit_init(sd_path, 0);            // no watchdog: runs until SD pull / signal
+	quit_init(sd_path, 0, nullptr, nullptr);  // no watchdog: runs until SD pull / signal
 	if (slogmark_init("audi_stream_receiver") == 0)
 		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");

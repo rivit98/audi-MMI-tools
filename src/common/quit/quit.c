@@ -7,7 +7,6 @@
 #include <pthread.h>
 #include <signal.h>
 #include "types.h"
-#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -15,7 +14,6 @@
 #include "quit.h"
 
 #define KEY_DEVICE   "/dev/ipc/ch8"
-#define KEY_LOG_MAX  30      /* log the first messages raw, to learn the protocol */
 
 static volatile int quit_reason;
 static const char *sd;
@@ -80,13 +78,11 @@ static void *signal_thread(void *arg)
 /* Blocking reads of the HMI's key channel, as qnx-audi does (no select()
  * support there). Byte 7/6 = rotary knob left/right, 5/4 = volume knob;
  * any other message is a button press. Nothing here stops the app: the
- * messages are logged (to keep decoding the protocol) and handed to the
- * app's observer, and that is all. */
+ * messages go to the app's observer, and that is all. */
 static void *key_thread(void *arg)
 {
-	int fd = (int)(isize)arg, n, i, seen = 0;
+	int fd = (int)(isize)arg, n;
 	u8 buf[256];
-	char hex[16 * 3 + 1];
 
 	for (;;) {
 		n = read(fd, buf, sizeof(buf));
@@ -95,12 +91,6 @@ static void *key_thread(void *arg)
 			        n < 0 ? strerror(errno) : "EOF");
 			break;
 		}
-		if (seen++ < KEY_LOG_MAX) {
-			for (i = 0; i < n && i < 16; i++)
-				snprintf(hex + i * 3, 4, "%02x ", buf[i]);
-			hex[i * 3] = '\0';
-			log_msg("%s: %d bytes: %s", KEY_DEVICE, n, hex);
-		}
 		if (key_cb != NULL)
 			key_cb(buf, n, key_cb_arg);
 	}
@@ -108,13 +98,8 @@ static void *key_thread(void *arg)
 	return NULL;
 }
 
-int quit_init(const char *sd_path, unsigned watchdog_s)
-{
-	return quit_init_ex(sd_path, watchdog_s, NULL, NULL);
-}
-
-int quit_init_ex(const char *sd_path, unsigned watchdog_s,
-                 quit_key_cb cb, void *cb_arg)
+int quit_init(const char *sd_path, unsigned watchdog_s,
+              quit_key_cb cb, void *cb_arg)
 {
 	pthread_t tid;
 	int fd, rc;

@@ -232,7 +232,7 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		fprintf(stderr, "lmprobe: cannot open %s, logging to stdout only\n", path);
 	log_msg("lmprobe start, pid=%d, show=%u s", getpid(), seconds);
-	quit_init(sd_path, seconds + WATCHDOG_SLACK);
+	quit_init(sd_path, seconds + WATCHDOG_SLACK, NULL, NULL);
 
 	fg_before = dump_state("before");
 	cleanup("before");

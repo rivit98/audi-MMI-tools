@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello6: cannot open %s, logging to stdout only\n", path);
 	log_msg("hello6 start, pid=%d, phases=%s", getpid(), phases);
-	quit_init_ex(sd_path, WATCHDOG_S, on_key, NULL);
+	quit_init(sd_path, WATCHDOG_S, on_key, NULL);
 	find_tools();
 
 	label_show(INTRO_TITLE, INTRO_BODY, FOOTER_MAIN);

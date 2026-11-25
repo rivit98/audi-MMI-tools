@@ -20,7 +20,7 @@
  * are drawn as untextured quads over every frame.
  *
  * Stops early, with the normal teardown, on a button press, SIGTERM/
- * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit.c).
+ * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit/quit.c).
  *
  * Output on the card: hello3.log (per-second fps, per-scene summary,
  * fill-rate table).
@@ -405,7 +405,7 @@ int main(int argc, char *argv[])
 	rng_state = (0x9e3779b9u ^ ((unsigned)getpid() << 8) ^ log_ms()) | 1;
 	log_msg("hello3 start, pid=%d, %u scenes x %u s, seed=0x%08x",
 	        getpid(), NSCENES, scene_s, rng_state);
-	quit_init(sd_path, NSCENES * scene_s + WATCHDOG_SLACK);
+	quit_init(sd_path, NSCENES * scene_s + WATCHDOG_SLACK, NULL, NULL);
 
 	if (gfx_init(&g, CID) == 0) {
 		const GLubyte *r = glGetString(GL_RENDERER), *v = glGetString(GL_VERSION);
