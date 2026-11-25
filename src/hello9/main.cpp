@@ -60,6 +60,7 @@
 extern "C" {
 #include "log.h"
 #include "proc.h"
+#include "ipc.h"
 #include "quit.h"
 #include "lmgr.h"
 }
@@ -244,10 +245,10 @@ std::mutex knob_mu;
 std::vector<unsigned> knob_times;        // log_ms() of every ch8 message
 std::vector<std::string> summary;
 
-void on_key(const u8 *, int, void *)
+void on_key(int, u32 ms, const u8 *, int, void *)
 {
 	std::lock_guard<std::mutex> lock(knob_mu);
-	knob_times.push_back(log_ms());
+	knob_times.push_back(ms);
 }
 
 std::vector<unsigned> knobs_since(unsigned t0)
@@ -939,16 +940,23 @@ bool selected(const char *only, const Test &t)
 }
 
 // Leave no displayable of ours behind; the screen back to the HMI.
-void restore_screen()
+// The layer-manager part only: quit's hard path, while the main thread may
+// still be drawing.
+void release_screen()
 {
 	int cids[3] = {40, 16, 19};
-	ui::hide();
 	if (lm_open() != 0)
 		return;
 	lm_unregister_displayable(41);
 	lm_unregister_displayable(40);
 	log_msg("restore: lm_show_displayables(0, {40,16,19}): rc=%d", lm_show_displayables(0, cids, 3));
 	lm_close();
+}
+
+void restore_screen()
+{
+	ui::hide();
+	release_screen();
 }
 
 } // namespace
@@ -972,7 +980,12 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello9: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello9 start, pid=%d%s%s", (int)getpid(), only ? ", only: " : "", only ? only : "");
-	quit_init(sd_path, kWatchdogS, on_key, nullptr);
+	quit_config qc{};
+	qc.sd_path = sd_path;
+	qc.watchdog_s = kWatchdogS;
+	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
+	quit_start(&qc);
+	ipc_subscribe(8, on_key, nullptr, "hello9");
 	log_msg("testapp-cmdline: %s", tool_path("testapp-cmdline").c_str());
 
 	std::vector<const Test *> run;
@@ -1033,8 +1046,7 @@ int main(int argc, char *argv[])
 		ui::show_list("hello9 results", {"no test ran"});
 		sleep_quit(kPageMs);
 	}
-	quit_request(QUIT_TIMER);
-	restore_screen();
+	quit_finish();
 	log_msg("hello9 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

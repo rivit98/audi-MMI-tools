@@ -12,6 +12,7 @@
 #ifndef BUTTONS_BUTTONS_H
 #define BUTTONS_BUTTONS_H
 
+#include "ch8.h"
 #include "types.h"
 
 #include <string>
@@ -63,10 +64,10 @@ struct Event {
 };
 
 // The message layout.
-constexpr int kMsgBytes = 27;     // a plain message; touch pad ones are 29-33
-constexpr int kControlBytes = 14; // 0-13: buttons and knobs
-constexpr int kKindByte = 14;     // 01 = controls, 02 = touch pad / extra bytes
-constexpr int kPowerByte = 15;    // 02 while running
+constexpr int kMsgBytes = CH8_MSG_BYTES;         // a plain message; touch pad ones are 29-33
+constexpr int kControlBytes = CH8_CONTROL_BYTES; // 0-13: buttons and knobs
+constexpr int kKindByte = CH8_KIND_BYTE;         // 01 = controls, 02 = touch pad / extra bytes
+constexpr int kPowerByte = CH8_POWER_BYTE;       // 02 while running
 
 class Decoder {
 public:

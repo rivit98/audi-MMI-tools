@@ -11,7 +11,7 @@
 // app is copied to /tmp/mmi_apps/ first, next to run.sh's copy of bin/
 // (FAT has no exec bit, the card may be pulled while it runs, and the apps
 // find the unit tools next to themselves). Input: src/common/buttons (Hub
-// fed by quit.c's ch8 thread, EventQueue).
+// fed by ipc.h's ch8 reader, EventQueue).
 //
 // Apps are started with QNX's spawn(), not fork + exec, system() or ksh
 // (README.md: why). The runner closes its screen first and opens it again
@@ -502,12 +502,23 @@ int main(int argc, char *argv[])
 		std::fprintf(stderr, "runner: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("runner start, pid=%d, apps from %s", getpid(), bin.c_str());
 
-	// quit.c reads ch8 for us and feeds the hub; no watchdog: the menu
-	// stays until the card is pulled or "Leave the menu".
-	// The hub lives as long as the process: quit.c's key thread keeps
+	// No watchdog: the menu stays until the card is pulled or "Leave the
+	// menu".
+	quit_config qc{};
+	qc.sd_path = argv[1];
+	qc.cleanup = [](int hard, void *) {
+		if (hard) {
+			screen_release();
+			return;
+		}
+		close_screen();
+		camera::stop();
+	};
+	quit_start(&qc);
+	// The hub lives as long as the process: ch8's reader (ipc.h) keeps
 	// calling into it until exit.
 	buttons::Hub &hub = *new buttons::Hub;
-	quit_init(argv[1], 0, buttons::Hub::quit_cb, &hub);
+	hub.listen();
 	camera::start();
 
 	std::vector<std::string> found = find_apps(sd + "/" + runner::kAppsDir);
@@ -560,10 +571,7 @@ int main(int argc, char *argv[])
 		if (screen_ok() && dirty)
 			draw(menu);
 	}
-	quit_request(QUIT_TIMER);
-
-	close_screen();
-	camera::stop();
+	quit_finish();
 	log_msg("runner exit (stop: %s), %u ch8 messages", quit_name(quit_poll()), hub.messages());
 	log_close();
 	return 0;

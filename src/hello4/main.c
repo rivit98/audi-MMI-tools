@@ -793,10 +793,23 @@ static void log_gl_info(void)
 	        depth, stencil, lights, tex, stack);
 }
 
+/* quit_finish() or the hard path: the screen back (only that while the
+ * main thread may still be inside GL) */
+static struct gfx gfx;
+
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard)
+		gfx_release_screen(&gfx);
+	else
+		gfx_shutdown(&gfx);
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char path[256], plan[512];
-	struct gfx g;
 	struct opts o;
 	struct seg seg[MAX_SEGS];
 	unsigned run_s = 0, i, n;
@@ -831,19 +844,22 @@ int main(int argc, char *argv[])
 	for (; i < n; i++)
 		run_s += (seg[i].ms + 999) / 1000;
 	log_msg("plan: probes %s,%s trace=%d, %u s", o.probes ? "on" : "off", plan, o.trace, run_s);
-	quit_init(sd_path, run_s + WATCHDOG_SLACK, NULL, NULL);
+	qc.sd_path = sd_path;
+	qc.watchdog_s = run_s + WATCHDOG_SLACK;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
 
-	if (gfx_init(&g, CID) == 0) {
+	if (gfx_init(&gfx, CID) == 0) {
 		log_gl_info();
 		if (o.probes)
-			nprobes = probes_run(g.width, g.height, probe_state);
+			nprobes = probes_run(gfx.width, gfx.height, probe_state);
 		setup_lights_fog();
 		if (make_assets() == 0)
-			run(&g, &o);
+			run(&gfx, &o);
 	} else {
 		log_msg("gfx_init failed, see the last FAIL line above");
 	}
-	gfx_shutdown(&g);
+	quit_finish();
 	free_assets();
 	log_msg("hello4 exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();

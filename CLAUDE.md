@@ -48,7 +48,7 @@ gradle, adb or gcc.
 
 - **Divide by zero is a fatal SIGFPE**, float too (`x/0.0f` is not inf). Guard every denominator.
 - No `fork()` in threaded code (`spawnvp` via `proc.c`), no signal handlers (`sigwait` thread,
-  `quit.c`), no TLS (`thread_local`: the build fails), no `<math.h>` in the sysroot
+  `src/common/quit/`), no TLS (`thread_local`: the build fails), no `<math.h>` in the sysroot
   (`src/common/qnx/math.h`).
 - C++: static libstdc++ from GCC 16, LL/SC atomics are the default. Never add `-m4` or another
   `-matomic-model`: gUSA loses updates. QNX `std::mutex` needs the SDK's init/destroy fix
@@ -64,7 +64,8 @@ gradle, adb or gcc.
 - **Never hide the rear camera.** While `camera::active()` (src/common/camera: the HMI owns
   VCAP 0 per dev-videoctrl's `/dev/slog` lines, or the camera's BAP session on ch4 ~1 s
   earlier), write nothing to VP1 and show nothing. Retake the screen 1 s after the camera goes
-  off (docs/rear-camera.md §9.1). Never open `/dev/ipc/ch4` yourself: `camera::subscribe_ch4`.
+  off (docs/rear-camera.md §9.1). Never open a `/dev/ipc/chN` for reading yourself:
+  `ipc_subscribe` (src/common/ipc, one reader per channel), or `camera::subscribe_ch4` for telegrams.
 - Hardware video: DM642 H.264 Baseline up to 720 wide (800 is refused; an 800-wide picture with
   its SPS cropped to 720 stays black; the DSP's decoder and BT.656 signal are 720 wide, §7.14),
   only through a CS-MP4

@@ -254,8 +254,8 @@ void test_hub()
 	CHECK_STR(a[2].c_str(), "main knob release");
 	CHECK_EQ(hub.messages(), 3);
 
-	// quit.c's callback form
-	Hub::quit_cb(msg(7, 1).data(), kMsgBytes, &hub);
+	// the ipc.h callback form
+	Hub::ipc_cb(8, 0, msg(7, 1).data(), kMsgBytes, &hub);
 	CHECK_EQ(a.size(), 4);
 	CHECK_STR(a[3].c_str(), "main knob turn -1");
 }

@@ -53,8 +53,9 @@ camera::stop();
   no blocking, no `subscribe` / `unsubscribe` from inside one.
   `unsubscribe` returns once no callback of that id is running.
 - `subscribe_ch4`: every ch4 read (raw bytes, `log_ms()` and the telegrams it
-  completed), for code that studies ch4 (hello11). Never open ch4 a second
-  time in a process: the reader below already keeps up.
+  completed), for code that studies ch4 (hello11). ch4 itself is read by
+  `src/common/ipc/` (one reader per channel and process); never open it
+  yourself.
 - `ch4_stats()`: the reader's state (`reading`, `no open`, `read failed`,
   `stopped: gaps`, `stopped`) and the telegram counters.
 

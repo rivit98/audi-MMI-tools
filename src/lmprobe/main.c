@@ -210,12 +210,21 @@ static int setup(gf_dev_t *dev, gf_display_t *display, gf_surface_t *surface)
 	return 0;
 }
 
+/* quit_finish() or the hard path: the screen back */
+static void on_quit(int hard, void *arg)
+{
+	(void)hard;
+	(void)arg;
+	cleanup("after");
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	gf_dev_t dev = NULL;
 	gf_display_t display = NULL;
 	gf_surface_t surface = NULL;
-	unsigned seconds = RUN_SECONDS, start;
+	unsigned seconds = RUN_SECONDS;
 	char path[256];
 	int shown, fg_before, fg_after;
 
@@ -232,7 +241,11 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		fprintf(stderr, "lmprobe: cannot open %s, logging to stdout only\n", path);
 	log_msg("lmprobe start, pid=%d, show=%u s", getpid(), seconds);
-	quit_init(sd_path, seconds + WATCHDOG_SLACK, NULL, NULL);
+	qc.sd_path = sd_path;
+	qc.run_ms = seconds * 1000;
+	qc.watchdog_s = seconds + WATCHDOG_SLACK;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
 
 	fg_before = dump_state("before");
 	cleanup("before");
@@ -240,14 +253,10 @@ int main(int argc, char *argv[])
 	dump_state("shown");
 	if (shown) {
 		log_msg("bars shown, waiting %u s", seconds);
-		start = log_ms();
-		while (quit_poll() == QUIT_NONE) {
-			if (log_ms() - start >= seconds * 1000)
-				quit_request(QUIT_TIMER);
+		while (quit_poll() == QUIT_NONE)
 			usleep(100 * 1000);
-		}
 	}
-	cleanup("after");
+	quit_finish();
 	fg_after = dump_state("after");
 	log_msg("foreground before %d, after %d: %s", fg_before, fg_after,
 	        fg_before == fg_after ? "restored" : "CHANGED");

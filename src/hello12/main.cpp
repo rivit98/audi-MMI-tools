@@ -407,15 +407,22 @@ bool label(int n, int count, const char *title, const char *what)
 	return !sleep_quit(kLabelMs);
 }
 
-void restore_screen()
+// The layer-manager part only: quit's hard path, while the main thread may
+// still be drawing.
+void release_screen()
 {
 	int cids[3] = {40, 16, 19};
-	ui::hide();
 	if (lm_open() != 0)
 		return;
 	lm_unregister_displayable(40);
 	log_msg("restore: lm_show_displayables(0, {40,16,19}): rc=%d", lm_show_displayables(0, cids, 3));
 	lm_close();
+}
+
+void restore_screen()
+{
+	ui::hide();
+	release_screen();
 }
 
 } // namespace
@@ -442,7 +449,11 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello12: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello12 start, pid=%d, steps %s", (int)getpid(), steps);
-	quit_init(sd_path, kWatchdogS, nullptr, nullptr);
+	quit_config qc{};
+	qc.sd_path = sd_path;
+	qc.watchdog_s = kWatchdogS;
+	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
+	quit_start(&qc);
 
 	int count = (int)std::strlen(steps), n = 0;
 	char intro[600];
@@ -573,8 +584,7 @@ int main(int argc, char *argv[])
 		              summary.empty() ? std::vector<std::string>{"no step ran"} : summary);
 		sleep_quit(12000);
 	}
-	quit_request(QUIT_TIMER);
-	restore_screen();
+	quit_finish();
 	log_msg("hello12 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

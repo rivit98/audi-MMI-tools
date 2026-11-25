@@ -7,6 +7,7 @@
 #include "vcap.h"
 
 extern "C" {
+#include "ipc.h"
 #include "log.h"
 }
 
@@ -31,7 +32,6 @@ constexpr unsigned kPollMs = 250;
 // them between readers, not copying them, and MMI3GApplication would miss
 // ours. Stop reading.
 constexpr u32 kGapCheckAfter = 20;
-constexpr const char *kCh4 = "/dev/ipc/ch4";
 
 struct Sub {
 	int id;
@@ -55,8 +55,9 @@ std::thread slog_thread;
 bool started = false;
 int buffer[4096];                       // the biggest slog event is 258 ints
 
-std::atomic<bool> ch4_quit{false};
-std::atomic<bool> ch4_alive{false};
+int ch4_sub = 0;                        // ipc.h id, 0: not subscribed
+ipc4::Splitter splitter;                // ch4's reader thread only
+std::vector<ipc4::Telegram> telegrams;  // the same
 
 std::string who(const std::vector<Sub> &list, bool ch4)
 {
@@ -157,70 +158,8 @@ void set_state(const char *s)
 	stats4.state = s;
 }
 
-// Until stop() (at the next telegram), a failed read or the gap guard.
-void ch4_run(int fd)
+void bap_off(const char *why)
 {
-	ipc4::Splitter sp;
-	std::vector<ipc4::Telegram> ts;
-	u8 buf[4096];
-	for (;;) {
-		isize n = read(fd, buf, sizeof(buf));
-		if (ch4_quit) {
-			set_state("stopped");
-			break;
-		}
-		if (n < 0 && errno == EINTR)
-			continue;
-		u32 now = log_ms();
-		if (n <= 0) {
-			log_msg("camera: ch4 read returned %d (%s): no BAP from now on", (int)n,
-			        n < 0 ? std::strerror(errno) : "end");
-			set_state("read failed");
-			break;
-		}
-		ts.clear();
-		sp.feed(buf, (usize)n, ts);
-
-		for (const ipc4::Telegram &t : ts) {
-			Rvc r = rvc_state(t);
-			if (r == Rvc::None)
-				continue;
-			bool on = r == Rvc::On, was, changed, up;
-			{
-				std::lock_guard<std::mutex> lock(mu);
-				was = comb.bap_on();
-				changed = comb.bap(on, now);
-				up = comb.active();
-			}
-			if (on != was)
-				log_msg("camera: BAP %02X.%02X session %s", kRvcLsg, kRvcSessionFid,
-				        on ? "on" : "off");
-			if (changed)
-				deliver(Event{up, "BAP", now});
-		}
-		{
-			std::lock_guard<std::mutex> lock(smu);
-			for (const Sub &s : subs)
-				if (s.h4)
-					s.h4(now, buf, (usize)n, ts);
-		}
-		bool gaps = sp.telegrams() >= kGapCheckAfter && sp.gaps() * 5 > sp.telegrams();
-		{
-			std::lock_guard<std::mutex> lock(mu);
-			stats4.telegrams = sp.telegrams();
-			stats4.gaps = sp.gaps();
-			stats4.missing = sp.missing();
-			stats4.skipped = sp.skipped();
-		}
-		if (gaps) {
-			log_msg("camera: ch4 STOP: %u gaps (%u telegrams missing) in %u telegrams: dev-ipc "
-			        "shares them between readers, MMI3GApplication would miss ours",
-			        sp.gaps(), sp.missing(), sp.telegrams());
-			set_state("stopped: gaps");
-			break;
-		}
-	}
-	close(fd);
 	bool changed;
 	u32 now = log_ms();
 	{
@@ -228,35 +167,81 @@ void ch4_run(int fd)
 		changed = comb.bap(false, now);
 	}
 	if (changed)
-		deliver(Event{false, "BAP gone", now});
-	ch4_alive = false;
+		deliver(Event{false, why, now});
+}
+
+// One ch4 read, on ipc.h's ch4 reader thread.
+void on_ch4(int, u32 now, const u8 *buf, int n, void *)
+{
+	ipc4::Splitter &sp = splitter;
+	std::vector<ipc4::Telegram> &ts = telegrams;
+	ts.clear();
+	sp.feed(buf, (usize)n, ts);
+
+	for (const ipc4::Telegram &t : ts) {
+		Rvc r = rvc_state(t);
+		if (r == Rvc::None)
+			continue;
+		bool on = r == Rvc::On, was, changed, up;
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			was = comb.bap_on();
+			changed = comb.bap(on, now);
+			up = comb.active();
+		}
+		if (on != was)
+			log_msg("camera: BAP %02X.%02X session %s", kRvcLsg, kRvcSessionFid,
+			        on ? "on" : "off");
+		if (changed)
+			deliver(Event{up, "BAP", now});
+	}
+	{
+		std::lock_guard<std::mutex> lock(smu);
+		for (const Sub &s : subs)
+			if (s.h4)
+				s.h4(now, buf, (usize)n, ts);
+	}
+	bool gaps = sp.telegrams() >= kGapCheckAfter && sp.gaps() * 5 > sp.telegrams();
+	{
+		std::lock_guard<std::mutex> lock(mu);
+		stats4.telegrams = sp.telegrams();
+		stats4.gaps = sp.gaps();
+		stats4.missing = sp.missing();
+		stats4.skipped = sp.skipped();
+	}
+	if (gaps) {
+		log_msg("camera: ch4 STOP: %u gaps (%u telegrams missing) in %u telegrams: dev-ipc "
+		        "shares them between readers, MMI3GApplication would miss ours",
+		        sp.gaps(), sp.missing(), sp.telegrams());
+		set_state("stopped: gaps");
+		ipc_stop(4, "camera: gaps");
+		bap_off("BAP gone");
+	}
 }
 
 void start_ch4()
 {
-	if (ch4_alive) {
-		ch4_quit = false;               // the old thread hasn't seen the stop yet
-		set_state("reading");
+	if (ch4_sub > 0)
+		return;
+	splitter = ipc4::Splitter();
+	ch4_sub = ipc_subscribe(4, on_ch4, nullptr, "camera");
+	if (ch4_sub < 0) {
+		log_msg("camera: no ch4 (%s): the slog alone", ipc_state(4));
+		set_state(ipc_state(4));
+		ch4_sub = 0;
 		return;
 	}
-	int fd = open(kCh4, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
-		log_msg("camera: %s: %s: the slog alone", kCh4, std::strerror(errno));
-		set_state("no open");
-		return;
-	}
-	ch4_quit = false;
-	ch4_alive = true;
 	set_state("reading");
-	try {
-		// blocks in read() until a telegram comes: detached, exit() ends it
-		std::thread(ch4_run, fd).detach();
-	} catch (const std::system_error &) {
-		log_msg("camera: no ch4 thread: the slog alone");
-		ch4_alive = false;
-		set_state("no thread");
-		close(fd);
-	}
+}
+
+void stop_ch4()
+{
+	if (ch4_sub <= 0)
+		return;
+	ipc_unsubscribe(ch4_sub);           // no on_ch4 runs after this
+	ch4_sub = 0;
+	set_state("stopped");
+	bap_off("BAP gone");
 }
 
 int add(Sub s)
@@ -318,7 +303,7 @@ void stop()
 	slog_thread.join();
 	close(slog_fd);
 	slog_fd = -1;
-	ch4_quit = true;
+	stop_ch4();
 	started = false;
 }
 

@@ -36,6 +36,7 @@
 extern "C" {
 #include "lmgr.h"
 #include "log.h"
+#include "ipc.h"
 #include "quit.h"
 }
 
@@ -69,7 +70,6 @@ constexpr unsigned kDarkMs = 120000;    // auto headlights come on within second
 constexpr unsigned kBrightMs = 180000;  // and go off only after a delay
 constexpr unsigned kScreenMs = 1000;
 constexpr unsigned kPageMs = 30000;
-constexpr const char *kCh5 = "/dev/ipc/ch5";
 constexpr const char *kFooter = "hello11 - read only. Pull the SD card to stop.";
 const char *const kNdrPaths[] = {"/dev/ndr/name/sensor/ReverseGear", "/dev/navi/sensor/ReverseGear"};
 
@@ -120,12 +120,11 @@ std::vector<u8> raw_q;                  // -> ch4.bin
 std::vector<u8> raw5_q;                 // -> ch5.bin
 std::vector<std::string> slog_q;        // -> slog.txt
 u32 ch5_reads = 0, ch5_records = 0, ch5_skipped = 0, slog_lines = 0;
-std::string ch5_state = "not started";
 u32 ch4_odd = 0;
 std::atomic<unsigned> clicks{0};
 std::atomic<bool> stopping{false};
 
-void on_key(const u8 *buf, int n, void *)
+void on_key(int, u32, const u8 *buf, int n, void *)
 {
 	if (n > 7 && (buf[6] != 0 || buf[7] != 0))
 		clicks++;
@@ -212,43 +211,26 @@ void on_ch4(u32 ms, const u8 *buf, usize n, const std::vector<ipc4::Telegram> &t
 
 // ---- ch5 ----
 
-void ch5_thread(int fd)
+// One ch5 read, on ipc.h's ch5 reader.
+void on_ch5(int, u32 ms, const u8 *buf, int n, void *)
 {
-	u8 buf[4096];
-	for (;;) {
-		isize n = read(fd, buf, sizeof(buf));
-		if (stopping)
-			return;
-		if (n < 0 && errno == EINTR)
+	usize skipped = 0;
+	std::vector<ch5::Record> rs = ch5::parse(buf, (usize)n, &skipped);
+	std::lock_guard<std::mutex> lock(mu);
+	u32 hdr[2] = {ms, (u32)n};
+	raw5_q.insert(raw5_q.end(), (const u8 *)hdr, (const u8 *)hdr + sizeof(hdr));
+	raw5_q.insert(raw5_q.end(), buf, buf + n);
+	ch5_reads++;
+	ch5_records += (u32)rs.size();
+	ch5_skipped += (u32)skipped;
+	for (const ch5::Record &r : rs) {
+		if (ch5::noisy(r.tag))
 			continue;
-		unsigned ms = log_ms();
-		if (n <= 0) {
-			log_msg("ch5: read returned %d (%s): stop reading", (int)n,
-			        n < 0 ? std::strerror(errno) : "end");
-			std::lock_guard<std::mutex> lock(mu);
-			ch5_state = "read failed";
-			close(fd);
-			return;
-		}
-		usize skipped = 0;
-		std::vector<ch5::Record> rs = ch5::parse(buf, (usize)n, &skipped);
-		std::lock_guard<std::mutex> lock(mu);
-		u32 hdr[2] = {ms, (u32)n};
-		raw5_q.insert(raw5_q.end(), (const u8 *)hdr, (const u8 *)hdr + sizeof(hdr));
-		raw5_q.insert(raw5_q.end(), buf, buf + n);
-		ch5_reads++;
-		ch5_records += (u32)rs.size();
-		ch5_skipped += (u32)skipped;
-		for (const ch5::Record &r : rs) {
-			if (ch5::noisy(r.tag))
-				continue;
-			// the sensor-ish tags go to the main log as they change
-			bool watched = r.tag == 0x09 || r.tag == 0x0a || r.tag == 0x08;
-			feed(ms, ch5::key(r), r.payload, watched);
-			if (r.tag == 0x09)
-				rain_now = ipc4::hex(r.payload, 8);
-		}
-		ch5_state = "reading";
+		// the sensor-ish tags go to the main log as they change
+		bool watched = r.tag == 0x09 || r.tag == 0x0a || r.tag == 0x08;
+		feed(ms, ch5::key(r), r.payload, watched);
+		if (r.tag == 0x09)
+			rain_now = ipc4::hex(r.payload, 8);
 	}
 }
 
@@ -408,7 +390,7 @@ std::string status()
 	              "ch4: %s, %u telegrams, %u gaps; ch5: %s, %u records; %zu keys",
 	              light_now.c_str(), rain_now.c_str(), rvc_now.c_str(), ndr_now.c_str(),
 	              cs.active ? "UP" : "off", cs.vcap ? "HMI" : "free", cs.bap ? "on" : "off",
-	              slog_now.c_str(), c4.state, c4.telegrams, c4.gaps, ch5_state.c_str(),
+	              slog_now.c_str(), c4.state, c4.telegrams, c4.gaps, ipc_state(5),
 	              ch5_records, w.keys());
 	return s;
 }
@@ -432,15 +414,22 @@ void screen(const std::string &title, const std::string &text, bool with_status 
 	shown = true;
 }
 
-void restore_screen()
+// The layer-manager part only: quit's hard path, while the main thread may
+// still be drawing.
+void release_screen()
 {
 	int cids[3] = {40, 16, 19};
-	ui::hide();
 	if (lm_open() != 0)
 		return;
 	lm_unregister_displayable(40);
 	log_msg("restore: lm_show_displayables(0, {40,16,19}): rc=%d", lm_show_displayables(0, cids, 3));
 	lm_close();
+}
+
+void restore_screen()
+{
+	ui::hide();
+	release_screen();
 }
 
 // ---- steps ----
@@ -527,7 +516,7 @@ std::vector<std::string> summary()
 	              ch4_odd);
 	out.push_back(s);
 	std::snprintf(s, sizeof(s), "ch5: %s, %u reads, %u records, %u bytes skipped; slog: %u lines",
-	              ch5_state.c_str(), ch5_reads, ch5_records, ch5_skipped, slog_lines);
+	              ipc_state(5), ch5_reads, ch5_records, ch5_skipped, slog_lines);
 	out.push_back(s);
 	for (const watch::Step &st : w.steps()) {
 		std::vector<std::string> keys = w.changed_in(st.begin_ms, st.end_ms);
@@ -577,7 +566,12 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello11: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello11 start, pid=%d", (int)getpid());
-	quit_init(sd_path, kWatchdogS, on_key, nullptr);
+	quit_config qc{};
+	qc.sd_path = sd_path;
+	qc.watchdog_s = kWatchdogS;
+	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
+	quit_start(&qc);
+	ipc_subscribe(8, on_key, nullptr, "hello11");
 	camera::start();
 	int ch4_sub = camera::subscribe_ch4(on_ch4, "hello11");
 
@@ -586,17 +580,10 @@ int main(int argc, char *argv[])
 		threads.emplace_back(writer_thread);
 		threads.emplace_back(ndr_thread);
 		threads.emplace_back(slog_thread);
-		int fd5 = open(kCh5, O_RDONLY | O_CLOEXEC);
-		if (fd5 < 0) {
-			log_msg("ch5: open %s: %s", kCh5, std::strerror(errno));
-			ch5_state = "no open";
-		} else {
-			ch5_state = "reading";
-			std::thread(ch5_thread, fd5).detach();
-		}
 	} catch (const std::system_error &e) {
 		log_msg("FAIL thread: %s", e.what());
 	}
+	int ch5_sub = ipc_subscribe(5, on_ch5, nullptr, "hello11");
 
 	int n = 0;
 	if (intro())
@@ -622,13 +609,13 @@ int main(int argc, char *argv[])
 				break;
 		}
 	}
-	quit_request(QUIT_TIMER);
 	stopping = true;
+	ipc_unsubscribe(ch5_sub);
 	camera::unsubscribe_ch4(ch4_sub);
 	for (std::thread &t : threads)
 		t.join();
 	camera::stop();
-	restore_screen();
+	quit_finish();
 	log_msg("hello11 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

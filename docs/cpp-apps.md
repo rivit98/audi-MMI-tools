@@ -225,5 +225,5 @@ C++ doesn't change the platform's C-level rules
   that release in their destructors (displayable, `gf` surfaces, io-media
   graph fds), so an exception doesn't leave the MMI's displayable
   registered.
-- **Stop cleanly** through `quit.c`: timer, SIGTERM/INT/HUP via
-  `sigwait`, SD removal, watchdog.
+- **Stop cleanly** through `src/common/quit/`: a `quit_config` with the
+  stop sources and a cleanup that `quit_finish()` runs once.

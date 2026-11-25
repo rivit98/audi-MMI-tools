@@ -46,6 +46,11 @@ int  gfx_swap(struct gfx *g);
  * everything gfx_init created. Safe after a partial gfx_init. */
 void gfx_shutdown(struct gfx *g);
 
+/* The layer-manager part of gfx_shutdown only: the screen back to the HMI,
+ * no EGL or gf calls. For quit's hard path, while the main thread may be
+ * stuck inside GL. gfx_shutdown after it does the rest. */
+void gfx_release_screen(struct gfx *g);
+
 /* Linear fog over [start, end). Always use this instead of setting
  * GL_FOG_MODE / GL_FOG_START / GL_FOG_END by hand: while the mode is
  * GL_LINEAR this unit's nVidia driver recomputes end/(end-start) and

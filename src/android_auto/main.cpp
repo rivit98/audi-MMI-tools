@@ -597,6 +597,29 @@ bool parse_args(int argc, char *argv[], Options &o)
 
 } // namespace
 
+static App *the_app = nullptr;                // for teardown, once started
+static bool screen_up = false;          // our displayable is registered
+
+// quit_finish() or quit's hard path (the screen back only: the main thread
+// may still be using everything else).
+static void teardown(int hard, void *)
+{
+	if (hard) {
+		screen_release();
+		return;
+	}
+	if (the_app != nullptr)
+		the_app->stop();              // says bye-bye while the link is up
+	aoa_host::stop();
+	if (screen_up) {
+		if (camera::active())
+			screen_no_show_on_close();
+		screen_close();
+	}
+	camera::stop();
+	cpumon_stop();
+}
+
 int main(int argc, char *argv[])
 {
 	char path[256];
@@ -618,7 +641,10 @@ int main(int argc, char *argv[])
 	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off",
 	        opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
 	        opt.cfg.video_fps ? " fps" : "");
-	quit_init(sd_path, 0, nullptr, nullptr);  // no watchdog: runs until SD pull / signal
+	quit_config qc{};
+	qc.sd_path = sd_path;                     // no watchdog: runs until SD pull / signal
+	qc.cleanup = teardown;
+	quit_start(&qc);
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	aa::Tls::set_debug(1);            // mbedTLS errors into the log
@@ -634,7 +660,7 @@ int main(int argc, char *argv[])
 	// our first show would cover the rear camera
 	while (camera::active() && quit_poll() == QUIT_NONE)
 		usleep(100 * 1000);
-	bool screen_up = screen_open() == 0;
+	screen_up = screen_open() == 0;
 	if (!screen_up)
 		log_msg("FAIL screen; running headless (log only)");
 	screen_set_partial(1);
@@ -647,6 +673,7 @@ int main(int argc, char *argv[])
 			std::snprintf(st.pace_label, sizeof(st.pace_label), "off");
 	});
 	App app(opt, cert, key);
+	the_app = &app;
 	aoa_host::Config usb = kUsb;
 	usb.sd_path = sd_path;
 	bool running = !cert.empty() && !key.empty() && app.start() && aoa_host::start(usb, app);
@@ -693,15 +720,8 @@ int main(int argc, char *argv[])
 		usleep(100 * 1000);
 	}
 
-	app.stop();                       // says bye-bye while the link is up
-	aoa_host::stop();
-	if (screen_up) {
-		if (camera::active())
-			screen_no_show_on_close();
-		screen_close();
-	}
-	camera::stop();
-	cpumon_stop();
+	quit_finish();
+	the_app = nullptr;
 	log_set_tap(nullptr);
 	log_msg("android_auto exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();

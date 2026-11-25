@@ -9,25 +9,25 @@ namespace {
 
 // Every button bit named on the car (README.md, "The table").
 struct Bit {
-	u8 byte, mask;
+	int bit;        // ch8.h CH8_KEY(byte, mask)
 	Key key;
 };
 constexpr Bit kBits[] = {
-	{0, 0x01, Key::Radio},
-	{0, 0x02, Key::Media},
-	{0, 0x08, Key::Tel},
-	{0, 0x10, Key::Nav},
-	{0, 0x40, Key::Car},
-	{1, 0x01, Key::Next},
-	{1, 0x02, Key::SoftTopLeft},
-	{1, 0x04, Key::SoftBottomLeft},
-	{1, 0x08, Key::Prev},
-	{1, 0x10, Key::SoftTopRight},
-	{1, 0x20, Key::SoftBottomRight},
-	{1, 0x40, Key::Back},
-	{1, 0x80, Key::MainKnob},
-	{2, 0x01, Key::VolumeKnob},
-	{3, 0x04, Key::Menu},
+	{CH8_RADIO, Key::Radio},
+	{CH8_MEDIA, Key::Media},
+	{CH8_TEL, Key::Tel},
+	{CH8_NAV, Key::Nav},
+	{CH8_CAR, Key::Car},
+	{CH8_NEXT, Key::Next},
+	{CH8_SOFT_TOP_LEFT, Key::SoftTopLeft},
+	{CH8_SOFT_BOTTOM_LEFT, Key::SoftBottomLeft},
+	{CH8_PREV, Key::Prev},
+	{CH8_SOFT_TOP_RIGHT, Key::SoftTopRight},
+	{CH8_SOFT_BOTTOM_RIGHT, Key::SoftBottomRight},
+	{CH8_BACK, Key::Back},
+	{CH8_MAIN_KNOB_PRESS, Key::MainKnob},
+	{CH8_VOLUME_KNOB_PRESS, Key::VolumeKnob},
+	{CH8_MENU, Key::Menu},
 };
 
 // The knob bytes: detents since the last message, never button bits.
@@ -64,7 +64,7 @@ Event button(Key k, Action a, int byte, int mask, u32 ms)
 Key key_of(int byte, int mask)
 {
 	for (const Bit &b : kBits)
-		if (b.byte == byte && b.mask == mask)
+		if (b.bit == CH8_KEY(byte, mask))
 			return b.key;
 	return Key::Unknown;
 }

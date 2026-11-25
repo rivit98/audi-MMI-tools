@@ -18,13 +18,13 @@ uses it.
 
 ## Using it
 
-The process reads ch8 once. `quit.c` already reads it on its key thread in
-every app and never stops (an unread channel stalls every reader, see
-"Several readers" below), so the hub is fed from there:
+The process reads ch8 once, through `src/common/ipc/ipc.h`, whose reader
+never stops (an unread channel stalls every reader, see "Several readers"
+below). The hub subscribes there:
 
 ```cpp
-buttons::Hub &hub = *new buttons::Hub;      // lives until exit: quit.c's thread calls it
-quit_init(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
+buttons::Hub &hub = *new buttons::Hub;      // lives until exit: ch8's reader calls it
+hub.listen();
 
 buttons::EventQueue q(hub);                 // for a main loop
 buttons::Event e;
@@ -33,7 +33,7 @@ if (q.wait(e, 100) && buttons::is_knob_press(e)) { ... }
 int id = hub.subscribe([](const buttons::Event &e) { ... });   // or a callback
 ```
 
-- Callbacks run on quit.c's key thread with the hub's lock held: short, no
+- Callbacks run on ch8's reader thread with the hub's lock held: short, no
   blocking, no `subscribe` / `unsubscribe` from inside one.
 - `unsubscribe` returns once no callback of that id is running.
 - `EventQueue` drops the oldest event when full (`dropped()`), and
@@ -270,10 +270,9 @@ dev-ipc gives every reader of a channel its own copy of each message, and
 a reader that keeps the channel open without reading stalls it for every
 reader after 32 messages ([docs/vehicle-data.md §2.2](../../../docs/vehicle-data.md)).
 For ch8 that includes MMI3GApplication, so: one reader per process
-(quit.c's), always reading, and no ch8 fd inherited by a child that won't
-read it: quit.c opens ch8 with `O_CLOEXEC` (so do hello7 and hello11 for
-their channels), and the runner spawns its apps with only
-stdin/stdout/stderr.
+(`ipc.h`'s, for every channel), always reading, and no channel fd inherited
+by a child that won't read it: `ipc.c` opens the channels with `O_CLOEXEC`,
+and the runner spawns its apps with only stdin/stdout/stderr.
 
 ### The HMI keeps the input
 
@@ -287,8 +286,8 @@ BACK and the source keys.
 
 **No key or button stops an app.** Runs end on their own timer, a signal,
 SD removal or the watchdog, so a stray press during a test cannot cut it
-short. `quit.c` reads ch8 and offers the
-bytes to an app observer (`quit_init`): the hub, or a plain callback
+short, unless the app names a stop key in its `quit_config`. `ipc.h` reads
+ch8 and offers the bytes to observers: the hub, or a plain callback
 (hello5 counts volume detents that way). **hello7** is the input tester:
 its guided mode named the table above, one control per step, and now
 asks the open touch pad and steering wheel questions.

@@ -5,6 +5,7 @@
 #include <string>
 
 extern "C" {
+#include "ipc.h"
 #include "log.h"
 }
 
@@ -106,9 +107,14 @@ void Hub::set_logging(bool on)
 	logging_ = on;
 }
 
-void Hub::quit_cb(const u8 *buf, int n, void *arg)
+void Hub::ipc_cb(int, u32 ms, const u8 *buf, int n, void *arg)
 {
-	static_cast<Hub *>(arg)->feed(buf, n, log_ms());
+	static_cast<Hub *>(arg)->feed(buf, n, ms);
+}
+
+bool Hub::listen()
+{
+	return ipc_subscribe(8, ipc_cb, this, "buttons") > 0;
 }
 
 u32 Hub::messages() const

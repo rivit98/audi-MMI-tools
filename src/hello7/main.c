@@ -48,6 +48,7 @@
 #include "guide.h"
 #include "keys.h"
 #include "log.h"
+#include "ipc.h"
 #include "quit.h"
 #include "screen.h"
 #include "text.h"
@@ -60,7 +61,6 @@
 #define SUMMARY_MS      45000
 #define RECENT          8       /* messages kept on screen */
 #define MARGIN          20
-#define KEY_DEVICE      "/dev/ipc/ch8"
 #define HEX_MAX         40      /* bytes logged per message */
 
 #define C_BG     0xff101820u
@@ -79,7 +79,7 @@ static const int shown[] = {
 };
 #define NSHOWN ((int)(sizeof(shown) / sizeof(shown[0])))
 
-/* Written by on_key (quit.c's key thread), read by the main loop. */
+/* Written by on_key (ipc.h's ch8 reader), read by the main loop. */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned counts[K_NCTL];         /* detents for knobs, presses else */
 static unsigned msgs, last_ms;
@@ -92,13 +92,14 @@ static int guided;
 static struct guide g;
 static int last_echo = -1;              /* the last pad mode the pad echoed */
 
-static void on_key(const u8 *buf, int n, void *arg)
+static void on_key(int ch, u32 ms, const u8 *buf, int n, void *arg)
 {
 	struct key_hit hits[KEY_MAX_HITS];
 	char what[96], hex[HEX_MAX * 3 + 1], gap_s[16], where[48] = "";
-	unsigned now = log_ms(), gap;
+	unsigned now = ms, gap;
 	int nh, i;
 
+	(void)ch;
 	(void)arg;
 	nh = key_decode(buf, n, hits, KEY_MAX_HITS);
 	key_describe(hits, nh, what, sizeof(what));
@@ -157,16 +158,16 @@ static void nap(unsigned ms)
 
 /* Set the pad's recognizer mode the way the HMI does (MMI3GApplication
  * 0x82288B8 -> 0x8228628): open ch8, write the 10-byte command, close. The
- * pad echoes the mode back (subfunction C4). quit.c keeps reading ch8 on
+ * pad echoes the mode back (subfunction C4). ipc.h keeps reading ch8 on
  * its own fd; this one is open for the write only, so it queues nothing. */
 static int pad_set_mode(int mode)
 {
 	u8 cmd[16];
 	int len = tpad_mode_cmd(mode, cmd, sizeof(cmd)), fd, w, err;
 
-	fd = open(KEY_DEVICE, O_RDWR | O_CLOEXEC);
+	fd = open(IPC_CH8, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
-		log_msg("pad mode %d: open %s failed: %s", mode, KEY_DEVICE, strerror(errno));
+		log_msg("pad mode %d: open %s failed: %s", mode, IPC_CH8, strerror(errno));
 		return -1;
 	}
 	w = (int)write(fd, cmd, (usize)len);
@@ -485,8 +486,24 @@ static void run_free(unsigned seconds)
 			        i <= K_VOL_DOWN ? " detents" : i == K_RELEASE ? "" : " presses");
 }
 
+/* quit_finish() or the hard path: the screen back, unless the rear camera
+ * is on it */
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (cam_active())
+		screen_no_show_on_close();
+	if (hard) {
+		screen_release();
+		return;
+	}
+	screen_close();
+	cam_stop();
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char logpath[256];
 	unsigned seconds = 0, watchdog;
 
@@ -508,8 +525,11 @@ int main(int argc, char *argv[])
 		log_msg("hello7 start, pid=%d, guided: %d steps, watchdog %u s", getpid(),
 		        guide_nprompts, watchdog);
 
-	/* quit.c owns /dev/ipc/ch8; on_key() runs on its reader thread. */
-	quit_init(argv[1], watchdog, on_key, NULL);
+	qc.sd_path = argv[1];
+	qc.watchdog_s = watchdog;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
+	ipc_subscribe(8, on_key, NULL, "hello7");
 	cam_start();
 	ui = screen_open() == 0;
 	if (!ui)
@@ -521,12 +541,7 @@ int main(int argc, char *argv[])
 		run_free(seconds);
 	else
 		run_guide();
-	quit_request(QUIT_TIMER);
-
-	if (cam_active())
-		screen_no_show_on_close();
-	screen_close();
-	cam_stop();
+	quit_finish();
 	log_msg("hello7 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

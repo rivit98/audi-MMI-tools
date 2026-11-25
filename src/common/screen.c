@@ -285,6 +285,20 @@ void screen_no_show_on_close(void)
 	no_show_on_close = 1;
 }
 
+void screen_release(void)
+{
+	int rc;
+
+	if (!lm_is_open && lm_open() == 0)
+		lm_is_open = 1;
+	if (!lm_is_open)
+		return;
+	rc = lm_unregister_displayable(CID);
+	log_msg("screen_release: lm_unregister_displayable(%d): rc=%d", CID, rc);
+	if (!no_show_on_close)
+		show_logged();
+}
+
 void screen_close(void)
 {
 	int rc;

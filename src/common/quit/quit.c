@@ -1,34 +1,37 @@
 /*
- * quit.c - stop requests from timer, keys, signals, SD removal, watchdog
- * (see quit.h).
+ * quit.c - stop requests and the cleanup (see quit.h).
  */
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
-#include "types.h"
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
+#include "ch8.h"
+#include "ipc.h"
 #include "log.h"
 #include "quit.h"
 
-#define KEY_DEVICE   "/dev/ipc/ch8"
-
 static volatile int quit_reason;
-static const char *sd;
-static unsigned sd_checked_ms;
+static struct quit_config cfg;
+static unsigned start_ms, sd_checked_ms;
 static sigset_t quit_sigs;
-static quit_key_cb key_cb;
-static void *key_cb_arg;
+static int key_held;
+
+/* 0 not run, 1 running, 2 done; taken under cleanup_mu so it runs once */
+static pthread_mutex_t cleanup_mu = PTHREAD_MUTEX_INITIALIZER;
+static int cleanup_state;
 
 const char *quit_name(int reason)
 {
 	switch (reason) {
 	case QUIT_NONE:     return "none";
+	case QUIT_DONE:     return "done";
 	case QUIT_TIMER:    return "timer";
 	case QUIT_SIGNAL:   return "signal";
 	case QUIT_SDCARD:   return "SD card removed";
+	case QUIT_KEY:      return "key";
 	case QUIT_WATCHDOG: return "watchdog";
 	}
 	return "?";
@@ -47,12 +50,64 @@ int quit_poll(void)
 {
 	unsigned now = log_ms();
 
-	if (quit_reason == QUIT_NONE && sd != NULL && now - sd_checked_ms >= 1000) {
+	if (quit_reason != QUIT_NONE)
+		return quit_reason;
+	if (cfg.run_ms != 0 && now - start_ms >= cfg.run_ms)
+		quit_request(QUIT_TIMER);
+	else if (cfg.sd_path != NULL && now - sd_checked_ms >= 1000) {
 		sd_checked_ms = now;
-		if (access(sd, F_OK) != 0)
+		if (access(cfg.sd_path, F_OK) != 0)
 			quit_request(QUIT_SDCARD);
 	}
 	return quit_reason;
+}
+
+/* 1 if the caller now owns the cleanup (it hadn't started). */
+static int take_cleanup(void)
+{
+	int mine;
+
+	pthread_mutex_lock(&cleanup_mu);
+	mine = cleanup_state == 0;
+	if (mine)
+		cleanup_state = 1;
+	pthread_mutex_unlock(&cleanup_mu);
+	return mine;
+}
+
+int quit_finish(void)
+{
+	quit_request(QUIT_DONE);
+	if (cfg.cleanup != NULL && take_cleanup()) {
+		cfg.cleanup(0, cfg.arg);
+		pthread_mutex_lock(&cleanup_mu);
+		cleanup_state = 2;
+		pthread_mutex_unlock(&cleanup_mu);
+	}
+	alarm(0);
+	return quit_reason;
+}
+
+static void *exit_later(void *arg)
+{
+	struct timespec ts = { QUIT_HARD_CLEANUP_S, 0 };
+
+	nanosleep(&ts, NULL);
+	log_msg("quit: hard cleanup took over %d s: _exit", QUIT_HARD_CLEANUP_S);
+	_exit((int)(isize)arg);
+	return NULL;
+}
+
+static void hard_exit(int code)
+{
+	pthread_t tid;
+
+	if (cfg.cleanup != NULL && take_cleanup()) {
+		log_msg("quit: hard cleanup");
+		if (pthread_create(&tid, NULL, exit_later, (void *)(isize)code) == 0)
+			cfg.cleanup(1, cfg.arg);
+	}
+	_exit(code);
 }
 
 static void *signal_thread(void *arg)
@@ -70,44 +125,34 @@ static void *signal_thread(void *arg)
 		}
 		/* already stopping: a second signal, or the teardown hung */
 		log_msg("signal %d while stopping (%s): _exit", sig, quit_name(quit_reason));
-		_exit(sig == SIGALRM ? 124 : 128 + sig);
+		hard_exit(sig == SIGALRM ? 124 : 128 + sig);
 	}
 	return NULL;
 }
 
-/* Blocking reads of the HMI's key channel, as qnx-audi does (no select()
- * support there). Byte 7/6 = rotary knob left/right, 5/4 = volume knob;
- * any other message is a button press. Nothing here stops the app: the
- * messages go to the app's observer, and that is all. */
-static void *key_thread(void *arg)
+/* ch8: a press of the stop key (it wasn't held in the message before). */
+static void on_ch8(int ch, u32 ms, const u8 *buf, int n, void *arg)
 {
-	int fd = (int)(isize)arg, n;
-	u8 buf[256];
+	int held;
 
-	for (;;) {
-		n = read(fd, buf, sizeof(buf));
-		if (n <= 0) {
-			log_msg("%s: read returned %d (%s), key thread ends", KEY_DEVICE, n,
-			        n < 0 ? strerror(errno) : "EOF");
-			break;
-		}
-		if (key_cb != NULL)
-			key_cb(buf, n, key_cb_arg);
-	}
-	close(fd);
-	return NULL;
+	(void)ch;
+	(void)ms;
+	(void)arg;
+	if (n <= CH8_POWER_BYTE || buf[CH8_KIND_BYTE] == CH8_KIND_TOUCH)
+		return;          /* a touch pad message says nothing about buttons */
+	held = ch8_held(buf, n, cfg.stop_key);
+	if (held && !key_held)
+		quit_request(QUIT_KEY);
+	key_held = held;
 }
 
-int quit_init(const char *sd_path, unsigned watchdog_s,
-              quit_key_cb cb, void *cb_arg)
+int quit_start(const struct quit_config *c)
 {
 	pthread_t tid;
-	int fd, rc;
+	int rc;
 
-	sd = sd_path;
-	sd_checked_ms = log_ms();
-	key_cb = cb;
-	key_cb_arg = cb_arg;
+	cfg = *c;
+	start_ms = sd_checked_ms = log_ms();
 
 	/* Block the stop signals in every thread (threads inherit the mask);
 	 * signal_thread picks them up with sigwait(). */
@@ -125,22 +170,14 @@ int quit_init(const char *sd_path, unsigned watchdog_s,
 	} else {
 		pthread_detach(tid);
 	}
-	alarm(watchdog_s);
-
-	/* close-on-exec: a child that inherits ch8 and never reads it fills
-	 * the channel's queue for every reader, the HMI included, after 32
-	 * messages (docs/vehicle-data.md 2.2) */
-	fd = open(KEY_DEVICE, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
-		log_msg("quit: open %s: %s; no key messages", KEY_DEVICE, strerror(errno));
-	} else if ((errno = pthread_create(&tid, NULL, key_thread, (void *)(isize)fd)) != 0) {
-		log_msg("quit: key thread: %s; no key messages", strerror(errno));
-		close(fd);
-	} else {
-		pthread_detach(tid);   /* stays blocked in read(); exit() ends it */
-	}
-	log_msg("quit: watchdog %u s, stop on: timer, SIGTERM/INT/HUP, "
-	        "SD removal (%s); %s is read but never stops the app",
-	        watchdog_s, sd_path, KEY_DEVICE);
+	alarm(cfg.watchdog_s);
+	if (cfg.stop_key != 0 && ipc_subscribe(8, on_ch8, NULL, "quit") < 0)
+		cfg.stop_key = 0;
+	log_msg("quit: stop on signals%s%s%s, run %u ms, watchdog %u s, stop key %s, cleanup %s",
+	        cfg.sd_path != NULL ? ", SD removal (" : "",
+	        cfg.sd_path != NULL ? cfg.sd_path : "",
+	        cfg.sd_path != NULL ? ")" : "",
+	        cfg.run_ms, cfg.watchdog_s,
+	        cfg.stop_key != 0 ? "yes" : "none", cfg.cleanup != NULL ? "yes" : "none");
 	return rc == 0 ? 0 : -1;
 }

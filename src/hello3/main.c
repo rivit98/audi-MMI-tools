@@ -19,7 +19,7 @@
  * A seven-segment FPS counter (top left) and a progress bar (bottom)
  * are drawn as untextured quads over every frame.
  *
- * Stops early, with the normal teardown, on a button press, SIGTERM/
+ * Stops early, with the normal teardown, on SIGTERM/
  * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit/quit.c).
  *
  * Output on the card: hello3.log (per-second fps, per-scene summary,
@@ -384,10 +384,23 @@ static void run(struct gfx *g, unsigned scene_s)
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
 }
 
+/* quit_finish() or the hard path: the screen back (only that while the
+ * main thread may still be inside GL) */
+static struct gfx gfx;
+
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard)
+		gfx_release_screen(&gfx);
+	else
+		gfx_shutdown(&gfx);
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char path[256];
-	struct gfx g;
 	unsigned scene_s = SCENE_SECONDS;
 
 	if (argc < 2) {
@@ -405,19 +418,22 @@ int main(int argc, char *argv[])
 	rng_state = (0x9e3779b9u ^ ((unsigned)getpid() << 8) ^ log_ms()) | 1;
 	log_msg("hello3 start, pid=%d, %u scenes x %u s, seed=0x%08x",
 	        getpid(), NSCENES, scene_s, rng_state);
-	quit_init(sd_path, NSCENES * scene_s + WATCHDOG_SLACK, NULL, NULL);
+	qc.sd_path = sd_path;
+	qc.watchdog_s = NSCENES * scene_s + WATCHDOG_SLACK;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
 
-	if (gfx_init(&g, CID) == 0) {
+	if (gfx_init(&gfx, CID) == 0) {
 		const GLubyte *r = glGetString(GL_RENDERER), *v = glGetString(GL_VERSION);
 
 		log_msg("GL_RENDERER: %s", r ? (const char *)r : "(null)");
 		log_msg("GL_VERSION: %s", v ? (const char *)v : "(null)");
 		if (make_textures() == 0)
-			run(&g, scene_s);
+			run(&gfx, scene_s);
 	} else {
 		log_msg("gfx_init failed, see the last FAIL line above");
 	}
-	gfx_shutdown(&g);
+	quit_finish();
 	log_msg("hello3 exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

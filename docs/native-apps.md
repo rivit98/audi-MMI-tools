@@ -192,7 +192,7 @@ docs/                   this guide and the deep dives
 
 | Group | Files | Gives you |
 |---|---|---|
-| `BASE` | `log`, `quit/`, `lmgr` | SD log, clean-stop sources, layer manager client |
+| `BASE` | `log`, `quit/`, `ipc/`, `lmgr` | SD log, stop sources + cleanup, the `/dev/ipc` channels' one reader each (observers), layer manager client |
 | `TEXT` | `text` + generated fonts | UTF-8, word wrap, Terminus 8×16 / 16×32 glyphs (12×24 `font_mid`: the runner's own) |
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
 | `GL` | `gfx`, `hud` | gf + EGL bring-up, FPS counter |
@@ -201,7 +201,7 @@ docs/                   this guide and the deep dives
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
 | `BUTTONS` | `src/common/buttons/` (C++, add `-Isrc/common/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
 | `VIDEO` | `src/common/video/` (C++, on the include path for all), + `CAMERA`, `IOM` | a live H.264 stream on screen through io-media and the DM642 (§10, [README](../src/common/video/README.md)) |
-| `CAMERA` | `src/common/camera/` (C++, on the include path for all) | is the rear camera up (slog + its BAP session on ch4), change observers, the process's one ch4 reader ([README](../src/common/camera/README.md)) |
+| `CAMERA` | `src/common/camera/` (C++, on the include path for all) | is the rear camera up (slog + its BAP session on ch4), change observers, ch4's telegrams ([README](../src/common/camera/README.md)) |
 
 Integer, size and float types use the short names from `src/common/types.h`
 (C and C++): `u8`..`u64`, `i8`..`i64`, `usize`, `isize`, `f32`, `f64`. Include
@@ -286,25 +286,39 @@ Modern GDB has no QNX/SH support. Read cores with `readelf -n`/`-l`.
 #include "screen.h"
 #include "font_big.h"
 
+/* quit_finish(), or quit's hard path while main may still be drawing */
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard)
+		screen_release();              /* the layer manager part only */
+	else
+		screen_close();                /* gives the screen back to the HMI */
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char path[256];
 	snprintf(path, sizeof path, "%s/myapp.log", argv[1]);
 	log_open(path);                        /* fsync per line */
-	quit_init(argv[1], 60 + 20, NULL, NULL);  /* before any other thread */
+	qc.sd_path = argv[1];
+	qc.run_ms = 60000;
+	qc.watchdog_s = 60 + 20;
+	qc.cleanup = on_quit;
+	quit_start(&qc);                       /* before any other thread */
 	if (screen_open() != 0) {
 		log_msg("FAIL screen_open");
-		quit_request(QUIT_TIMER);
+		quit_request(QUIT_DONE);
 	}
-	unsigned end = log_ms() + 60000;
-	while (log_ms() < end && quit_poll() == QUIT_NONE) {
+	while (quit_poll() == QUIT_NONE) {
 		struct canvas *c = screen_canvas();
 		canvas_fill(c, 0, 0, c->w, c->h, 0xff101820u);
 		text_draw(c, &font_big, 20, 20, "hello", -1, 0xffffd040u);
 		screen_present();
 		usleep(100 * 1000);
 	}
-	screen_close();                        /* gives the screen back to the HMI */
+	quit_finish();                         /* on_quit(0), once */
 	log_close();
 	return 0;
 }
@@ -312,9 +326,15 @@ int main(int argc, char *argv[])
 
 `src/hello7/main.c` is a complete, small example (screen + knob callback).
 
-`quit.c` stops an app on its timer, SIGTERM/INT/HUP (via a `sigwait()`
-thread), SD removal (checked once a second) or a watchdog (`alarm()`).
-After a stop request the app has 10 s, then `_exit()`. No key stops an app.
+`src/common/quit/` stops an app on the sources its `quit_config` names:
+SIGTERM/INT/HUP (always, via a `sigwait()` thread), a run time, SD
+removal (checked once a second), a stop key on ch8 (only then is ch8
+read), or a watchdog (`alarm()`). The main loop polls `quit_poll()`; on a
+stop it calls `quit_finish()`, which runs the app's cleanup once, on the
+main thread. After a stop request the app has 10 s; then the cleanup runs
+on the signal thread with `hard = 1` if it hasn't started (only what must
+not be left behind: the screen, VCAP 0), and the process ends with
+`_exit()`. A short test that holds nothing needs no quit at all.
 
 Rules the platform forces:
 
@@ -570,11 +590,13 @@ Details: [platform-notes.md](platform-notes.md) §9, [src/hello5/README.md](../s
 
 ## 12. Input: knobs and buttons
 
-All user input arrives as 27-byte state messages on `/dev/ipc/ch8`. `quit.c`
-reads it; pass a callback to `quit_init()` to receive every message on
-its thread. For events (knob turns with detents, button press / release by
-name), link the `BUTTONS` group and feed a `buttons::Hub` from
-`quit_init` ([src/common/buttons/README.md](../src/common/buttons/README.md): the API
+All user input arrives as 27-byte state messages on `/dev/ipc/ch8`
+(layout and button bits: `src/common/ipc/ch8.h`). `ipc_subscribe(8, ...)`
+(`src/common/ipc/ipc.h`, the process's one reader per channel) hands every
+message to a callback on the reader thread. For events (knob turns with
+detents, button press / release by name), link the `BUTTONS` group and
+`listen()` with a `buttons::Hub`
+([src/common/buttons/README.md](../src/common/buttons/README.md): the API
 and the protocol).
 
 The **HMI still acts on every knob and button** while your app is on

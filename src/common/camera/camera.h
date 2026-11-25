@@ -12,10 +12,10 @@
 // callers behave as if there were no camera. No ch4: the slog alone, as
 // before BAP was known.
 //
-// The process has one ch4 reader, this one: dev-ipc gives every reader its
-// own copy, but a reader that stops reading stalls the channel for all of
-// them, MMI3GApplication included. Code that wants ch4's telegrams
-// subscribes here (subscribe_ch4) instead of opening the channel again.
+// ch4 is read through ipc.h, the process's one reader per channel. This
+// library splits the reads into telegrams; code that wants ch4's telegrams
+// subscribes here (subscribe_ch4), code that wants the raw reads subscribes
+// to ipc.h's channel 4.
 #ifndef CAMERA_CAMERA_H
 #define CAMERA_CAMERA_H
 
@@ -30,8 +30,7 @@ namespace camera {
 // Reads the slog so far before it returns, so active() is right at once.
 // Opens ch4 unless with_ch4 is false.
 void start(bool with_ch4 = true);
-// Stops the slog thread. The ch4 thread is blocked in read() until the next
-// telegram: it closes the channel then and ends (detached; exit ends it too).
+// Stops the slog thread and leaves ch4 (ipc.h keeps reading it).
 void stop();
 
 // The camera is up (or about to be): don't write VP1, don't show anything.

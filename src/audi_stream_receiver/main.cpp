@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "camera.h"
+#include "vout.h"
 #include "takeover.h"
 
 extern "C" {
@@ -73,6 +74,30 @@ void keep_previous_run(const char *sd_path)
 	keep(var, "audi_stream_receiver.log", "audi_stream_receiver.prev.log");
 }
 
+bool screen_up = false;                 // our displayable is registered
+
+// quit_finish() or quit's hard path. The hard path only gives back what
+// must not outlive us, the screen and VCAP 0 (the rear camera's input):
+// the main thread may still be using everything else.
+void teardown(int hard, void *)
+{
+	if (hard) {
+		vout::hide();
+		screen_release();
+		return;
+	}
+	aoa::stop();
+	hwvideo::shutdown();
+	if (screen_up) {
+		if (camera::active())
+			screen_no_show_on_close();
+		screen_close();
+	}
+	carlog::stop();
+	camera::stop();
+	cpumon_stop();
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -90,7 +115,10 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
 	log_msg("audi_stream_receiver start, pid=%d", getpid());
-	quit_init(sd_path, 0, nullptr, nullptr);  // no watchdog: runs until SD pull / signal
+	quit_config qc{};
+	qc.sd_path = sd_path;                     // no watchdog: runs until SD pull / signal
+	qc.cleanup = teardown;
+	quit_start(&qc);
 	if (slogmark_init("audi_stream_receiver") == 0)
 		slogmark("start, pid %d", (int)getpid());
 	cpumon_name_thread("main");
@@ -106,7 +134,7 @@ int main(int argc, char *argv[])
 	bool shown = screen_open() == 0;
 	if (!shown)
 		log_msg("FAIL screen; running headless (log only)");
-	bool screen_up = shown;
+	screen_up = shown;
 	camera::Takeover takeover;
 	hwvideo::start();
 	if (shown)
@@ -165,16 +193,7 @@ int main(int argc, char *argv[])
 		usleep(50 * 1000);
 	}
 
-	aoa::stop();
-	hwvideo::shutdown();
-	if (screen_up) {
-		if (camera::active())
-			screen_no_show_on_close();
-		screen_close();
-	}
-	carlog::stop();
-	camera::stop();
-	cpumon_stop();
+	quit_finish();
 	slogmark("exit (stop reason: %s)", quit_name(quit_poll()));
 	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();

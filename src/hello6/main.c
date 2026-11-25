@@ -45,6 +45,7 @@
 #include "lmgr.h"
 #include "log.h"
 #include "proc.h"
+#include "ipc.h"
 #include "quit.h"
 #include "texts.h"
 
@@ -101,8 +102,10 @@ unsigned knob_events(void)
 	return knob_count;
 }
 
-static void on_key(const u8 *buf, int n, void *arg)
+static void on_key(int ch, u32 ms, const u8 *buf, int n, void *arg)
 {
+	(void)ch;
+	(void)ms;
 	(void)buf;
 	(void)n;
 	(void)arg;
@@ -162,11 +165,10 @@ const char *tool_path(const char *name)
 
 /* Whatever happened, leave no displayable of ours behind and give the
  * screen back to the HMI (showScreen's exit: show {40,16,19}). */
-static void restore_screen(void)
+static void release_screen(void)
 {
 	int cids[3] = { 40, 16, 19 };
 
-	label_hide();
 	if (lm_open() != 0)
 		return;
 	lm_unregister_displayable(41);
@@ -176,8 +178,26 @@ static void restore_screen(void)
 	lm_close();
 }
 
+static void restore_screen(void)
+{
+	label_hide();
+	release_screen();
+}
+
+/* quit_finish() or the hard path: the screen back (the hard path leaves
+ * the label alone: the main thread may be drawing it) */
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard)
+		release_screen();
+	else
+		restore_screen();
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	const char *phases = "scgv";
 	char path[300], *slash;
 	int i;
@@ -202,7 +222,11 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		fprintf(stderr, "hello6: cannot open %s, logging to stdout only\n", path);
 	log_msg("hello6 start, pid=%d, phases=%s", getpid(), phases);
-	quit_init(sd_path, WATCHDOG_S, on_key, NULL);
+	qc.sd_path = sd_path;
+	qc.watchdog_s = WATCHDOG_S;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
+	ipc_subscribe(8, on_key, NULL, "hello6");
 	find_tools();
 
 	label_show(INTRO_TITLE, INTRO_BODY, FOOTER_MAIN);
@@ -247,7 +271,7 @@ int main(int argc, char *argv[])
 		sleep_quit(PAGE_MS);
 	}
 out:
-	restore_screen();
+	quit_finish();
 	log_msg("hello6 exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

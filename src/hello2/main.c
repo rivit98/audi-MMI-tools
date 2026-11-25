@@ -6,7 +6,7 @@
  *  2. Animates for RUN_SECONDS: hue-cycling background, rotating gradient
  *     square, bouncing block, progress bar along the bottom.
  *  3. Hands the screen back like qnx-audi does and exits. Stops early, with
- *     the same clean teardown, on a button press, SIGTERM/SIGINT/SIGHUP,
+ *     the same clean teardown, on SIGTERM/SIGINT/SIGHUP,
  *     SD card removal or the watchdog (src/common/quit/quit.c).
  *
  * usage: hello2 <sd_path> [seconds]
@@ -182,11 +182,24 @@ static void animate(struct gfx *g, unsigned seconds)
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
 }
 
+/* quit_finish() or the hard path: the screen back (only that while the
+ * main thread may still be inside GL) */
+static struct gfx gfx;
+
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard)
+		gfx_release_screen(&gfx);
+	else
+		gfx_shutdown(&gfx);
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char path[256];
 	struct utsname u;
-	struct gfx g;
 	unsigned seconds = RUN_SECONDS;
 
 	if (argc < 2) {
@@ -205,15 +218,18 @@ int main(int argc, char *argv[])
 	if (uname(&u) == 0)
 		log_msg("uname: %s %s %s %s %s", u.sysname, u.nodename, u.release,
 		        u.version, u.machine);
-	quit_init(sd_path, seconds + WATCHDOG_SLACK, NULL, NULL);
+	qc.sd_path = sd_path;
+	qc.watchdog_s = seconds + WATCHDOG_SLACK;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
 
-	if (gfx_init(&g, CID) == 0) {
+	if (gfx_init(&gfx, CID) == 0) {
 		log_gl_info();
-		animate(&g, seconds);
+		animate(&gfx, seconds);
 	} else {
 		log_msg("gfx_init failed, see the last FAIL line above");
 	}
-	gfx_shutdown(&g);
+	quit_finish();
 	log_msg("hello2 exit (stop reason: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

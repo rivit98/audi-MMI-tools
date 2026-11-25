@@ -197,7 +197,11 @@ int main(int argc, char *argv[])
 	        only ? ", only: " : "", only ? only : "");
 	log_toolchain();
 
-	quit_init(argv[1], seconds + kWatchdogSlack, nullptr, nullptr);
+	quit_config qc{};
+	qc.sd_path = argv[1];
+	qc.watchdog_s = seconds + kWatchdogSlack;
+	qc.cleanup = [](int hard, void *) { hard ? screen_release() : screen_close(); };
+	quit_start(&qc);
 	bool ui = screen_open() == 0;
 	if (!ui)
 		log_msg("FAIL hello8: no screen, logging only");
@@ -241,9 +245,7 @@ int main(int argc, char *argv[])
 		}
 		nap(100);
 	}
-	quit_request(QUIT_TIMER);
-
-	screen_close();
+	quit_finish();
 	log_msg("hello8 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	return 0;

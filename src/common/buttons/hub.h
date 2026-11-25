@@ -1,18 +1,17 @@
 // hub.h - hand the decoded button events (buttons.h) to any number of
 // observers in one process.
 //
-// The process reads /dev/ipc/ch8 once: quit.c already does, on its key
-// thread, for every app, and must keep doing so (a reader that stops reading
-// stalls the channel for every other reader, the HMI included; README.md).
-// Plug the hub into it:
+// The process reads /dev/ipc/ch8 once, through ipc.h (a reader that stops
+// reading stalls the channel for every other reader, the HMI included;
+// README.md). The hub subscribes there:
 //
 //     buttons::Hub &hub = *new buttons::Hub;   // never freed, see below
-//     quit_init(sd_path, watchdog_s, buttons::Hub::quit_cb, &hub);
+//     hub.listen();
 //
-// The hub must outlive quit.c's key thread, which runs until the process
+// The hub must outlive ch8's reader thread, which runs until the process
 // exits (blocked in read(), not joined): allocate it once and never free it.
 //
-// Then either subscribe a callback (it runs on the key thread: keep it short,
+// Then either subscribe a callback (it runs on ch8's reader thread: keep it short,
 // never block) or, for a main loop, take the events from an EventQueue:
 //
 //     buttons::EventQueue q(hub);
@@ -52,8 +51,10 @@ public:
 	// One raw ch8 message, from the reader thread. ms: the caller's clock.
 	void feed(const u8 *buf, int n, u32 ms);
 
-	// quit_key_cb for quit_init(); arg is the Hub. Stamps with log_ms().
-	static void quit_cb(const u8 *buf, int n, void *arg);
+	// Subscribe to ch8 (ipc.h). false: no ch8, no events.
+	bool listen();
+	// The ipc_cb listen() subscribes; arg is the Hub.
+	static void ipc_cb(int ch, u32 ms, const u8 *buf, int n, void *arg);
 
 	// Log events and subscriptions (on by default).
 	void set_logging(bool on);

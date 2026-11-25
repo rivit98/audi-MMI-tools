@@ -353,7 +353,7 @@ void gfx_fog_linear(f32 start, f32 end)
 	glFogf(GL_FOG_MODE, GL_LINEAR);
 }
 
-void gfx_shutdown(struct gfx *g)
+void gfx_release_screen(struct gfx *g)
 {
 	/* qnx-audi's exit: updateVfb, unregister, show displayables {cid,16,19}
 	 * (showScreen's cleanup is the same minus updateVfb). Unregister also
@@ -371,6 +371,12 @@ void gfx_shutdown(struct gfx *g)
 		rc = lm_show_displayables(0, cids, 3);
 		log_msg("lm_show_displayables(0, {%d,16,19}): %d", g->cid, rc);
 	}
+	g->done &= ~(GFX_STEP_REGISTER | GFX_STEP_REG_TRY);
+}
+
+void gfx_shutdown(struct gfx *g)
+{
+	gfx_release_screen(g);
 
 	if (g->done & GFX_STEP_CURRENT)
 		eglMakeCurrent(g->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,

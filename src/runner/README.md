@@ -28,7 +28,7 @@ library.
 - An `apps.conf` line (`name|timeout s|arguments|text`) is optional. It
   gives the app its text, arguments and timeout, and puts it in
   `apps.conf`'s order. Apps without one follow by name: no arguments, a 1 h
-  timeout (apps end themselves; quit.c's watchdog).
+  timeout (apps end themselves; quit's watchdog).
 - Eight lines at a time; the list scrolls with the selection.
 - Under the list: the selected app's last run (verdict, exit, seconds) and
   its `apps.conf` text (what to do).
@@ -67,7 +67,7 @@ Pulling the SD card (or SIGTERM) stops the running app (TERM, KILL after
 
 | Way | Verdict |
 |---|---|
-| `fork()` + `execve()` | **Not possible.** QNX 6.3 refuses `fork()` in a process with more than one thread, and every app has quit.c's threads (key, signals) and the camera thread. |
+| `fork()` + `execve()` | **Not possible.** QNX 6.3 refuses `fork()` in a process with more than one thread, and every app has quit's signal thread, ipc's channel readers and the camera thread. |
 | `system()` | Blocks the caller and returns no pid: no timeout, no stop when the card is pulled, and a shell in between. The child inherits every fd. |
 | `ksh -c` (`proc.c`'s `proc_shell`) | One more process. The pid is the shell's, so TERM may not reach the app. Quoting of `apps.conf` arguments. Still inherits every fd. |
 | **QNX `spawn()`** | **Used.** One call, no fork, returns the app's pid. `fd_map` gives the child exactly stdin (`/dev/null`), stdout and stderr (the out file): QNX passes no other fd when `fd_count > 0`, so the runner's ch8, log, slog and layer manager fds stay out of the app. `SPAWN_SETSIGMASK` with an empty mask (the runner blocks SIGTERM for quit.c's `sigwait`, and a spawned child inherits the mask), `SPAWN_SETGROUP` a new process group (the KILL takes the app's own tools too). |

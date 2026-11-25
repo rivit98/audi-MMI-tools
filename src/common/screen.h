@@ -54,5 +54,9 @@ const struct screen_stats *screen_last_stats(void);
 /* Unregister our displayable and give the screen back to the HMI. Safe to
  * call when screen_open() failed. */
 void screen_close(void);
+/* The layer-manager part of screen_close only: unregister and show the HMI,
+ * nothing freed. For quit's hard path, while the main thread may still be
+ * drawing. */
+void screen_release(void);
 
 #endif

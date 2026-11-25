@@ -152,7 +152,9 @@
 #include "ducklink.h"
 #include "log.h"
 #include "proc.h"
+#include "ipc.h"
 #include "quit.h"
+#include "screen.h"
 #include "h5ui.h"
 #include "iom.h"
 #include "ipcprobe.h"
@@ -1573,13 +1575,15 @@ static void run_step(const struct step *s, int index, int count)
 
 /* ---- /dev/ipc/ch8 ---- */
 
-/* quit.c calls this for every ch8 message, on its key thread: logged raw,
- * volume detents counted for step v (hello7 decodes everything). */
-static void on_key(const u8 *buf, int n, void *arg)
+/* Every ch8 message, on ipc.h's ch8 reader: logged raw, volume detents
+ * counted for step v (hello7 decodes everything). */
+static void on_key(int ch, u32 ms, const u8 *buf, int n, void *arg)
 {
 	char hex[32 * 3 + 1];
 	int i;
 
+	(void)ch;
+	(void)ms;
 	(void)arg;
 	for (i = 0; i < n && i < 32; i++)
 		snprintf(hex + i * 3, 4, "%02x ", buf[i]);
@@ -1631,8 +1635,21 @@ static const char *find_player(const char *argv0, char *buf, usize size)
 	return access(buf, X_OK) == 0 ? buf : NULL;
 }
 
+/* quit_finish() or the hard path: the screen back, our WAVs off /tmp */
+static void on_quit(int hard, void *arg)
+{
+	(void)arg;
+	if (hard) {
+		screen_release();
+		return;
+	}
+	ui_close();
+	pulse_cleanup();
+}
+
 int main(int argc, char *argv[])
 {
+	struct quit_config qc = { 0 };
 	char logpath[256], wavpath[256], playerpath[256];
 	const char *outspec = DEFAULT_OUTPUTS, *steps = DEFAULT_STEPS, *c;
 	unsigned stage1_max_ms = 0;
@@ -1708,9 +1725,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* quit.c owns /dev/ipc/ch8; on_key() runs on its reader thread. */
-	quit_init(sd_path, stage1_max_ms / 1000 + WATCHDOG_SLACK,
-	             on_key, NULL);
+	qc.sd_path = sd_path;
+	qc.watchdog_s = stage1_max_ms / 1000 + WATCHDOG_SLACK;
+	qc.cleanup = on_quit;
+	quit_start(&qc);
+	ipc_subscribe(8, on_key, NULL, "hello5");
 
 	ui_open();
 	for (i = 0; i < nsteps && quit_poll() == QUIT_NONE; i++) {
@@ -1720,9 +1739,7 @@ int main(int argc, char *argv[])
 			stage_sound(outputs, nout);
 	}
 
-	quit_request(QUIT_TIMER);
-	ui_close();
-	pulse_cleanup();
+	quit_finish();
 	log_msg("hello5 exit (stop: %s)", quit_name(quit_poll()));
 	log_close();
 	free(beep.pcm);
