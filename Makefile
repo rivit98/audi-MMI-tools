@@ -449,7 +449,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 build/test_png \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_hello12 build/test_audio_rx build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_carsig build/test_hello12 build/test_audio_rx build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -585,11 +585,14 @@ build/test_runner: tests/test_runner.cpp tests/check.h src/runner/conf.cpp src/r
 build/test_camera: tests/test_camera.cpp tests/check.h src/common/camera/vcap.h \
     src/common/camera/bap.h src/common/camera/state.h src/common/camera/takeover.h \
     src/common/camera/ipc4.cpp src/common/camera/ipc4.h
-build/test_proto build/test_config_gate build/test_rate_limit build/test_camera:
+# CAMERA's car-signal change log and night state (carsig.h)
+build/test_carsig: tests/test_carsig.cpp tests/check.h src/common/camera/carsig.h \
+    src/common/camera/ipc4.cpp src/common/camera/ipc4.h
+build/test_proto build/test_config_gate build/test_rate_limit build/test_camera build/test_carsig:
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -Isrc/common/camera -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_hello11 build/test_hello12 build/test_audio_rx build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_hello11 build/test_hello12 build/test_audio_rx build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_carsig build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

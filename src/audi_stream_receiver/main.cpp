@@ -15,7 +15,9 @@
 //
 // Writes <sd>/audi_stream_receiver.log: states, every USBDI result, every message
 // but the video data, "h264:" stream lines (hwvideo.h) and a
-// "cpu:" line every 10 s (own and unit load, per thread; cpumon.h).
+// "cpu:" line every 10 s (own and unit load, per thread; cpumon.h) and
+// "car:" lines, the car's signals on ch4 (night, lights, climate, driving
+// state; carlog.h), with every ch4 telegram in audi_stream_receiver_ch4.txt.
 // The previous run's log is kept as *.prev.*; the slog snapshots
 // carry the time in their names (log_stamp), so runs never overwrite them.
 //
@@ -37,6 +39,7 @@ extern "C" {
 }
 
 #include "aoa.h"
+#include "carlog.h"
 #include "hwvideo.h"
 #include "model.h"
 #include "ui.h"
@@ -95,6 +98,7 @@ int main(int argc, char *argv[])
 	screen_set_partial(1);
 
 	camera::start();
+	carlog::start(sd_path);
 	// our first show would cover the rear camera
 	while (camera::active() && quit_poll() == QUIT_NONE)
 		usleep(100 * 1000);
@@ -168,6 +172,7 @@ int main(int argc, char *argv[])
 			screen_no_show_on_close();
 		screen_close();
 	}
+	carlog::stop();
 	camera::stop();
 	cpumon_stop();
 	slogmark("exit (stop reason: %s)", quit_name(quit_poll()));

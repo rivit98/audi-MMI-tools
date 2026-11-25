@@ -23,8 +23,11 @@ gets off VP1 and the screen before the HMI switches the capture, not after.
   out, with the guards below.
 - `takeover.h`: `Takeover`, pure. What an app with a picture does: retake
   the screen after the camera, show again, give back on a race.
+- `carsig.h`: `carsig::Logger`, pure. ch4's car functions (not BAP) in,
+  throttled change lines and the night state (DA01.0C0D byte 0) out. Used
+  by audi_stream_receiver's `carlog.cpp`.
 - `camera.h` / `.cpp`: the reader threads, the state, observers.
-- Tests: [tests/test_camera.cpp](../../../tests/test_camera.cpp), on ch4
+- Tests: [tests/test_carsig.cpp](../../../tests/test_carsig.cpp) and [tests/test_camera.cpp](../../../tests/test_camera.cpp), on ch4
   telegrams and slog lines logged on the car.
 
 ## Using it
