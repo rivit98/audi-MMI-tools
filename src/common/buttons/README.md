@@ -286,7 +286,7 @@ BACK and the source keys.
 
 **No key or button stops an app.** Runs end on their own timer, a signal,
 SD removal or the watchdog, so a stray press during a test cannot cut it
-short, unless the app names a stop key in its `quit_config`. `ipc.h` reads
+short, unless the app names a stop key in its `quit::Config`. `ipc.h` reads
 ch8 and offers the bytes to observers: the hub, or a plain callback
 (hello5 counts volume detents that way). **hello7** is the input tester:
 its guided mode named the table above, one control per step, and now

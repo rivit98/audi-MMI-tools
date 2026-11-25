@@ -72,7 +72,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Screen:** while no stream plays, a CPU-drawn status screen (`ui.cpp`):
   link state and what to do next. The stream's video replaces it.
 - **Logging:** per-frame paths only count in RAM; `h264:` summaries every
-  10 s. `slogmark.h` writes markers with the log's time into the system log.
+  10 s.
 
 ## Log lines
 
@@ -122,8 +122,6 @@ the frames io-media holds (learnt before), counted as `from the read position`.
   the frames in between were dropped, an IDR asked for, and the stream
   played on. A frame over 64 KB raised the frame size to 128 KB with one
   restart, as designed.
-- Slog markers (`audi_stream_receiver: t=<ms> ms ...`) show in the
-  periodic slog snapshots.
 
 **Doesn't work / known**
 - Landscape only for H.264 (portrait shows a "turn the phone" card).

@@ -86,7 +86,7 @@ gradle, adb or gcc.
   `sdk/`, and lines marked `types-ok`. `make test` runs `tools/check_types.sh`, which fails on
   anything else.
 - Header guards = directory + file (`COMMON_LOG_H`, `HELLO5_PULSE_H`), never a bare `X_H`.
-- New app: `src/<app>/` + README, Makefile rule (+ `CXX_APPS` for C++), `sd/apps.conf` line,
+- New app (C++; C files are fine): `src/<app>/` + README, Makefile rule, `sd/apps.conf` line,
   host tests (native-apps.md §4 "Adding an app").
 - **Commit every finished piece of work automatically**, without asking, so progress is easy
   to track: one commit per logical step (a fix, a feature, a docs update after a car run).

@@ -37,8 +37,8 @@ extern "C" {
 #include "lmgr.h"
 #include "log.h"
 #include "ipc.h"
-#include "quit.h"
 }
+#include "quit.h"
 
 #include "bap.h"
 #include "camera.h"
@@ -133,7 +133,7 @@ void on_key(int, u32, const u8 *buf, int n, void *)
 bool sleep_quit(unsigned ms)
 {
 	unsigned t0 = log_ms();
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		unsigned now = log_ms();
 		if (now - t0 >= ms)
 			return false;
@@ -566,11 +566,11 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello11: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello11 start, pid=%d", (int)getpid());
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;
 	qc.watchdog_s = kWatchdogS;
-	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
-	quit_start(&qc);
+	qc.cleanup = [](bool hard) { hard ? release_screen() : restore_screen(); };
+	quit::start(qc);
 	ipc_subscribe(8, on_key, nullptr, "hello11");
 	camera::start();
 	int ch4_sub = camera::subscribe_ch4(on_ch4, "hello11");
@@ -595,9 +595,9 @@ int main(int argc, char *argv[])
 	std::vector<std::string> sum = summary();
 	for (const std::string &s : sum)
 		log_msg("  %s", s.c_str());
-	if (quit_poll() == QUIT_NONE) {
+	if (!quit::stopping()) {
 		unsigned t0 = log_ms();
-		while (log_ms() - t0 < kPageMs && quit_poll() == QUIT_NONE) {
+		while (log_ms() - t0 < kPageMs && !quit::stopping()) {
 			if (!camera::active() && camera::clear()) {
 				ui::show_list("hello11 results (also in hello11.log)", sum);
 				shown = true;
@@ -615,8 +615,8 @@ int main(int argc, char *argv[])
 	for (std::thread &t : threads)
 		t.join();
 	camera::stop();
-	quit_finish();
-	log_msg("hello11 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello11 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

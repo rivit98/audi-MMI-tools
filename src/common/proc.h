@@ -2,7 +2,7 @@
  * proc.h - run the unit's own tools from a multithreaded app.
  *
  * QNX 6.3 refuses fork() in a process with more than one thread, and
- * quit.c starts threads, so children are started with spawnvp(P_NOWAIT).
+ * quit.cpp starts threads, so children are started with spawnvp(P_NOWAIT).
  * Their stdout + stderr go to a file: fds 1 and 2 are pointed at it for
  * the duration of the spawn call (a child inherits every fd without
  * FD_CLOEXEC) and restored straight after.

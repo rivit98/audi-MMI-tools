@@ -52,9 +52,9 @@ extern "C" {
 #include "font_big.h"
 #include "font_small.h"
 #include "log.h"
-#include "quit.h"
 #include "screen.h"
 }
+#include "quit.h"
 
 namespace {
 
@@ -600,9 +600,9 @@ bool parse_args(int argc, char *argv[], Options &o)
 static App *the_app = nullptr;                // for teardown, once started
 static bool screen_up = false;          // our displayable is registered
 
-// quit_finish() or quit's hard path (the screen back only: the main thread
+// quit::finish() or quit's hard path (the screen back only: the main thread
 // may still be using everything else).
-static void teardown(int hard, void *)
+static void teardown(bool hard)
 {
 	if (hard) {
 		screen_release();
@@ -641,10 +641,10 @@ int main(int argc, char *argv[])
 	        getpid(), opt.cfg.version_major, opt.cfg.version_minor, opt.cfg.audio ? "on" : "off",
 	        opt.cfg.video_fps ? "paced to " : "at once", opt.cfg.video_fps,
 	        opt.cfg.video_fps ? " fps" : "");
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;                     // no watchdog: runs until SD pull / signal
 	qc.cleanup = teardown;
-	quit_start(&qc);
+	quit::start(qc);
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	aa::Tls::set_debug(1);            // mbedTLS errors into the log
@@ -658,7 +658,7 @@ int main(int argc, char *argv[])
 
 	camera::start();
 	// our first show would cover the rear camera
-	while (camera::active() && quit_poll() == QUIT_NONE)
+	while (camera::active() && !quit::stopping())
 		usleep(100 * 1000);
 	screen_up = screen_open() == 0;
 	if (!screen_up)
@@ -686,7 +686,7 @@ int main(int argc, char *argv[])
 	unsigned last_version = ~0u, last_tail = ~0u, last_draw = 0;
 	int last_done = -1;
 	unsigned step_t0 = 0;
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		using Action = camera::Takeover::Action;
 		switch (takeover.tick(screen_up, camera::active(), camera::clear(), log_ms())) {
 		case Action::Retake:
@@ -720,10 +720,10 @@ int main(int argc, char *argv[])
 		usleep(100 * 1000);
 	}
 
-	quit_finish();
+	quit::finish();
 	the_app = nullptr;
 	log_set_tap(nullptr);
-	log_msg("android_auto exit (stop reason: %s)", quit_name(quit_poll()));
+	log_msg("android_auto exit (stop reason: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

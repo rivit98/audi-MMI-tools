@@ -19,7 +19,6 @@
 #include "cpumon.h"
 #include "cpustat.h"
 #include "log.h"
-#include "slogmark.h"
 
 #define SAMPLE_MS 1000
 #define NAME_LEN 12
@@ -242,10 +241,6 @@ static void *sampler(void *arg)
 			log_msg("cpu: %u.%u s: %s%s%s", (unsigned)(w.wall_us / 1000000u),
 			        (unsigned)(w.wall_us / 100000u % 10), line, mem,
 			        self >= warn_pct ? " - HIGH" : "");
-			/* a slog marker per window (if the app turned them on) */
-			slogmark("cpu: self %u%%, unit %u%%, free %u MB", self,
-			         (unsigned)(s.unit_us < 0 ? 0 : cpustat_pct((unsigned long long)s.unit_us,
-			                                                     s.wall_us)), free_mb);
 			cpustat_reset(&w);
 		} else {
 			pthread_mutex_unlock(&lock);

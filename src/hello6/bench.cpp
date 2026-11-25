@@ -1,5 +1,5 @@
 /*
- * bench.c - how fast can pixels get onto this screen? The numbers that
+ * bench.cpp - how fast can pixels get onto this screen? The numbers that
  * choose between the raw-pixel mirroring options (docs/phone-mirroring.md
  * section 2.4 and test T3):
  *
@@ -31,10 +31,12 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 
+extern "C" {
 #include "gfx.h"
 #include "hello6.h"
 #include "log.h"
 #include "lz4mini.h"
+}
 #include "quit.h"
 
 #ifndef GL_BGRA_EXT
@@ -207,9 +209,9 @@ static void lz4_case(const char *name, const u16 *frame, u8 *cbuf,
 void bench_cpu(void)
 {
 	const int ccap = LZ4MINI_BOUND(PIX * 2);
-	u8 *a = malloc(PIX * 4), *b = malloc(PIX * 4);
-	u8 *cbuf = malloc((usize)ccap), *dbuf = malloc(PIX * 2);
-	u16 *f = malloc(PIX * 2);
+	u8 *a = (u8 *)malloc(PIX * 4), *b = (u8 *)malloc(PIX * 4);
+	u8 *cbuf = (u8 *)malloc((usize)ccap), *dbuf = (u8 *)malloc(PIX * 2);
+	u16 *f = (u16 *)malloc(PIX * 2);
 	unsigned t0, ms;
 	int i, reps;
 
@@ -476,7 +478,7 @@ static void pipeline(struct gfx *g, int mode, u16 *const bars[2],
 		                GL_UNSIGNED_SHORT_5_6_5, bars[0]);
 
 	t0 = last = log_ms();
-	while (log_ms() - t0 < PIPE_MS && quit_poll() == QUIT_NONE) {
+	while (log_ms() - t0 < PIPE_MS && !quit::stopping()) {
 		int v = (int)(frames & 1);
 		unsigned now;
 
@@ -515,9 +517,9 @@ static void pipeline(struct gfx *g, int mode, u16 *const bars[2],
 void bench_gpu(void)
 {
 	struct gfx g;
-	u16 *bars[2] = { malloc(PIX * 2), malloc(PIX * 2) };
-	u8 *dxt[2] = { malloc(PIX / 2), malloc(PIX / 2) };
-	u8 *rgba[2] = { malloc(PIX * 4), malloc(PIX * 4) };
+	u16 *bars[2] = { (u16 *)malloc(PIX * 2), (u16 *)malloc(PIX * 2) };
+	u8 *dxt[2] = { (u8 *)malloc(PIX / 2), (u8 *)malloc(PIX / 2) };
+	u8 *rgba[2] = { (u8 *)malloc(PIX * 4), (u8 *)malloc(PIX * 4) };
 	void *zero = calloc(TEX_W * TEX_H, 4);
 	int i, m;
 
@@ -561,7 +563,7 @@ void bench_gpu(void)
 	upload_case("bgra8888", GL_BGRA_EXT, GL_UNSIGNED_BYTE, 4, rgba[0], rgba[1], zero);
 	upload_case("rgb565", GL_RGB, GL_UNSIGNED_SHORT_5_6_5, 2, bars[0], bars[1], zero);
 	upload_dxt1(dxt[0], dxt[1], zero);
-	for (m = PIPE_RGB565_FULL; m <= PIPE_DXT1_FULL && quit_poll() == QUIT_NONE; m++)
+	for (m = PIPE_RGB565_FULL; m <= PIPE_DXT1_FULL && !quit::stopping(); m++)
 		pipeline(&g, m, bars, dxt, zero);
 
 	gfx_shutdown(&g);

@@ -178,12 +178,12 @@ docs/                   this guide and the deep dives
 
    ```make
    APPS := ... myapp
-   build/myapp: $(wildcard src/myapp/*.c src/myapp/*.h) $(BASE) $(SCREEN)
+   build/myapp: $(wildcard src/myapp/*.cpp src/myapp/*.c src/myapp/*.h) $(BASE) $(SCREEN)
    LIBS_myapp := -lgf
    ```
 
-   For C++, also add it to `CXX_APPS` (the rule compiles the `src/common`
-   files as C and yours as C++ in one command).
+   Every app is C++ (`main` at least: `quit` is a C++ module); C files are
+   fine and are compiled as C in the same command.
 3. Add a line to `sd/apps.conf`:
    `name|timeout s|arguments after <sd>|what you see / do` (optional: the
    menu lists every binary in `apps/` by its file name).
@@ -198,7 +198,7 @@ docs/                   this guide and the deep dives
 | `GL` | `gfx`, `hud` | gf + EGL bring-up, FPS counter |
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
-| `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
+| `CPUMON` | `cpumon`, `cpustat` | own + whole-unit CPU load and memory lines |
 | `BUTTONS` | `src/common/buttons/` (C++, add `-Isrc/common/buttons`) | knob and button events from ch8, observers and an event queue (§12) |
 | `VIDEO` | `src/common/video/` (C++, on the include path for all), + `CAMERA`, `IOM` | a live H.264 stream on screen through io-media and the DM642 (§10, [README](../src/common/video/README.md)) |
 | `CAMERA` | `src/common/camera/` (C++, on the include path for all) | is the rear camera up (slog + its BAP session on ch4), change observers, ch4's telegrams ([README](../src/common/camera/README.md)) |
@@ -278,61 +278,58 @@ Modern GDB has no QNX/SH support. Read cores with `readelf -n`/`-l`.
 
 ## 6. App skeleton and process rules
 
-```c
-#include <stdio.h>
+```cpp
+#include <cstdio>
 #include <unistd.h>
+extern "C" {                               /* src/common's C headers */
 #include "log.h"
-#include "quit.h"
 #include "screen.h"
 #include "font_big.h"
-
-/* quit_finish(), or quit's hard path while main may still be drawing */
-static void on_quit(int hard, void *arg)
-{
-	(void)arg;
-	if (hard)
-		screen_release();              /* the layer manager part only */
-	else
-		screen_close();                /* gives the screen back to the HMI */
 }
+#include "quit.h"
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
 	char path[256];
-	snprintf(path, sizeof path, "%s/myapp.log", argv[1]);
+	std::snprintf(path, sizeof path, "%s/myapp.log", argv[1]);
 	log_open(path);                        /* fsync per line */
+	quit::Config qc;
 	qc.sd_path = argv[1];
 	qc.run_ms = 60000;
 	qc.watchdog_s = 60 + 20;
-	qc.cleanup = on_quit;
-	quit_start(&qc);                       /* before any other thread */
+	qc.cleanup = [](bool hard) {           /* quit::finish(), or the hard path */
+		if (hard)
+			screen_release();      /* the layer manager part only */
+		else
+			screen_close();        /* gives the screen back to the HMI */
+	};
+	quit::start(qc);                       /* before any other thread */
 	if (screen_open() != 0) {
 		log_msg("FAIL screen_open");
-		quit_request(QUIT_DONE);
+		quit::request(quit::Reason::Done);
 	}
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		struct canvas *c = screen_canvas();
 		canvas_fill(c, 0, 0, c->w, c->h, 0xff101820u);
 		text_draw(c, &font_big, 20, 20, "hello", -1, 0xffffd040u);
 		screen_present();
 		usleep(100 * 1000);
 	}
-	quit_finish();                         /* on_quit(0), once */
+	quit::finish();                        /* the cleanup, once */
 	log_close();
 	return 0;
 }
 ```
 
-`src/hello7/main.c` is a complete, small example (screen + knob callback).
+`src/hello7/main.cpp` is a complete, small example (screen + knob callback).
 
-`src/common/quit/` stops an app on the sources its `quit_config` names:
+`src/common/quit/` (C++, `quit::`) stops an app on the sources its `quit::Config` names:
 SIGTERM/INT/HUP (always, via a `sigwait()` thread), a run time, SD
 removal (checked once a second), a stop key on ch8 (only then is ch8
-read), or a watchdog (`alarm()`). The main loop polls `quit_poll()`; on a
-stop it calls `quit_finish()`, which runs the app's cleanup once, on the
+read), or a watchdog (`alarm()`). The main loop polls `quit::stopping()`; on a
+stop it calls `quit::finish()`, which runs the app's cleanup once, on the
 main thread. After a stop request the app has 10 s; then the cleanup runs
-on the signal thread with `hard = 1` if it hasn't started (only what must
+on the signal thread with `hard = true` if it hasn't started (only what must
 not be left behind: the screen, VCAP 0), and the process ends with
 `_exit()`. A short test that holds nothing needs no quit at all.
 

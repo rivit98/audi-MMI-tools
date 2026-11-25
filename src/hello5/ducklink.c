@@ -74,7 +74,7 @@ int link_start(struct duck_link *l, char *const argv[])
 #ifdef __QNXNTO__
 	{
 		/* only these four fds reach the child (fd_count > 0); an empty
-		 * signal mask (quit.c blocks SIGTERM in hello5 for its sigwait) */
+		 * signal mask (quit blocks SIGTERM in hello5 for its sigwait) */
 		int fd_map[4] = { to[0], nul >= 0 ? nul : SPAWN_FDCLOSED,
 		                  nul >= 0 ? nul : SPAWN_FDCLOSED, from[1] };
 		struct inheritance inh;

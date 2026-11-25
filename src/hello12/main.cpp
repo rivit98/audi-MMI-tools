@@ -36,8 +36,8 @@ extern "C" {
 #include "lmgr.h"
 #include "log.h"
 #include "proc.h"
-#include "quit.h"
 }
+#include "quit.h"
 
 #include "sbc.h"
 #include "sbcsrv.h"
@@ -90,7 +90,7 @@ std::string clip_path(const char *clip)
 bool sleep_quit(unsigned ms)
 {
 	unsigned t0 = log_ms();
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		if (log_ms() - t0 >= ms)
 			return false;
 		usleep(20000);
@@ -256,7 +256,7 @@ bool play(const char *step, const char *url, unsigned clip_ms, SbcServer *srv, s
 		bool error = false, done = false;
 		unsigned last_stats = t_play;
 		while (rc == 0 && !done) {
-			if (quit_poll() != QUIT_NONE) {
+			if (quit::stopping()) {
 				stop = true;
 				break;
 			}
@@ -449,11 +449,11 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello12: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello12 start, pid=%d, steps %s", (int)getpid(), steps);
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;
 	qc.watchdog_s = kWatchdogS;
-	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
-	quit_start(&qc);
+	qc.cleanup = [](bool hard) { hard ? release_screen() : restore_screen(); };
+	quit::start(qc);
 
 	int count = (int)std::strlen(steps), n = 0;
 	char intro[600];
@@ -579,13 +579,13 @@ int main(int argc, char *argv[])
 	log_msg("== summary");
 	for (const std::string &s : summary)
 		log_msg("  %s", s.c_str());
-	if (quit_poll() == QUIT_NONE) {
+	if (!quit::stopping()) {
 		ui::show_list("hello12 results (also in hello12.log)",
 		              summary.empty() ? std::vector<std::string>{"no step ran"} : summary);
 		sleep_quit(12000);
 	}
-	quit_finish();
-	log_msg("hello12 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello12 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

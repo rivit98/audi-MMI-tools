@@ -24,9 +24,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define _Static_assert static_assert   // the SDK's usbdi.h checks its layouts the C way
 #include <sys/usbdi.h>
-#undef _Static_assert
 
 extern "C" {
 #include "cpumon.h"

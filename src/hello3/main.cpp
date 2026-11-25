@@ -20,7 +20,7 @@
  * are drawn as untextured quads over every frame.
  *
  * Stops early, with the normal teardown, on SIGTERM/
- * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit/quit.c).
+ * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit/quit.cpp).
  *
  * Output on the card: hello3.log (per-second fps, per-scene summary,
  * fill-rate table).
@@ -35,14 +35,16 @@
 
 #include <GLES/gl.h>
 
+extern "C" {
 #include "gfx.h"
 #include "hud.h"
 #include "log.h"
+}
 #include "quit.h"
 
 /* openqnx ships no <math.h> (libm is not in the source leak); the device's
  * libm.so.2 exports sinf, and the sysroot has a stub for it. */
-f32 sinf(f32 x);
+extern "C" f32 sinf(f32 x);
 
 #define CID             40     /* displayable id qnx-audi uses */
 #define SCENE_SECONDS   10
@@ -132,7 +134,7 @@ static void fill_plasma(GLubyte *p, int size)
 
 static int make_textures(void)
 {
-	GLubyte *buf = malloc(NOISE_SIZE * NOISE_SIZE * 4);
+	GLubyte *buf = (GLubyte *)malloc(NOISE_SIZE * NOISE_SIZE * 4);
 	unsigned t0 = log_ms();
 
 	if (buf == NULL) {
@@ -320,8 +322,8 @@ static void run(struct gfx *g, unsigned scene_s)
 		unsigned now = log_ms(), ms = now - start, scene, sms, layers = 0, fi = 0;
 
 		if (ms >= run_ms)
-			quit_request(QUIT_TIMER);
-		if (quit_poll() != QUIT_NONE)
+			quit::request(quit::Reason::Timer);
+		if (quit::stopping())
 			break;
 		scene = ms / scene_ms;
 		sms = ms % scene_ms;
@@ -384,13 +386,12 @@ static void run(struct gfx *g, unsigned scene_s)
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
 }
 
-/* quit_finish() or the hard path: the screen back (only that while the
+/* quit::finish() or the hard path: the screen back (only that while the
  * main thread may still be inside GL) */
 static struct gfx gfx;
 
-static void on_quit(int hard, void *arg)
+static void on_quit(bool hard)
 {
-	(void)arg;
 	if (hard)
 		gfx_release_screen(&gfx);
 	else
@@ -399,7 +400,7 @@ static void on_quit(int hard, void *arg)
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
+	quit::Config qc;
 	char path[256];
 	unsigned scene_s = SCENE_SECONDS;
 
@@ -421,7 +422,7 @@ int main(int argc, char *argv[])
 	qc.sd_path = sd_path;
 	qc.watchdog_s = NSCENES * scene_s + WATCHDOG_SLACK;
 	qc.cleanup = on_quit;
-	quit_start(&qc);
+	quit::start(qc);
 
 	if (gfx_init(&gfx, CID) == 0) {
 		const GLubyte *r = glGetString(GL_RENDERER), *v = glGetString(GL_VERSION);
@@ -433,8 +434,8 @@ int main(int argc, char *argv[])
 	} else {
 		log_msg("gfx_init failed, see the last FAIL line above");
 	}
-	quit_finish();
-	log_msg("hello3 exit (stop reason: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello3 exit (stop reason: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

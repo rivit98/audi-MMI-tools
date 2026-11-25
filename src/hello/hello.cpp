@@ -1,5 +1,5 @@
 /*
- * hello.c - first native binary for the MMI 3G+: write "hello world" to a
+ * hello.cpp - first native binary for the MMI 3G+: write "hello world" to a
  * file on the SD card (var/hello.txt, where all the apps' output goes).
  *
  * run.sh passes the SD card mount point as argv[1]. If it is missing we

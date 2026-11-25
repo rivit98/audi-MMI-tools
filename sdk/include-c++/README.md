@@ -12,7 +12,7 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
 
 As with any g++, `.c` files are compiled as C++. To mix in C files, put
 `-x c` before **each** one: g++'s driver applies it to the next file only.
-The Makefile's `CXX_APPS` rule does this.
+The Makefile's app rule does this.
 
 **Status:** `src/hello8` (19 checks) passes on the build host with
 glibc's libstdc++ (`make test`) and **on the car**

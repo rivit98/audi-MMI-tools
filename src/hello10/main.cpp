@@ -29,9 +29,9 @@ extern "C" {
 #include "log.h"
 #include "proc.h"
 #include "ipc.h"
-#include "quit.h"
 #include "lmgr.h"
 }
+#include "quit.h"
 
 #include "capture.h"
 #include "iomcopy.h"
@@ -126,7 +126,7 @@ std::string clip_path(const char *clip)
 bool sleep_quit(unsigned ms)
 {
 	unsigned t0 = log_ms();
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		unsigned now = log_ms();
 		if (now - t0 >= ms)
 			return false;
@@ -259,7 +259,7 @@ bool run_file(const Test &t, const std::string &graph, unsigned *time_events = n
 		log_msg("FAIL %s: %s", t.name, err.c_str());
 		summary.push_back(std::string(t.name) + ": " + err);
 		player.close();
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
 	std::thread query;
@@ -290,7 +290,7 @@ bool run_file(const Test &t, const std::string &graph, unsigned *time_events = n
 	result_line(t, o);
 	if (time_events != nullptr)
 		*time_events = player.stats().time_events;
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 // probe: io-media's width words, read through /proc/<pid>/as. Nothing changes.
@@ -330,7 +330,7 @@ bool run_iomcopy(const Test &t)
 	if (access(clip_path(t.clip).c_str(), R_OK) != 0) {
 		log_msg("FAIL %s: %s missing", t.name, clip_path(t.clip).c_str());
 		summary.push_back(std::string(t.name) + ": clip missing");
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	int orig = -1;
 	std::string err = capture::find_io_media(out_path("pidin_iomcopy.txt").c_str(), orig);
@@ -408,7 +408,7 @@ bool run_iomcopy(const Test &t)
 	}
 	log_msg("RESULT %s: original io-media pid %d %s at the end", t.name, orig,
 	        iomcopy::pid_alive(orig) ? "alive" : "GONE");
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 bool run_test(int n, int total, const Test &t)
@@ -474,11 +474,11 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello10: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello10 start, pid=%d%s%s", (int)getpid(), only ? ", only: " : "", only ? only : "");
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;
 	qc.watchdog_s = kWatchdogS;
-	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
-	quit_start(&qc);
+	qc.cleanup = [](bool hard) { hard ? release_screen() : restore_screen(); };
+	quit::start(qc);
 	ipc_subscribe(8, on_key, nullptr, "hello10");
 	log_msg("testapp-cmdline: %s", tool_path("testapp-cmdline").c_str());
 
@@ -508,13 +508,13 @@ int main(int argc, char *argv[])
 	log_msg("== summary (lag = min/median/max/last ms after the frame was pushed; knob = turns seen)");
 	for (const std::string &s : summary)
 		log_msg("  %s", s.c_str());
-	if (quit_poll() == QUIT_NONE) {
+	if (!quit::stopping()) {
 		ui::show_list("hello10 results (also in hello10.log)",
 		              summary.empty() ? std::vector<std::string>{"no test ran"} : summary);
 		sleep_quit(kPageMs);
 	}
-	quit_finish();
-	log_msg("hello10 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello10 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

@@ -1,7 +1,7 @@
 /*
  * ch8.h - the layout of a /dev/ipc/ch8 message: the state of every knob and
  * button at once (buttons/README.md has the protocol and how it was found).
- * C, so C apps and quit.c can name a button; buttons/ decodes the messages
+ * C, so C code and quit.cpp can name a button; buttons/ decodes the messages
  * into events for C++ apps.
  *
  *   bytes 0-13  controls: button bits (set while held), except

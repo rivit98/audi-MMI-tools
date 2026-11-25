@@ -15,7 +15,6 @@
 extern "C" {
 #include "cpumon.h"
 #include "log.h"
-#include "slogmark.h"
 }
 
 #include "aoa.h"
@@ -234,7 +233,6 @@ void teardown(const char *why, End how = End::Stop)
 		is_active = false;
 	else
 		kept_since = log_ms();
-	slogmark("h264: stream ended (%s), %u frames", why, ls.real);
 }
 
 // hw thread: a stream from an H264_CONFIG payload.
@@ -313,8 +311,6 @@ void setup(const std::vector<u8> &payload)
 	log_msg("h264: streaming at %s, graph %s; waiting for the first IDR", kPath, o.graph.c_str());
 	log_msg("h264: ring %u frames = %.1f s (%u-byte frames)", o.cfg.ring_frames, ring_s(o.cfg),
 	        (unsigned)o.cfg.sample_size);
-	slogmark("h264: stream start, %ux%u %u fps, %u-byte frames, ring %u", sps.width, sps.height,
-	         c.fps, (unsigned)o.cfg.sample_size, o.cfg.ring_frames);
 	evicted_seen = false;
 }
 
@@ -502,7 +498,6 @@ void run()
 				// going on into it from the next IDR; errors too often
 				// (ErrorRestarts) and the phone is told REFUSED.
 				log_msg("h264: io-media error: %s", ps.first_error.c_str());
-				slogmark("h264: io-media error: %s", ps.first_error.c_str());
 				dump_error(*h);
 				std::vector<u8> again;
 				bool other = false, restart = false;
@@ -526,7 +521,6 @@ void run()
 				log_msg("h264: starting the stream again after the io-media error (%u of %u "
 				        "allowed in %u s)", recent, ErrorRestarts::kMax,
 				        ErrorRestarts::kWindowMs / 1000);
-				slogmark("h264: stream restart after an io-media error");
 				{
 					std::lock_guard<std::mutex> lock(mu);
 					gate.offer(again);   // the phone's copy of it changes nothing
@@ -728,10 +722,9 @@ bool status_pop(u8 *code)
 		why = statuses.front().second;
 		statuses.pop_front();
 	}
-	if (why != nullptr) {
+	if (why != nullptr)
 		log_msg("h264: tx H264_STATUS %s (reason: %s)", status_name(*code), why);
-		slogmark("h264: tx H264_STATUS %s (reason: %s)", status_name(*code), why);
-	} else
+	else
 		log_msg("h264: tx H264_STATUS %s", status_name(*code));
 	return true;
 }

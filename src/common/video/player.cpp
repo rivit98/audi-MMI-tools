@@ -1,5 +1,5 @@
 // player.cpp - see player.h. Event layout as hello5 found it on the car
-// (src/hello5/main.c, native_event): {u32 size, u32 type} then the payload;
+// (src/hello5/main.cpp, native_event): {u32 size, u32 type} then the payload;
 // TIME = u64 track, s64 position ms, u64 total ms; STATUS = u64 track, u32
 // state (4 = playing), s32 speed.
 #include "player.h"

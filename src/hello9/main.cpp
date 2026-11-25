@@ -61,9 +61,9 @@ extern "C" {
 #include "log.h"
 #include "proc.h"
 #include "ipc.h"
-#include "quit.h"
 #include "lmgr.h"
 }
+#include "quit.h"
 
 #include "csmp4.h"
 #include "h264.h"
@@ -274,7 +274,7 @@ std::string clip_path(const char *clip)
 bool sleep_quit(unsigned ms)
 {
 	unsigned t0 = log_ms();
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		unsigned now = log_ms();
 		if (now - t0 >= ms)
 			return false;
@@ -626,7 +626,7 @@ bool run_file(const Test &t, const std::string &graph)
 		log_msg("FAIL %s: %s", t.name, err.c_str());
 		summary.push_back(std::string(t.name) + ": " + err);
 		player.close();
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
 	std::thread query;
@@ -665,7 +665,7 @@ bool run_file(const Test &t, const std::string &graph)
 	result_line(t, o);
 	if (!t.speeds.empty())
 		log_msg("RESULT %s %s", t.name, speeds.str(log_ms() - o.t_play).c_str());
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 // live / gap / slow / burst / stall: the clip pushed frame by frame
@@ -690,7 +690,7 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 	if (!err.empty()) {
 		log_msg("FAIL %s: %s", t.name, err.c_str());
 		summary.push_back(std::string(t.name) + ": " + err);
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	plan::Schedule sched(t.fps, t.stalls, t.burst);
 	log_msg("  feeder: %zu frames in the clip (looped), %.0f fps%s%s", clip.frames.size(), t.fps,
@@ -791,7 +791,7 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 	std::snprintf(line, sizeof(line), "       reads %u, waited %u (max %u ms), skips %u, refused %u",
 	              s.reads, s.waited, s.wait_ms_max, ls.skips, feeder.refused());
 	summary.push_back(line);
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 // lv_aac / lv_mp3: a constant-size A/V MP4 (media/csav.py) from the card,
@@ -815,7 +815,7 @@ bool run_paced(const Test &t, const std::string &graph)
 	if (!err.empty()) {
 		log_msg("FAIL %s: %s", t.name, err.c_str());
 		summary.push_back(std::string(t.name) + ": " + err);
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	const paced::Layout &l = src.layout();
 	log_msg("  paced: %llu bytes, data at %llu, %u chunks of %u bytes (%u video frames, %u ms)",
@@ -840,7 +840,7 @@ bool run_paced(const Test &t, const std::string &graph)
 		player.close();
 		server.stop();
 		log_notes(server);
-		return quit_poll() == QUIT_NONE;
+		return !quit::stopping();
 	}
 	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
 	std::thread query;
@@ -890,7 +890,7 @@ bool run_paced(const Test &t, const std::string &graph)
 	std::snprintf(line, sizeof(line), "       reads %u (%u preads), waited %u (max %u ms)",
 	              s.reads, s.preads, s.waited, s.wait_ms_max);
 	summary.push_back(line);
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 // Run one test; false if hello9 should stop.
@@ -980,11 +980,11 @@ int main(int argc, char *argv[])
 	if (log_open(logpath.c_str()) != 0)
 		std::fprintf(stderr, "hello9: cannot open %s, logging to stdout only\n", logpath.c_str());
 	log_msg("hello9 start, pid=%d%s%s", (int)getpid(), only ? ", only: " : "", only ? only : "");
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;
 	qc.watchdog_s = kWatchdogS;
-	qc.cleanup = [](int hard, void *) { hard ? release_screen() : restore_screen(); };
-	quit_start(&qc);
+	qc.cleanup = [](bool hard) { hard ? release_screen() : restore_screen(); };
+	quit::start(qc);
 	ipc_subscribe(8, on_key, nullptr, "hello9");
 	log_msg("testapp-cmdline: %s", tool_path("testapp-cmdline").c_str());
 
@@ -1033,7 +1033,7 @@ int main(int argc, char *argv[])
 	log_msg("== summary (lag = min/median/max/last ms after the frame was pushed; knob = turns seen)");
 	for (const std::string &s : summary)
 		log_msg("  %s", s.c_str());
-	for (usize i = 0; i < summary.size() && quit_poll() == QUIT_NONE;) {
+	for (usize i = 0; i < summary.size() && !quit::stopping();) {
 		std::vector<std::string> page(summary.begin() + (long)i, summary.end());
 		int dropped = ui::show_list("hello9 results (also in hello9.log)", page);
 		usize shown = page.size() - (usize)dropped;
@@ -1042,12 +1042,12 @@ int main(int argc, char *argv[])
 		i += shown;
 		sleep_quit(kPageMs);
 	}
-	if (summary.empty() && quit_poll() == QUIT_NONE) {
+	if (summary.empty() && !quit::stopping()) {
 		ui::show_list("hello9 results", {"no test ran"});
 		sleep_quit(kPageMs);
 	}
-	quit_finish();
-	log_msg("hello9 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello9 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

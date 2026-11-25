@@ -34,7 +34,7 @@ constexpr int kSlogSnapshots = 6;
 // handshake or a removal saves a system log snapshot (var/usb_slog_<time>.txt).
 // screen_w x screen_h: the screen, for VIDEO_CAPS.
 bool start(const char *sd_path, unsigned screen_w, unsigned screen_h);
-void stop();    // tear down and join; bounded by quit.c's hard alarm
+void stop();    // tear down and join; bounded by quit's hard alarm
 
 // A frame is done (any thread): goes out in the next VIDEO_ACKS, sent at
 // once (a bad or cut-short frame).

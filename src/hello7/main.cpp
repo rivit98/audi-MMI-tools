@@ -28,7 +28,7 @@
  * every prompt's start and result; RESULT lines.
  *
  * Stops at the end, on SIGTERM/INT/HUP, SD removal or the watchdog
- * (src/common/quit/quit.c). No key or button stops it.
+ * (src/common/quit/quit.cpp). No key or button stops it.
  *
  * usage: hello7 <sd_path> [guide | <seconds>]   (default guide; a number:
  *        free mode for that long)
@@ -42,6 +42,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "types.h"
+extern "C" {
 #include "cam.h"
 #include "font_big.h"
 #include "font_small.h"
@@ -49,11 +51,11 @@
 #include "keys.h"
 #include "log.h"
 #include "ipc.h"
-#include "quit.h"
 #include "screen.h"
 #include "text.h"
 #include "tpad.h"
-#include "types.h"
+}
+#include "quit.h"
 
 #define WATCHDOG_SLACK  20
 #define REDRAW_MS       100
@@ -225,7 +227,7 @@ struct wrap {
 
 static void wrap_line(const char *line, int nbytes, void *arg)
 {
-	struct wrap *w = arg;
+	struct wrap *w = (struct wrap *)arg;
 
 	text_draw(w->c, w->f, MARGIN, w->y, line, nbytes, w->color);
 	w->y += w->f->h + 4;
@@ -407,7 +409,7 @@ static void run_guide(void)
 	guided = 1;
 	pthread_mutex_unlock(&lock);
 	start_prompt();
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		pthread_mutex_lock(&lock);
 		ended = guide_tick(&g, log_ms());
 		pthread_mutex_unlock(&lock);
@@ -457,7 +459,7 @@ static void run_guide(void)
 	}
 	end = log_ms() + SUMMARY_MS;
 	dirty = 1;
-	while (guide_done(&g) && log_ms() < end && quit_poll() == QUIT_NONE) {
+	while (guide_done(&g) && log_ms() < end && !quit::stopping()) {
 		if (screen_ok() && dirty) {
 			draw_summary();
 			dirty = 0;
@@ -471,7 +473,7 @@ static void run_free(unsigned seconds)
 	unsigned end = log_ms() + seconds * 1000, left, shown_left = 0;
 	int i;
 
-	while (log_ms() < end && quit_poll() == QUIT_NONE) {
+	while (log_ms() < end && !quit::stopping()) {
 		left = (end - log_ms() + 999) / 1000;
 		if (screen_ok() && (dirty || left != shown_left)) {
 			draw_free(left);
@@ -486,11 +488,10 @@ static void run_free(unsigned seconds)
 			        i <= K_VOL_DOWN ? " detents" : i == K_RELEASE ? "" : " presses");
 }
 
-/* quit_finish() or the hard path: the screen back, unless the rear camera
+/* quit::finish() or the hard path: the screen back, unless the rear camera
  * is on it */
-static void on_quit(int hard, void *arg)
+static void on_quit(bool hard)
 {
-	(void)arg;
 	if (cam_active())
 		screen_no_show_on_close();
 	if (hard) {
@@ -503,7 +504,7 @@ static void on_quit(int hard, void *arg)
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
+	quit::Config qc;
 	char logpath[256];
 	unsigned seconds = 0, watchdog;
 
@@ -528,7 +529,7 @@ int main(int argc, char *argv[])
 	qc.sd_path = argv[1];
 	qc.watchdog_s = watchdog;
 	qc.cleanup = on_quit;
-	quit_start(&qc);
+	quit::start(qc);
 	ipc_subscribe(8, on_key, NULL, "hello7");
 	cam_start();
 	ui = screen_open() == 0;
@@ -541,8 +542,8 @@ int main(int argc, char *argv[])
 		run_free(seconds);
 	else
 		run_guide();
-	quit_finish();
-	log_msg("hello7 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello7 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

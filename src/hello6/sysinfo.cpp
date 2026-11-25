@@ -1,5 +1,5 @@
 /*
- * sysinfo.c - what the unit says about itself, into hello6/<file>: process
+ * sysinfo.cpp - what the unit says about itself, into hello6/<file>: process
  * list and CPU times, memory, the io-media and audio device nodes, where
  * the efs tools live, and the GPU state from the unit's own diagnostic
  * tools (ShowVideoMemory, memusage, hbhogs).
@@ -13,9 +13,11 @@
  */
 #include <stdio.h>
 
+extern "C" {
 #include "hello6.h"
 #include "log.h"
 #include "proc.h"
+}
 #include "quit.h"
 
 static void tool(const char *file, unsigned timeout_s, const char *name,
@@ -58,7 +60,7 @@ void sysinfo_run(const char *file_name, int full)
 
 	out_path(file, sizeof(file), file_name);
 	log_msg("== system info (%s) -> %s", full ? "full" : "GPU only", file);
-	for (i = 0; full && i < sizeof(cmds) / sizeof(cmds[0]) && quit_poll() == QUIT_NONE; i++)
+	for (i = 0; full && i < sizeof(cmds) / sizeof(cmds[0]) && !quit::stopping(); i++)
 		proc_shell(file, 10, cmds[i]);
 
 	tool(file, 10, "ShowVideoMemory", "");

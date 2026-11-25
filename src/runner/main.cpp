@@ -26,13 +26,13 @@
 
 extern "C" {
 #include "log.h"
-#include "quit.h"
 #include "screen.h"
 #include "text.h"
 #include "font_big.h"
 #include "font_mid.h"
 #include "font_small.h"
 }
+#include "quit.h"
 
 #include "camera.h"
 #include "conf.h"
@@ -59,7 +59,7 @@ constexpr unsigned kRedrawMs = 100;
 constexpr unsigned kReshowMs = 1000;
 constexpr unsigned kWaitMs = 200;
 constexpr unsigned kKillGraceMs = 15000;   // after the TERM at a timeout
-constexpr unsigned kQuitGraceMs = 7000;    // quit.c ends us QUIT_HARD_S after a stop
+constexpr unsigned kQuitGraceMs = 7000;    // quit ends us quit::kHardS after a stop
 constexpr unsigned kStuckGraceMs = 5000;   // after the KILL
 constexpr unsigned kPostS = 60;            // the slog + core collection
 constexpr int kMargin = 20;
@@ -188,7 +188,7 @@ bool copy_app(const std::string &src, const std::string &dst)
 // spawn() argv[0] with stdin /dev/null and stdout + stderr into out_path
 // (truncated or appended). Only those three fds reach the child (QNX:
 // fd_count > 0 inherits nothing else, so not our ch8, log or screen fds), it
-// gets an empty signal mask (ours blocks SIGTERM for quit.c's sigwait) and a
+// gets an empty signal mask (ours blocks SIGTERM for quit's sigwait) and a
 // process group of its own (the KILL after a timeout takes its tools too).
 pid_t start(const std::vector<std::string> &args, const std::string &out_path, bool truncate)
 {
@@ -247,9 +247,9 @@ int await(pid_t pid, unsigned timeout_s, bool &timed_out, bool &stopped,
 			return 0;
 		}
 		unsigned now = log_ms();
-		if (!termed && quit_poll() != QUIT_NONE) {
+		if (!termed && quit::stopping()) {
 			stopped = true;
-			log_msg("stop requested (%s): TERM %d", quit_name(quit_poll()), (int)pid);
+			log_msg("stop requested (%s): TERM %d", quit::name(quit::poll()), (int)pid);
 		} else if (!termed && now - t0 >= timeout_s * 1000) {
 			timed_out = true;
 			log_msg("timeout %u s: TERM %d", timeout_s, (int)pid);
@@ -480,7 +480,7 @@ bool run_item(Item &it)
 	it.detail = detail;
 	status = a.name + ": " + v + " (" + detail + ")";
 	open_screen();
-	return quit_poll() == QUIT_NONE;
+	return !quit::stopping();
 }
 
 } // namespace
@@ -504,9 +504,9 @@ int main(int argc, char *argv[])
 
 	// No watchdog: the menu stays until the card is pulled or "Leave the
 	// menu".
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = argv[1];
-	qc.cleanup = [](int hard, void *) {
+	qc.cleanup = [](bool hard) {
 		if (hard) {
 			screen_release();
 			return;
@@ -514,7 +514,7 @@ int main(int argc, char *argv[])
 		close_screen();
 		camera::stop();
 	};
-	quit_start(&qc);
+	quit::start(qc);
 	// The hub lives as long as the process: ch8's reader (ipc.h) keeps
 	// calling into it until exit.
 	buttons::Hub &hub = *new buttons::Hub;
@@ -541,7 +541,7 @@ int main(int argc, char *argv[])
 	buttons::EventQueue q(hub, 64, "runner");
 	open_screen();
 
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		buttons::Event e;
 		bool start_now = false;
 		bool got = q.wait(e, kRedrawMs);
@@ -571,8 +571,8 @@ int main(int argc, char *argv[])
 		if (screen_ok() && dirty)
 			draw(menu);
 	}
-	quit_finish();
-	log_msg("runner exit (stop: %s), %u ch8 messages", quit_name(quit_poll()), hub.messages());
+	quit::finish();
+	log_msg("runner exit (stop: %s), %u ch8 messages", quit::name(quit::poll()), hub.messages());
 	log_close();
 	return 0;
 }

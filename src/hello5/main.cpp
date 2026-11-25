@@ -127,7 +127,7 @@
  * from the device's own libasound.so.2.
  *
  * Stops on SIGTERM/INT/HUP, SD removal, its own run timer, or the watchdog
- * (src/common/quit/quit.c). No key or button stops it.
+ * (src/common/quit/quit.cpp). No key or button stops it.
  *
  * usage: hello5 <sd_path> [steps] [outputs]
  *   steps: any of "mnvtpg", run in that order (default pmntgv; d is disabled)
@@ -147,18 +147,20 @@
 
 #include <sys/asoundlib.h>
 
+extern "C" {
 #include "hbdsi_wire.h"
 #include "duckhelper.h"
 #include "ducklink.h"
 #include "log.h"
 #include "proc.h"
 #include "ipc.h"
-#include "quit.h"
 #include "screen.h"
 #include "h5ui.h"
 #include "iom.h"
 #include "ipcprobe.h"
 #include "pulse.h"
+}
+#include "quit.h"
 
 #define DEFAULT_STEPS   "pmntgv"
 #define DEFAULT_OUTPUTS "m2,m1,m6,m4,m7"
@@ -245,7 +247,7 @@ static int clip_load(const char *path, struct clip *c)
 		fclose(f);
 		return -1;
 	}
-	buf = malloc(size);
+	buf = (u8 *)malloc(size);
 	if (buf == NULL || fread(buf, 1, size, f) != (usize)size) {
 		log_msg("clip: read %s failed", path);
 		free(buf);
@@ -347,11 +349,11 @@ static int wait_ms(unsigned ms)
 	unsigned end = log_ms() + ms;
 
 	while (log_ms() < end) {
-		if (quit_poll() != QUIT_NONE)
+		if (quit::stopping())
 			return 1;
 		nap(POLL_MS);
 	}
-	return quit_poll() != QUIT_NONE;
+	return quit::stopping();
 }
 
 /* Open one playback device and negotiate the clip's format. */
@@ -543,7 +545,7 @@ static void scan_log(const char *log_file, long pos, struct play *r)
 static int play_clip(const char *url, const char *file, const char *log_file,
                      unsigned cap_ms, void (*tick)(unsigned ms), struct play *r)
 {
-	char *argv[] = { (char *)player, "-f", "hello5", "-n", "200", "-o",
+	char *argv[] = { (char *)player, (char *)"-f", (char *)"hello5", (char *)"-n", (char *)"200", (char *)"-o",
 	                 (char *)url, (char *)file, NULL };
 	long pos = file_size(log_file);
 	unsigned t0;
@@ -555,7 +557,7 @@ static int play_clip(const char *url, const char *file, const char *log_file,
 	if (pid < 0)
 		return -1;
 	while (proc_wait(pid, 0, &r->status) != 0) {
-		if (log_ms() - t0 >= cap_ms || quit_poll() != QUIT_NONE) {
+		if (log_ms() - t0 >= cap_ms || quit::stopping()) {
 			r->status = proc_stop(pid);
 			r->stopped = 1;
 			break;
@@ -617,7 +619,7 @@ static void mixer_chimes(struct group *g)
 
 static void *group_thread(void *arg)
 {
-	struct group *g = arg;
+	struct group *g = (struct group *)arg;
 	snd_pcm_t *h;
 	unsigned k, t0, write_ms, busy_ms, shown, screen_ms;
 	isize w;
@@ -686,14 +688,14 @@ static void run_group(struct group *g)
 		log_msg("FAIL group %d: thread: %s", g->index, strerror(errno));
 		return;
 	}
-	while (!g->done && log_ms() < deadline && quit_poll() == QUIT_NONE)
+	while (!g->done && log_ms() < deadline && !quit::stopping())
 		nap(BUSY_POLL_MS);
 	if (g->done) {
 		pthread_join(tid, NULL);
 		return;
 	}
 	pthread_detach(tid);    /* left blocked; exit() ends it */
-	if (quit_poll() == QUIT_NONE)
+	if (!quit::stopping())
 		log_msg("FAIL group %d: %s stuck in %s, written off",
 		        g->index, g->label, step_name(g->step));
 }
@@ -720,7 +722,7 @@ static void stage_sound(const struct output *outputs, int n)
 		g->mixer = outputs[i].mixer;
 		output_label(&outputs[i], g->label, sizeof(g->label));
 		run_group(g);
-		if (quit_poll() != QUIT_NONE)
+		if (quit::stopping())
 			return;
 		if (i + 1 < n)
 			output_label(&outputs[i + 1], next, sizeof(next));
@@ -1020,7 +1022,7 @@ static int native_play(const char *file, const char *chain_file,
 	log_msg("step n: play");
 	while (!n.finished) {
 		t = log_ms() - t0;
-		if (t >= clip + STEP_SLACK_MS || quit_poll() != QUIT_NONE) {
+		if (t >= clip + STEP_SLACK_MS || quit::stopping()) {
 			r->stopped = 1;
 			break;
 		}
@@ -1164,7 +1166,7 @@ static struct duck_link duck_link;
 
 static int duck_stop(void)
 {
-	return quit_poll() != QUIT_NONE;
+	return quit::stopping();
 }
 
 /* RequestAudioFocus / ReleaseAudioFocus(src, eSNK_SPEAKERS), sent by the
@@ -1239,7 +1241,7 @@ static int duck_pings(snd_pcm_t *h, const i16 *pcm, unsigned n,
 			        (unsigned)(len * sizeof(i16)), (unsigned)off);
 			break;
 		}
-		if (quit_poll() != QUIT_NONE)
+		if (quit::stopping())
 			return 1;
 	}
 	log_msg("step d: %u pings written to navi in %u ms (train %u ms)", n,
@@ -1315,7 +1317,7 @@ static int play_duck(const struct step *s, const char *log_file, struct play *p)
 	duck_count = cur_count;
 	duck_note[0] = '\0';
 	link_init(&duck_link);
-	pcm = malloc(pulse_samples(DUCK_PINGS) * sizeof(i16));
+	pcm = (i16 *)malloc(pulse_samples(DUCK_PINGS) * sizeof(i16));
 	if (pcm == NULL) {
 		log_msg("step d: no memory for the pings");
 		return -1;
@@ -1550,7 +1552,7 @@ static void run_step(const struct step *s, int index, int count)
 		pulse_dir = out_dir;
 		rc = s->play(s, log_file, &p);
 	}
-	if (quit_poll() != QUIT_NONE)
+	if (quit::stopping())
 		return;
 
 	step_note(s, note, sizeof(note));
@@ -1635,10 +1637,9 @@ static const char *find_player(const char *argv0, char *buf, usize size)
 	return access(buf, X_OK) == 0 ? buf : NULL;
 }
 
-/* quit_finish() or the hard path: the screen back, our WAVs off /tmp */
-static void on_quit(int hard, void *arg)
+/* quit::finish() or the hard path: the screen back, our WAVs off /tmp */
+static void on_quit(bool hard)
 {
-	(void)arg;
 	if (hard) {
 		screen_release();
 		return;
@@ -1649,7 +1650,7 @@ static void on_quit(int hard, void *arg)
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
+	quit::Config qc;
 	char logpath[256], wavpath[256], playerpath[256];
 	const char *outspec = DEFAULT_OUTPUTS, *steps = DEFAULT_STEPS, *c;
 	unsigned stage1_max_ms = 0;
@@ -1728,19 +1729,19 @@ int main(int argc, char *argv[])
 	qc.sd_path = sd_path;
 	qc.watchdog_s = stage1_max_ms / 1000 + WATCHDOG_SLACK;
 	qc.cleanup = on_quit;
-	quit_start(&qc);
+	quit::start(qc);
 	ipc_subscribe(8, on_key, NULL, "hello5");
 
 	ui_open();
-	for (i = 0; i < nsteps && quit_poll() == QUIT_NONE; i++) {
+	for (i = 0; i < nsteps && !quit::stopping(); i++) {
 		if (steps[i] != 'g')
 			run_step(find_step(steps[i]), i + 1, nsteps);
 		else if (beep.pcm != NULL)
 			stage_sound(outputs, nout);
 	}
 
-	quit_finish();
-	log_msg("hello5 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello5 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	free(beep.pcm);
 	return 0;

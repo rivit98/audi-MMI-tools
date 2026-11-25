@@ -338,7 +338,7 @@ records:
 `sloginfo` runs right after the video phase into
 `hello6/slog_video.txt`, before the GPU phase.
 
-**hello6 T3: throughput** (`bench.c`), before the videos:
+**hello6 T3: throughput** (`bench.cpp`), before the videos:
 - (a) CPU: memcpy, RGB565→BGRA conversion, LZ4 compress/decompress on
   UI-like, photo-like and random frames (`lz4mini.c`, verified against
   liblz4 by `make test`)

@@ -54,7 +54,6 @@
 #include "lmgr.h"
 #include "log.h"
 #include "proc.h"
-#include "quit.h"
 #include "texts.h"
 
 #define VCID         41

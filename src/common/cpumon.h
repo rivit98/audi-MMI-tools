@@ -12,8 +12,7 @@
  * (max = the busiest second, others = the rest of the unit, threads named
  * by cpumon_name_thread() or "tid N", mem free = the unit's free RAM, heap =
  * this process's malloc'ed bytes in use), with " - HIGH" at the end when
- * self reached warn_pct. If the app called slogmark_init(), each window also
- * puts a marker into the system log (slogmark.h). Kernel time is charged a clock tick at a time
+ * self reached warn_pct. Kernel time is charged a clock tick at a time
  * (1 ms), so single seconds are approximate and windows good.
  */
 #ifndef COMMON_CPUMON_H

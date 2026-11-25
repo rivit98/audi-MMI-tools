@@ -30,11 +30,15 @@
 #include <string.h>
 #include <unistd.h>
 
+extern "C" {
 #include <gf/gf.h>
+}
 
+extern "C" {
 #include "lmgr.h"
 #include "lmstate.h"
 #include "log.h"
+}
 #include "quit.h"
 
 #define CID            40   /* showScreen's displayable id */
@@ -210,17 +214,16 @@ static int setup(gf_dev_t *dev, gf_display_t *display, gf_surface_t *surface)
 	return 0;
 }
 
-/* quit_finish() or the hard path: the screen back */
-static void on_quit(int hard, void *arg)
+/* quit::finish() or the hard path: the screen back */
+static void on_quit(bool hard)
 {
 	(void)hard;
-	(void)arg;
 	cleanup("after");
 }
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
+	quit::Config qc;
 	gf_dev_t dev = NULL;
 	gf_display_t display = NULL;
 	gf_surface_t surface = NULL;
@@ -245,7 +248,7 @@ int main(int argc, char *argv[])
 	qc.run_ms = seconds * 1000;
 	qc.watchdog_s = seconds + WATCHDOG_SLACK;
 	qc.cleanup = on_quit;
-	quit_start(&qc);
+	quit::start(qc);
 
 	fg_before = dump_state("before");
 	cleanup("before");
@@ -253,10 +256,10 @@ int main(int argc, char *argv[])
 	dump_state("shown");
 	if (shown) {
 		log_msg("bars shown, waiting %u s", seconds);
-		while (quit_poll() == QUIT_NONE)
+		while (!quit::stopping())
 			usleep(100 * 1000);
 	}
-	quit_finish();
+	quit::finish();
 	fg_after = dump_state("after");
 	log_msg("foreground before %d, after %d: %s", fg_before, fg_after,
 	        fg_before == fg_after ? "restored" : "CHANGED");
@@ -268,7 +271,7 @@ int main(int argc, char *argv[])
 	if (dev != NULL)
 		gf_dev_detach(dev);
 	log_msg("lmprobe exit: %s (stop reason: %s)", shown ? "ok" : "FAILED",
-	        quit_name(quit_poll()));
+	        quit::name(quit::poll()));
 	log_close();
 	return shown ? 0 : 1;
 }

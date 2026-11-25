@@ -16,7 +16,7 @@
 // one PASS/FAIL line per check with its time and notes, RESULT counts.
 //
 // Stops after <seconds>, on SIGTERM/INT/HUP, SD removal or the watchdog
-// (src/common/quit/quit.c).
+// (src/common/quit/quit.cpp).
 //
 // usage: hello8 <sd_path> [seconds] [check,check,...]
 //        seconds: how long the results stay up (default 20)
@@ -26,10 +26,10 @@ extern "C" {
 #include "font_big.h"
 #include "font_small.h"
 #include "log.h"
-#include "quit.h"
 #include "screen.h"
 #include "text.h"
 }
+#include "quit.h"
 
 #include "checks.h"
 
@@ -197,11 +197,11 @@ int main(int argc, char *argv[])
 	        only ? ", only: " : "", only ? only : "");
 	log_toolchain();
 
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = argv[1];
 	qc.watchdog_s = seconds + kWatchdogSlack;
-	qc.cleanup = [](int hard, void *) { hard ? screen_release() : screen_close(); };
-	quit_start(&qc);
+	qc.cleanup = [](bool hard) { hard ? screen_release() : screen_close(); };
+	quit::start(qc);
 	bool ui = screen_open() == 0;
 	if (!ui)
 		log_msg("FAIL hello8: no screen, logging only");
@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
 
 	int passed = 0, failed = 0;
 	for (Row &row : rows) {
-		if (quit_poll() != QUIT_NONE)
+		if (quit::stopping())
 			break;
 		row.state = Row::RUNNING;
 		if (ui)
@@ -235,7 +235,7 @@ int main(int argc, char *argv[])
 
 	char status[96];
 	unsigned end = log_ms() + seconds * 1000, shown_left = 0;
-	while (log_ms() < end && quit_poll() == QUIT_NONE) {
+	while (log_ms() < end && !quit::stopping()) {
 		unsigned left = (end - log_ms() + 999) / 1000;
 		if (ui && left != shown_left) {
 			std::snprintf(status, sizeof(status), "%d of %d passed, %d failed.  ends in %u s",
@@ -245,8 +245,8 @@ int main(int argc, char *argv[])
 		}
 		nap(100);
 	}
-	quit_finish();
-	log_msg("hello8 exit (stop: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("hello8 exit (stop: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

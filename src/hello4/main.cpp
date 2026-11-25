@@ -38,7 +38,7 @@
  * stops at 12.
  *
  * Stops early, with the normal teardown, on SIGTERM/SIGINT/SIGHUP, SD
- * card removal or the watchdog (src/common/quit/quit.c). A freeze of the whole
+ * card removal or the watchdog (src/common/quit/quit.cpp). A freeze of the whole
  * unit stops nothing: only the MMI reboot key combo helps then.
  *
  * Output on the card: hello4.log (GL limits, probe reads + verdicts,
@@ -68,11 +68,13 @@
 
 #include <GLES/gl.h>
 
+extern "C" {
 #include "gfx.h"
 #include "hud.h"
 #include "log.h"
 #include "mesh.h"
 #include "probe.h"
+}
 #include "quit.h"
 
 #define CID             40     /* displayable id qnx-audi uses */
@@ -198,7 +200,7 @@ static void fill_crate(GLubyte *p, int size)
 
 static int make_assets(void)
 {
-	GLubyte *buf = malloc(TEX_SIZE * TEX_SIZE * 4);
+	GLubyte *buf = (GLubyte *)malloc(TEX_SIZE * TEX_SIZE * 4);
 	unsigned t0 = log_ms();
 
 	if (buf == NULL || mesh_cube(&cube) || mesh_torus(&torus, 1.0f, 0.4f, 32, 16) ||
@@ -588,8 +590,8 @@ static void run(struct gfx *g, const struct opts *o)
 		f32 t;
 
 		if (ms >= run_ms)
-			quit_request(QUIT_TIMER);
-		if (quit_poll() != QUIT_NONE)
+			quit::request(quit::Reason::Timer);
+		if (quit::stopping())
 			break;
 		while (cur + 1 < nseg && ms >= seg_start + seg[cur].ms) {
 			log_seg_done(o, &seg[cur], seg_frames, ms - seg_start);
@@ -770,7 +772,7 @@ static int parse_args(struct opts *o, int argc, char *argv[])
 		else
 			ok = 0;
 		if (!ok) {
-			log_msg("FAIL bad argument '%s' (usage: top of src/hello4/main.c)", a);
+			log_msg("FAIL bad argument '%s' (usage: top of src/hello4/main.cpp)", a);
 			bad = 1;
 		}
 	}
@@ -793,13 +795,12 @@ static void log_gl_info(void)
 	        depth, stencil, lights, tex, stack);
 }
 
-/* quit_finish() or the hard path: the screen back (only that while the
+/* quit::finish() or the hard path: the screen back (only that while the
  * main thread may still be inside GL) */
 static struct gfx gfx;
 
-static void on_quit(int hard, void *arg)
+static void on_quit(bool hard)
 {
-	(void)arg;
 	if (hard)
 		gfx_release_screen(&gfx);
 	else
@@ -808,7 +809,7 @@ static void on_quit(int hard, void *arg)
 
 int main(int argc, char *argv[])
 {
-	struct quit_config qc = { 0 };
+	quit::Config qc;
 	char path[256], plan[512];
 	struct opts o;
 	struct seg seg[MAX_SEGS];
@@ -847,7 +848,7 @@ int main(int argc, char *argv[])
 	qc.sd_path = sd_path;
 	qc.watchdog_s = run_s + WATCHDOG_SLACK;
 	qc.cleanup = on_quit;
-	quit_start(&qc);
+	quit::start(qc);
 
 	if (gfx_init(&gfx, CID) == 0) {
 		log_gl_info();
@@ -859,9 +860,9 @@ int main(int argc, char *argv[])
 	} else {
 		log_msg("gfx_init failed, see the last FAIL line above");
 	}
-	quit_finish();
+	quit::finish();
 	free_assets();
-	log_msg("hello4 exit (stop reason: %s)", quit_name(quit_poll()));
+	log_msg("hello4 exit (stop reason: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

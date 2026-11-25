@@ -7,6 +7,10 @@
 #include "types.h"
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SCREEN_W 800
 #define SCREEN_H 480
 
@@ -46,5 +50,9 @@ int  label_show_list(const char *title, const char *const *lines, int n);
 void label_hide(void);
 /* Lines the last label_show / label_show_list could not fit on screen. */
 int  label_dropped(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

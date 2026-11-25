@@ -65,7 +65,7 @@ public:
 
 // false if the manager thread could not start.
 bool start(const Config &cfg, Client &client);
-void stop();    // tear down and join; bounded by quit.c's hard alarm
+void stop();    // tear down and join; bounded by quit's hard alarm
 
 // Queue bytes for bulk OUT (any thread, copied). false: no link, or more
 // than kOutQueueMax bytes waiting (the link is stuck).

@@ -31,18 +31,17 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/src mmi-sdk \
     shle-nto-g++ -O2 -g -Wall -o myapp main.cpp -lgf
 ```
 
-In this repo, add the app to `APPS` and `CXX_APPS` in the Makefile and
-give it a rule like hello8's:
+In this repo every app is C++: add it to `APPS` in the Makefile and give
+it a rule like hello8's:
 
 ```make
 APPS     := ... myapp
-CXX_APPS := hello8 myapp
 build/myapp: $(wildcard src/myapp/*.cpp src/myapp/*.h) $(BASE) $(SCREEN)
 LIBS_myapp := -lgf
 ```
 
-The `CXX_APPS` rule compiles the `src/common` C files as C and yours as
-C++ in one command. Then add a line to `sd/apps.conf` (optional), run
+The apps' rule compiles the C files (`src/common`'s and any of the app's
+own) as C and the rest as C++ in one command. Then add a line to `sd/apps.conf` (optional), run
 `make sd` and start it from the runner's menu.
 
 - **`src/common` headers have no `extern "C"`.** Wrap the includes, as
@@ -152,7 +151,7 @@ hello8 they are only in:
 - `set_terminate` / `set_unexpected` / `set_new_handler`
 - the unwinder's frame registry (`btree_*`, `version_lock_*`)
 
-Plus hello8's deliberate `src/hello8/gusa.cpp`. The C apps have none.
+Plus hello8's deliberate `src/hello8/gusa.cpp`.
 
 **Rules:**
 
@@ -172,8 +171,7 @@ Plus hello8's deliberate `src/hello8/gusa.cpp`. The C apps have none.
 - **Don't install signal handlers** (`signal`, `sigaction`) in C++ apps.
   The precompiled gUSA sequences above can still be running when one
   arrives. Block the signals and `sigwait()` for them in a thread, as
-  `src/common/quit/quit.c` does. A C app has no gUSA left, but `sigwait()` is
-  still the simpler pattern.
+  `src/common/quit/quit.cpp` does.
 - `std::mutex` / `std::condition_variable` are QNX's pthread objects and
   safe as ever: a lock+unlock costs ~0.2 µs.
 - **Don't add `-m4` or another `-matomic-model`** to an app's flags.
@@ -225,5 +223,5 @@ C++ doesn't change the platform's C-level rules
   that release in their destructors (displayable, `gf` surfaces, io-media
   graph fds), so an exception doesn't leave the MMI's displayable
   registered.
-- **Stop cleanly** through `src/common/quit/`: a `quit_config` with the
-  stop sources and a cleanup that `quit_finish()` runs once.
+- **Stop cleanly** through `src/common/quit/`: a `quit::Config` with the
+  stop sources and a cleanup that `quit::finish()` runs once.

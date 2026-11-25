@@ -34,10 +34,9 @@
 extern "C" {
 #include "cpumon.h"
 #include "log.h"
-#include "slogmark.h"
-#include "quit.h"
 #include "screen.h"
 }
+#include "quit.h"
 
 #include "aoa.h"
 #include "carlog.h"
@@ -76,10 +75,10 @@ void keep_previous_run(const char *sd_path)
 
 bool screen_up = false;                 // our displayable is registered
 
-// quit_finish() or quit's hard path. The hard path only gives back what
+// quit::finish() or quit's hard path. The hard path only gives back what
 // must not outlive us, the screen and VCAP 0 (the rear camera's input):
 // the main thread may still be using everything else.
-void teardown(int hard, void *)
+void teardown(bool hard)
 {
 	if (hard) {
 		vout::hide();
@@ -115,12 +114,10 @@ int main(int argc, char *argv[])
 	if (log_open(path) != 0)
 		std::fprintf(stderr, "audi_stream_receiver: cannot open %s, logging to stdout only\n", path);
 	log_msg("audi_stream_receiver start, pid=%d", getpid());
-	quit_config qc{};
+	quit::Config qc;
 	qc.sd_path = sd_path;                     // no watchdog: runs until SD pull / signal
 	qc.cleanup = teardown;
-	quit_start(&qc);
-	if (slogmark_init("audi_stream_receiver") == 0)
-		slogmark("start, pid %d", (int)getpid());
+	quit::start(qc);
 	cpumon_name_thread("main");
 	cpumon_start(kCpuWindowMs, kCpuWarnPct);
 	screen_set_partial(1);
@@ -128,7 +125,7 @@ int main(int argc, char *argv[])
 	camera::start();
 	carlog::start(sd_path);
 	// our first show would cover the rear camera
-	while (camera::active() && quit_poll() == QUIT_NONE)
+	while (camera::active() && !quit::stopping())
 		usleep(100 * 1000);
 
 	bool shown = screen_open() == 0;
@@ -142,7 +139,7 @@ int main(int argc, char *argv[])
 	else
 		aoa::start(sd_path, 800, 480);
 
-	while (quit_poll() == QUIT_NONE) {
+	while (!quit::stopping()) {
 		// the H.264 stream's video takes the screen (vout replaces what
 		// the layer manager shows); ours comes back when it ends
 		// (not during the rear camera: both of these show something)
@@ -193,9 +190,8 @@ int main(int argc, char *argv[])
 		usleep(50 * 1000);
 	}
 
-	quit_finish();
-	slogmark("exit (stop reason: %s)", quit_name(quit_poll()));
-	log_msg("audi_stream_receiver exit (stop reason: %s)", quit_name(quit_poll()));
+	quit::finish();
+	log_msg("audi_stream_receiver exit (stop reason: %s)", quit::name(quit::poll()));
 	log_close();
 	return 0;
 }

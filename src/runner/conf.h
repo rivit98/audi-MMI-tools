@@ -26,7 +26,7 @@ std::vector<AppConf> parse_conf(const std::string &text);
 // Apps found on the card: every ELF file in <sd>/apps/ is one. An apps.conf
 // line is optional and only describes it.
 constexpr const char *kAppsDir = "apps";
-// Timeout of an app with no apps.conf line. The apps stop themselves (quit.c's
+// Timeout of an app with no apps.conf line. The apps stop themselves (quit's
 // watchdog); this only catches one that hangs.
 constexpr unsigned kDefaultTimeoutS = 3600;
 
