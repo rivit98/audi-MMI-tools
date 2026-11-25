@@ -42,8 +42,7 @@
  * unit stops nothing: only the MMI reboot key combo helps then.
  *
  * Output on the card: hello4.log (GL limits, probe reads + verdicts,
- * per-second fps + free RAM, triangle-rate table) and layer manager
- * screenshots of scenes 1-3.
+ * per-second fps + free RAM, triangle-rate table).
  *
  * usage: hello4 <sd_path> [scene_seconds] [option=value ...]
  *   scene_seconds  length of scenes cube/light/world, and of the whole
@@ -464,16 +463,6 @@ static void draw_hud(int w, int h, unsigned fps, unsigned count, f32 progress)
 
 /* ---- main loop ---- */
 
-static void screenshot(const char *scene)
-{
-	char cmd[320];
-	int rc;
-
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello4_%s.png", out_dir, scene);
-	rc = lm_text_command(cmd);
-	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-}
-
 /* Free system RAM in MB (on QNX the size of /proc is the free memory),
  * logged to catch a leak in the driver before a hang. 0 if unknown. */
 static unsigned free_mb(void)
@@ -577,10 +566,7 @@ static void run(struct gfx *g, const struct opts *o)
 	unsigned nseg = build_segs(o, seg), run_ms = 0, i;
 	unsigned start, last, next_report = 1000;
 	unsigned frames = 0, sec_frames = 0, fps_shown = 0, worst = 0, swap_fail = 0;
-	unsigned cur = 0, seg_start = 0, scene_start = 0, seg_frames = 0, shot_done = 0;
-	/* Milliseconds spent on screenshots. Kept out of the scene clock and of
-	 * the fps / worst-frame numbers: capturing is not drawing. */
-	unsigned paused = 0;
+	unsigned cur = 0, seg_start = 0, scene_start = 0, seg_frames = 0;
 	struct stress_stat stress[MAX_STEPS];
 	int w = g->width, h = g->height;
 
@@ -597,7 +583,7 @@ static void run(struct gfx *g, const struct opts *o)
 	log_seg_start(o, &seg[0]);
 
 	for (;;) {
-		unsigned now = log_ms(), ms = now - start - paused, sms, count = 0, t0, t_draw, t_swap;
+		unsigned now = log_ms(), ms = now - start, sms, count = 0, t0, t_draw, t_swap;
 		const struct seg *sg;
 		f32 t;
 
@@ -612,7 +598,6 @@ static void run(struct gfx *g, const struct opts *o)
 			if (seg[cur].scene != seg[cur - 1].scene)
 				scene_start = seg_start;
 			seg_frames = 0;
-			shot_done = 0;
 			log_seg_start(o, &seg[cur]);
 		}
 		sg = &seg[cur];
@@ -646,14 +631,6 @@ static void run(struct gfx *g, const struct opts *o)
 		draw_hud(w, h, fps_shown, count, (f32)sms / sg->ms);
 		t_draw = log_ms() - t0;
 
-		/* screenshot mid-scene; not in the stress scene, it would skew timing */
-		if (!shot_done && sg->scene != SCENE_STRESS && sms >= sg->ms / 2) {
-			t0 = log_ms();
-			screenshot(scene_name[sg->scene]);
-			paused += log_ms() - t0;
-			last = log_ms();        /* don't bill the capture to this frame */
-			shot_done = 1;
-		}
 		if (count && o->trace >= 2)
 			log_msg("f%u swap", frames);
 		t0 = log_ms();
@@ -688,15 +665,13 @@ static void run(struct gfx *g, const struct opts *o)
 			next_report += 1000;
 		}
 	}
-	log_seg_done(o, &seg[cur], seg_frames, log_ms() - start - paused - seg_start);
+	log_seg_done(o, &seg[cur], seg_frames, log_ms() - start - seg_start);
 	log_stress_table(o, stress);
-	run_ms = log_ms() - start - paused;   /* actual, shorter after an early stop */
+	run_ms = log_ms() - start;   /* actual, shorter after an early stop */
 	if (run_ms == 0)
 		run_ms = 1;
 	log_msg("run done: %u frames in %u ms (avg %u.%u fps), swap failures=%u",
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
-	if (paused != 0)
-		log_msg("  (+%u ms capturing and writing files, not counted above)", paused);
 }
 
 /* ---- command line ---- */

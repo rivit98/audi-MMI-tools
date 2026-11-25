@@ -19,8 +19,7 @@
  * After updateVfb it asks getVfb again: the VFB is double-buffered, so the
  * sid should change.
  *
- * Writes <sd>/var/lmprobe.log, lmprobe_dshot.png (our VFB),
- * lmprobe_sshot.png (whole display) and lmprobe_state_<when>.txt.
+ * Writes <sd>/var/lmprobe.log and lmprobe_state_<when>.txt.
  *
  * usage: lmprobe <sd_path> [seconds]
  */
@@ -140,19 +139,6 @@ static void fill_bars(const gf_surface_info_t *si)
 	}
 }
 
-static void screenshots(void)
-{
-	char cmd[300];
-	int rc;
-
-	snprintf(cmd, sizeof(cmd), "d-shot %d %s/lmprobe_dshot.png", CID, out_dir);
-	rc = lm_text_command(cmd);
-	log_msg("  layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/lmprobe_sshot.png", out_dir);
-	rc = lm_text_command(cmd);
-	log_msg("  layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-}
-
 /* showScreen 0x08041b34. Returns 0 if the bars were shown. */
 static int setup(gf_dev_t *dev, gf_display_t *display, gf_surface_t *surface)
 {
@@ -220,7 +206,6 @@ static int setup(gf_dev_t *dev, gf_display_t *display, gf_surface_t *surface)
 		        next.sid, vfb.sid, next.sid != vfb.sid ? "double-buffered" : "same");
 	}
 	show_cid_and_hmi();
-	screenshots();
 	lm_close();
 	return 0;
 }

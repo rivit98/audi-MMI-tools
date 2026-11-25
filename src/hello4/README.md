@@ -4,7 +4,7 @@
 back with `glReadPixels`, then 3D scenes and a triangle-rate stress test.
 
 - **Run:** `hello4 <sd_path> [seconds] [scenes=pclws] [tori=1,2,4,8,12] [step=<s>] [trace=0|1|2]`
-- **Output:** `var/hello4.log` (probe verdicts, fps, free RAM, triangle-rate table), screenshots
+- **Output:** `var/hello4.log` (probe verdicts, fps, free RAM, triangle-rate table)
 
 ![Cube, lit torus, fogged world and 8 lit tori](img/scenes.jpg)
 
@@ -26,6 +26,5 @@ back with `glReadPixels`, then 3D scenes and a triangle-rate stress test.
 - 16 tori or more freeze the whole unit (8 froze it once too); 12 is the
   largest step that always passed.
 - No buffer objects (`glBindBuffer` not exported): client-side arrays only.
-- Layer manager screenshots don't show the 3D scenes.
 
 Details: [docs/gpu-results.md](../../docs/gpu-results.md).

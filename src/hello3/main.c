@@ -23,7 +23,7 @@
  * SIGINT/SIGHUP, SD card removal or the watchdog (src/common/quit.c).
  *
  * Output on the card: hello3.log (per-second fps, per-scene summary,
- * fill-rate table) and layer manager screenshots of scenes 1 and 2.
+ * fill-rate table).
  *
  * usage: hello3 <sd_path> [scene_seconds]
  */
@@ -268,16 +268,6 @@ static void draw_hud(int w, int h, unsigned fps, unsigned layers, f32 progress)
 
 /* ---- main loop ---- */
 
-static void screenshot(const char *scene)
-{
-	char cmd[320];
-	int rc;
-
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello3_%s.png", out_dir, scene);
-	rc = lm_text_command(cmd);
-	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-}
-
 struct fill_stat {
 	unsigned frames, first_ms, last_ms;
 };
@@ -309,10 +299,7 @@ static void run(struct gfx *g, unsigned scene_s)
 	unsigned scene_ms = scene_s * 1000, run_ms = NSCENES * scene_ms;
 	unsigned start = log_ms(), last = start, next_report = 1000;
 	unsigned frames = 0, sec_frames = 0, fps_shown = 0, worst = 0, swap_fail = 0;
-	unsigned scene_frames = 0, scene_start = 0, cur_scene = 0, shot_done = 0;
-	/* Milliseconds spent on screenshots. Kept out of the scene clock and of
-	 * the fps / worst-frame numbers: capturing is not drawing. */
-	unsigned paused = 0;
+	unsigned scene_frames = 0, scene_start = 0, cur_scene = 0;
 	struct fill_stat fill[NFILL];
 	int w = g->width, h = g->height;
 
@@ -330,7 +317,7 @@ static void run(struct gfx *g, unsigned scene_s)
 	log_msg("scene 1/%u: %s", NSCENES, scene_name[0]);
 
 	for (;;) {
-		unsigned now = log_ms(), ms = now - start - paused, scene, sms, layers = 0, fi = 0;
+		unsigned now = log_ms(), ms = now - start, scene, sms, layers = 0, fi = 0;
 
 		if (ms >= run_ms)
 			quit_request(QUIT_TIMER);
@@ -346,7 +333,6 @@ static void run(struct gfx *g, unsigned scene_s)
 			cur_scene = scene;
 			scene_frames = 0;
 			scene_start = ms;
-			shot_done = 0;
 		}
 
 		switch (scene) {
@@ -364,15 +350,6 @@ static void run(struct gfx *g, unsigned scene_s)
 		}
 		draw_hud(w, h, fps_shown, layers, (f32)sms / scene_ms);
 
-		/* screenshot mid-scene; not in the fill scene, it would skew timing */
-		if (!shot_done && scene != SCENE_FILL && sms >= scene_ms / 2) {
-			unsigned t0 = log_ms();
-
-			screenshot(scene_name[scene]);
-			paused += log_ms() - t0;
-			last = log_ms();        /* don't bill the capture to this frame */
-			shot_done = 1;
-		}
 		if (gfx_swap(g) != 0 && swap_fail++ < 3)
 			log_msg("eglSwapBuffers failed: %s", egl_err_name(eglGetError()));
 
@@ -398,15 +375,13 @@ static void run(struct gfx *g, unsigned scene_s)
 		}
 	}
 	log_msg("scene %u done: %u frames in %u ms", cur_scene + 1, scene_frames,
-	        log_ms() - start - paused - scene_start);
+	        log_ms() - start - scene_start);
 	log_fill_table(fill, w, h);
-	run_ms = log_ms() - start - paused;   /* actual, shorter after an early stop */
+	run_ms = log_ms() - start;   /* actual, shorter after an early stop */
 	if (run_ms == 0)
 		run_ms = 1;
 	log_msg("run done: %u frames in %u ms (avg %u.%u fps), swap failures=%u",
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
-	if (paused != 0)
-		log_msg("  (+%u ms capturing and writing files, not counted above)", paused);
 }
 
 int main(int argc, char *argv[])

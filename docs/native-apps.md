@@ -195,8 +195,7 @@ docs/                   this guide and the deep dives
 | `BASE` | `log`, `quit`, `lmgr` | SD log, clean-stop sources, layer manager client |
 | `TEXT` | `text` + generated fonts | UTF-8, word wrap, Terminus 8×16 / 16×32 glyphs (12×24 `font_mid`: the runner's own) |
 | `SCREEN` | `screen`, `vfbcopy` + `TEXT` | a CPU-drawn full-screen displayable |
-| `GL` | `gfx`, `hud`, `img` | gf + EGL bring-up, FPS counter, BMP/PNG writer |
-| `IMG` | `img` | PNG/BMP writer (stb_image_write) |
+| `GL` | `gfx`, `hud` | gf + EGL bring-up, FPS counter |
 | `PROC` | `proc` | start the unit's own tools from a threaded app |
 | `IOM` | `iom` | own io-media client: sound, video playback |
 | `CPUMON` | `cpumon`, `cpustat`, `slogmark` | own + whole-unit CPU load and memory lines; our time markers in the system log |
@@ -215,7 +214,7 @@ arithmetic and `ssize_t` results, `strtoull` into a `u64`). Exceptions:
   for `%lld`, `%llu`, `%lu`. `u64` is `unsigned long long` on the car but
   `unsigned long` on the host, so a `u64` passed straight to `%llu` warns in
   the host tests.
-- third-party code (`stb_image*.h`, `src/common/qnx/`, mbedTLS) and `sdk/`,
+- third-party code (`src/common/qnx/`, mbedTLS) and `sdk/`,
   whose headers and stubs mirror the unit's own APIs.
 - a line marked `types-ok` (hello8's checks of the C types themselves).
 
@@ -249,7 +248,7 @@ started from its menu:
 
 Apps get the card path as `argv[1]`: inputs (`clips/`, `beep.wav`, `aa/`)
 are read from there, and everything they write goes to `<card>/var/`
-(`var_dir()` in `src/common/log.c`): logs, screenshots, recordings, their
+(`var_dir()` in `src/common/log.c`): logs, recordings, their
 `hello6/` / `hello9/` folders. They run with `var/` as the working
 directory, so files the unit's tools drop there (e.g.
 `testapp-cmdline.history`) land in `var/` too.
@@ -422,8 +421,7 @@ Sequence (DrGER's `showScreen`, confirmed): unregister 40 → register cid
   `s-shot <display> <file>`, `d-shot <cid> <file>`, `da-shot <cid> <file>`
   (type by extension: png/bmp/jpg/gif). These capture the HMI and CPU-drawn
   VFBs, **never GL output**. `v-level` / `s-level` also exist; meaning
-  unknown.
-- Pictures: `img.c` (stb_image_write) writes PNG/BMP. The SDK has no zlib or libpng.
+  unknown. No app uses them.
 
 ## 9. GPU: 2D and 3D with OpenGL ES 1.0
 

@@ -22,7 +22,7 @@ It refuses a path that isn't the root of a mounted FAT file system. Boot the MMI
 card in SD slot 1: the [runner](src/runner/README.md)'s menu comes up, the
 main knob chooses an app and its press runs it. Any binary copied into
 `apps/` on the card shows up in the menu. Everything a run writes
-(logs, screenshots, recordings) comes back in `var/` on the card, so
+(logs, recordings) comes back in `var/` on the card, so
 copying that one folder gets all of it. If the screen freezes, reboot the MMI:
 hold **MENU + rotary knob + top-right soft key**. Details:
 [docs/native-apps.md §4–5](docs/native-apps.md#4-build-system).

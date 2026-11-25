@@ -8,7 +8,7 @@
 int  log_open(const char *path);
 
 /* "<sd_path>/var", created if missing: where every app writes its logs,
- * screenshots, recordings and other output, so one folder holds a run.
+ * recordings and other output, so one folder holds a run.
  * The card's root keeps only inputs (bin/, clips/, run.sh ...). A static
  * buffer, the same for the whole program. */
 const char *var_dir(const char *sd_path);

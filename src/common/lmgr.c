@@ -108,20 +108,6 @@ int lm_show_displayables(int display, const int *cids, int n)
 	                 (n ? 2 + n : 3) * sizeof(int));
 }
 
-int lm_text_command(const char *cmd)
-{
-	int fd = open(LM_PATH, O_WRONLY);
-	isize len = (isize)strlen(cmd), n;
-
-	if (fd < 0)
-		return errno;
-	n = write(fd, cmd, len);
-	close(fd);
-	if (n < 0)
-		return errno;
-	return n == len ? 0 : EIO;
-}
-
 int lm_read_state(char *buf, usize size, usize *len, isize *second)
 {
 	char scratch[256];

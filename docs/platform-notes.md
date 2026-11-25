@@ -541,6 +541,3 @@ app to be able to take the unit down, not just itself.
   `touch` with `: > file`.
 - The unit's clock starts at `Jan 01 1970` on a cold boot, so file mtimes and
   any in-file "Generated" date are meaningless. Use the dump directory epochs.
-- Screenshots and file writes are deliberately excluded from the frame
-  statistics in hello2/3/4 (a `paused` accumulator), so fps and worst-frame
-  measure drawing rather than I/O.

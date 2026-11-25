@@ -5,35 +5,26 @@
  *     logs every step plus the EGL/GL diagnostics to <sd>/hello2.log.
  *  2. Animates for RUN_SECONDS: hue-cycling background, rotating gradient
  *     square, bouncing block, progress bar along the bottom.
- *  3. At SHOT_AT_MS captures what it rendered three ways:
- *       hello2_glread.bmp   glReadPixels of our own frame (GL works)
- *       hello2_dshot.png    layer manager snapshot of our displayable's VFB
- *       hello2_sshot.png    layer manager snapshot of the whole display
- *                           (proves our layer is what's actually visible)
- *  4. Hands the screen back like qnx-audi does and exits. Stops early, with
+ *  3. Hands the screen back like qnx-audi does and exits. Stops early, with
  *     the same clean teardown, on a button press, SIGTERM/SIGINT/SIGHUP,
  *     SD card removal or the watchdog (src/common/quit.c).
  *
  * usage: hello2 <sd_path> [seconds]
  */
 #include "types.h"
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/utsname.h>
 
 #include <GLES/gl.h>
 
-#include "img.h"
 #include "gfx.h"
 #include "log.h"
 #include "quit.h"
 
 #define CID           40    /* displayable id qnx-audi uses */
 #define RUN_SECONDS   20
-#define SHOT_AT_MS    5000
 #define WATCHDOG_SLACK 40   /* stop (then _exit) if GL or the LM hangs */
 
 static const char *sd_path;
@@ -144,42 +135,11 @@ static void draw_frame(int w, int h, unsigned ms, unsigned run_ms)
 	draw_rect(0.0f, 0.0f, w * (f32)ms / run_ms, 10.0f, yellow);
 }
 
-static void take_screenshots(int w, int h)
-{
-	char path[256], cmd[320];
-	u8 *pixels = malloc((usize)w * h * 4);
-	int rc;
-
-	if (pixels != NULL) {
-		glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-		rc = glGetError();
-		snprintf(path, sizeof(path), "%s/hello2_glread.bmp", out_dir);
-		log_msg("glReadPixels %dx%d: glError=0x%04x, centre pixel rgba=%u,%u,%u,%u",
-		        w, h, rc,
-		        pixels[((h / 2) * w + w / 2) * 4 + 0], pixels[((h / 2) * w + w / 2) * 4 + 1],
-		        pixels[((h / 2) * w + w / 2) * 4 + 2], pixels[((h / 2) * w + w / 2) * 4 + 3]);
-		log_msg("write %s: %s", path,
-		        img_write_bmp_rgba(path, pixels, w, h) == 0 ? "ok" : strerror(errno));
-		free(pixels);
-	}
-
-	snprintf(cmd, sizeof(cmd), "d-shot %d %s/hello2_dshot.png", CID, out_dir);
-	rc = lm_text_command(cmd);
-	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-	snprintf(cmd, sizeof(cmd), "s-shot 0 %s/hello2_sshot.png", out_dir);
-	rc = lm_text_command(cmd);
-	log_msg("layermanager '%s': %s", cmd, rc ? strerror(rc) : "ok");
-}
-
 static void animate(struct gfx *g, unsigned seconds)
 {
 	unsigned run_ms = seconds * 1000, start = log_ms(), last = start;
 	unsigned frames = 0, sec_frames = 0, next_report = 1000;
-	unsigned worst = 0, swap_fail = 0, shot_done = 0;
-	/* Milliseconds spent capturing and writing files. The readback and the
-	 * card write are not drawing, so they are kept out of both the clock
-	 * that drives the animation and the fps / worst-frame numbers. */
-	unsigned paused = 0;
+	unsigned worst = 0, swap_fail = 0;
 
 	glViewport(0, 0, g->width, g->height);
 	glMatrixMode(GL_PROJECTION);
@@ -191,21 +151,13 @@ static void animate(struct gfx *g, unsigned seconds)
 	log_msg("animation: %u s, glError=0x%04x", seconds, glGetError());
 
 	for (;;) {
-		unsigned now = log_ms(), ms = now - start - paused;
+		unsigned now = log_ms(), ms = now - start;
 
 		if (ms >= run_ms)
 			quit_request(QUIT_TIMER);
 		if (quit_poll() != QUIT_NONE)
 			break;
 		draw_frame(g->width, g->height, ms, run_ms);
-		if (!shot_done && ms >= SHOT_AT_MS) {
-			unsigned t0 = log_ms();
-
-			take_screenshots(g->width, g->height);
-			paused += log_ms() - t0;
-			last = log_ms();        /* don't bill the capture to this frame */
-			shot_done = 1;
-		}
 		if (gfx_swap(g) != 0 && swap_fail++ < 3)
 			log_msg("eglSwapBuffers failed: %s", egl_err_name(eglGetError()));
 
@@ -223,13 +175,11 @@ static void animate(struct gfx *g, unsigned seconds)
 			next_report += 1000;
 		}
 	}
-	run_ms = log_ms() - start - paused;   /* actual, shorter after an early stop */
+	run_ms = log_ms() - start;   /* actual, shorter after an early stop */
 	if (run_ms == 0)
 		run_ms = 1;
 	log_msg("animation done: %u frames in %u ms (avg %u.%u fps), swap failures=%u",
 	        frames, run_ms, frames * 1000 / run_ms, frames * 10000 / run_ms % 10, swap_fail);
-	if (paused != 0)
-		log_msg("  (+%u ms capturing and writing files, not counted above)", paused);
 }
 
 int main(int argc, char *argv[])

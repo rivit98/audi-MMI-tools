@@ -7,8 +7,7 @@ every raw devctl status. It also saves the layer manager's state dump
 before, during and after the bars. Not in the default run.
 
 - **Run:** `lmprobe <sd_path> [seconds]` (default 5)
-- **Output:** `var/lmprobe.log`, `lmprobe_dshot.png`, `lmprobe_sshot.png`,
-  `lmprobe_state_{before,shown,after}.txt`
+- **Output:** `var/lmprobe.log`, `lmprobe_state_{before,shown,after}.txt`
 
 ![The eight colour bars drawn straight into the VFB](img/colour-bars.jpg)
 
@@ -17,13 +16,12 @@ before, during and after the bars. Not in the default run.
 - The `showScreen` sequence: unregister → register cid 40 flags 2 → `getVfb`
   → draw → `updateVfb` → show `{40,16,19}` → unregister.
 - CPU drawing straight into the VFB.
-- Layer manager screenshots of a CPU-drawn VFB.
 
 ## Results
 
 **Works**
 - Every step `rc=0`; layer manager 1.1; VFB 800×480 `BGRA8888`, stride 3200.
-- The bars cover the HMI; the `d-shot` is exact and byte-identical between runs.
+- The bars cover the HMI.
 - The sequence lives on in `src/common/screen.c` and `src/common/gfx.c`.
 
 **Expected, not errors**

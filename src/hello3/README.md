@@ -5,7 +5,7 @@ from two textures uploaded once (random blocks, a blended plasma, 1–32
 full-screen blended layers).
 
 - **Run:** `hello3 <sd_path> [scene_seconds]` (default 10)
-- **Output:** `var/hello3.log` (fps, fill-rate table), screenshots of scenes 1–2
+- **Output:** `var/hello3.log` (fps, fill-rate table)
 
 ![Pixels and plasma scenes](img/scenes.jpg)
 
@@ -19,8 +19,5 @@ full-screen blended layers).
 **Works**
 - Pixels scene 57 fps, plasma 38 fps, no GL errors.
 - Fill rate: 57 fps up to 2 layers, then fill-bound; up to 132 Mpixel/s at 32 layers.
-
-**Doesn't work**
-- Layer manager screenshots show the navigation map, not hello3.
 
 Details: [docs/gpu-results.md](../../docs/gpu-results.md).

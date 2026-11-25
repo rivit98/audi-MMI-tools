@@ -53,12 +53,6 @@ int  lm_update_vfb(int cid);
 #define LM_MAX_SHOW 16
 int  lm_show_displayables(int display, const int *cids, int n);
 
-/* Text command interface (write() to /dev/layermanager), e.g.
- *   "s-shot <display> <file>"      screenshot of a whole display
- *   "d-shot <displayable> <file>"  screenshot of one displayable's VFB
- * The file type follows the extension (img_codec_{png,bmp,jpg,gif}). */
-int  lm_text_command(const char *cmd);
-
 /* State dump: one read() of /dev/layermanager (its own fd) returns
  * CGraphicsManager::dumpCurrentState as text (parse it with lmstate.h).
  * buf gets the text, NUL-terminated; *len its length. Returns 0, an errno
