@@ -146,6 +146,14 @@ public:
 	usize read(u64 off, u8 *dst, usize n, ReadInfo *info = nullptr);
 	// When frame k was pushed (real or skip), or -1 if unknown / no longer kept.
 	i64 push_ms(u64 k) const;
+	// The frame io-media shows at its TIME position pos_ms, or -1. Its
+	// clock runs on through anything not in the stream (a catch-up's
+	// dropped stretch, a pause), so once that happened, or the position
+	// maps to a frame io-media hasn't read yet, the frame comes from the
+	// read position instead: the frame being read minus the frames
+	// io-media holds before showing (measured while the position was
+	// good, ~9 at first). *from_reader says which.
+	i64 shown_frame(i64 pos_ms, bool *from_reader = nullptr);
 	bool started() const;        // the first IDR is in
 	u64 start_ms() const;   // when it came
 	Stats stats() const;
@@ -170,6 +178,8 @@ private:
 	bool filling_ = false, shedding_ = false;
 	bool catching_ = false;    // io-media too far behind: dropping until the IDR after it caught up
 	bool caught_ = false;      // the reader is back: waiting for that IDR
+	i64 reading_ = -1;         // the frame io-media reads (reader_at()), -1 = unknown
+	f64 held_ = 9.0;           // frames io-media holds between reading and showing (smoothed)
 	unsigned prev_ref_frame_num_ = 0, last_poc_lsb_ = 0;
 	std::vector<u8> sample_, filler_;
 	Stats st_;

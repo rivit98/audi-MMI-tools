@@ -92,6 +92,9 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | `audio: stream ended (why)` | totals; `audio: capture ->` the saved file |
 
 `lag` is MMI-side only (io-media's queue); the phone's capture, encoder and USB are not in it.
+It comes from io-media's TIME position while that clock matches the stream. After a catch-up
+(its clock runs on through the dropped stretch) it comes from io-media's read position minus
+the frames io-media holds (learnt before), counted as `from the read position`.
 
 ## Results
 

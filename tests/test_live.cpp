@@ -966,6 +966,46 @@ void test_catch_up()
 	CHECK(on.frames >= 24 * 115 && on.frames <= 24 * 121);
 }
 
+// The frame io-media shows: from its clock while that is good, from its
+// read position (minus the frames it holds) once a catch-up has moved the
+// stream off its clock, or the clock points past what it has read.
+void test_shown_frame()
+{
+	h264::Sps s;
+	h264::parse_sps(kSps.data(), kSps.size(), s);
+	live::Config c = cfg(8192, 0, true, 64);
+	c.catch_up_frames = 12;
+	live::Stream st;
+	CHECK_OK(st.configure(c));
+	bool from_reader = true;
+	CHECK_EQ(st.shown_frame(-1, &from_reader), -1);
+	CHECK_EQ(st.shown_frame(400, &from_reader), 10);     // no read position yet: the clock
+	CHECK(!from_reader);
+
+	// io-media reads up to the newest frame and shows 6 frames behind it
+	unsigned k = 0;
+	for (; k < 100; k++) {
+		std::vector<u8> f = k == 0 ? idr_au(s, kSps, kPps) : p_au(s, k % 16);
+		CHECK(st.push(f.data(), f.size(), k * 40) == live::Push::Ok);
+		st.reader_at(st.data_off() + (k + 1) * c.sample_size);
+		i64 pos = (i64)k * 40 - 200;     // 5 frames before frame k
+		if (pos < 0)
+			continue;
+		CHECK_EQ(st.shown_frame(pos, &from_reader), (i64)k - 5);
+		CHECK(!from_reader);
+	}
+	// the held frames, learnt: 6 (read up to k, shown k - 5)
+	// a clock past the read position: from the reader
+	CHECK_EQ(st.shown_frame(10000, &from_reader), 100 - 6);
+	CHECK(from_reader);
+
+	// io-media falls 13 behind: a catch-up; from then on, always the reader
+	st.reader_at(st.data_off() + 87 * c.sample_size);
+	CHECK_EQ(st.stats().catch_ups, 1u);
+	CHECK_EQ(st.shown_frame(80 * 40, &from_reader), 87 - 6);
+	CHECK(from_reader);
+}
+
 void test_burst()
 {
 	plan::Schedule b(25.0, {}, 5);
@@ -1151,6 +1191,7 @@ int main()
 	test_fill();
 	test_shed();
 	test_catch_up();
+	test_shown_frame();
 	test_burst();
 	test_with_clip();
 	CHECK_DONE();

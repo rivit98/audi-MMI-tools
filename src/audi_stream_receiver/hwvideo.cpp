@@ -66,6 +66,7 @@ struct Window {
 	bool waited_before = false;          // a window of this stream had waited reads
 	std::vector<i64> lags;
 	unsigned lag_unknown = 0;            // TIME events for a frame no longer kept
+	unsigned lag_read = 0;               // lags from io-media's read position, not its clock
 };
 
 RateLimit warn_waited(kWarnEveryMs), warn_evicted(kWarnEveryMs), warn_lag(kWarnEveryMs);
@@ -345,7 +346,7 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 	i64 p50 = lags.empty() ? 0 : lags[lags.size() / 2];
 	log_msg("h264: %.1f s: %u frames (%.1f fps), %u skips, %u refused; io-media %u reads, %u "
 	        "waited (max %u ms), lead %lld/%lld/%lld frames; lag %lld/%lld/%lld ms (%zu TIME, "
-	        "%u not kept), position %.1f s%s; evicted %u, far %u, eof %u, unblocked %u; reader "
+	        "%u from the read position, %u not kept), position %.1f s%s; evicted %u, far %u, eof %u, unblocked %u; reader "
 	        "%lld frames behind, ring %u frames; data %llu kbit/s, frames avg %u / max %u KB, "
 	        "%u IDR",
 	        ms / 1000.0, frames, frames * 1000.0 / (ms ? ms : 1),
@@ -353,7 +354,7 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 	        ss.wait_win_max, any_lead ? (long long)ss.lead_win_min : 0LL,
 	        (long long)ss.lead_frames_last, any_lead ? (long long)ss.lead_win_max : 0LL,
 	        lags.empty() ? 0LL : (long long)lags.front(), (long long)p50,
-	        lags.empty() ? 0LL : (long long)lags.back(), lags.size(), w.lag_unknown,
+	        lags.empty() ? 0LL : (long long)lags.back(), lags.size(), w.lag_read, w.lag_unknown,
 	        h.player().stats().max_pos_ms < 0 ? 0.0 : h.player().stats().max_pos_ms / 1000.0,
 	        h.video_on() ? "" : ", picture not on yet", evicted, ss.far - w.far, ss.eof - w.eof,
 	        ss.unblocked - w.unblocked, (long long)behind, c.ring_frames,
@@ -386,6 +387,7 @@ void log_window(HwStream &h, Window &w, unsigned ms)
 	w.unblocked = ss.unblocked;
 	w.idr = ls.idr;
 	w.lag_unknown = 0;
+	w.lag_read = 0;
 }
 
 // hw thread, io-media has reported an error: what led up to it, before the
@@ -475,11 +477,15 @@ void run()
 		}
 		if (h != nullptr) {
 			std::string err = h->poll([&w, h](unsigned, i64 pos) {
-				i64 lag = h->lag_ms(pos);
-				if (lag == INT64_MIN)
+				bool from_reader = false;
+				i64 lag = h->lag_ms(pos, &from_reader);
+				if (lag == INT64_MIN) {
 					w.lag_unknown++;     // that frame left the ring: no lag for it
-				else if (w.lags.size() < 2000)
+				} else if (w.lags.size() < 2000) {
 					w.lags.push_back(lag);
+					if (from_reader)
+						w.lag_read++;
+				}
 			});
 			if (!err.empty()) {
 				log_msg("h264: %s", err.c_str());

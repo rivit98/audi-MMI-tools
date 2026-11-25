@@ -71,8 +71,10 @@ public:
 	unsigned video_ms() const { return t_video_; }    // log_ms() at picture on
 
 	// How long after frame (position pos_ms) was pushed io-media reports
-	// playing it, in ms; INT64_MIN if that frame is unknown.
-	i64 lag_ms(i64 pos_ms) const;
+	// playing it, in ms; INT64_MIN if that frame is unknown. *from_reader:
+	// the frame came from io-media's read position, not its clock
+	// (live::Stream::shown_frame).
+	i64 lag_ms(i64 pos_ms, bool *from_reader = nullptr);
 
 	live::Stream &stream() { return stream_; }
 	StreamServer &server() { return server_; }

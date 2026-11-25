@@ -280,9 +280,12 @@ bool Stream::sync_wanted()
 void Stream::reader_at(u64 served_end)
 {
 	std::lock_guard<std::mutex> lock(mu_);
-	if (!started_ || cfg_.catch_up_frames == 0 || served_end <= data_off_)
+	if (!started_ || served_end <= data_off_)
 		return;
 	i64 reading = (i64)((served_end - data_off_) / cfg_.sample_size);
+	reading_ = reading;
+	if (cfg_.catch_up_frames == 0)
+		return;
 	i64 behind = (i64)frames_ - reading;
 	if (behind > st_.behind_max)
 		st_.behind_max = behind;
@@ -363,6 +366,27 @@ i64 Stream::push_ms(u64 k) const
 	if (k >= frames_ || k + cfg_.ring_frames < frames_ || ring_ms_.empty())
 		return -1;
 	return ring_ms_[(usize)(k % cfg_.ring_frames)];
+}
+
+i64 Stream::shown_frame(i64 pos_ms, bool *from_reader)
+{
+	std::lock_guard<std::mutex> lock(mu_);
+	if (from_reader != nullptr)
+		*from_reader = false;
+	if (pos_ms < 0)
+		return -1;
+	i64 k = (i64)((u64)pos_ms * cfg_.fps / 1000);
+	if (reading_ < 0)
+		return k;                       // no read position: the clock only
+	if (st_.catch_ups == 0 && k < reading_) {
+		// a good position: how many frames io-media holds, smoothed
+		held_ = 0.75 * held_ + 0.25 * (f64)(reading_ - k);
+		return k;
+	}
+	if (from_reader != nullptr)
+		*from_reader = true;
+	i64 held = (i64)(held_ + 0.5);
+	return reading_ > held ? reading_ - held : 0;
 }
 
 bool Stream::started() const

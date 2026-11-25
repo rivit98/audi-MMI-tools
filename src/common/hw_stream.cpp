@@ -89,12 +89,12 @@ void HwStream::stop(bool keep_video)
 	server_.stop();
 }
 
-i64 HwStream::lag_ms(i64 pos_ms) const
+i64 HwStream::lag_ms(i64 pos_ms, bool *from_reader)
 {
-	if (pos_ms < 0)
+	i64 frame = stream_.shown_frame(pos_ms, from_reader);
+	if (frame < 0)
 		return INT64_MIN;
-	u64 frame = (u64)pos_ms * opts_.cfg.fps / 1000;
-	i64 at = stream_.push_ms(frame);
+	i64 at = stream_.push_ms((u64)frame);
 	if (at < 0)
 		return INT64_MIN;
 	return (i64)log_ms() - at;
