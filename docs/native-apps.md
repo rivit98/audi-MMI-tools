@@ -518,7 +518,9 @@ and ignores SIGTERM. Judge it by its `FINISHED` line.
 constant-sample-size MP4 (CS-MP4, `media/csmp4.py`): `ftyp`, `moov`, then a
 32-bit `mdat`; one constant `stsz` size; every frame padded to one size S
 with a filler NAL; `moov` declaring far more frames than exist. An app's own
-QNX resource manager serves it (`src/common/stream_server.cpp`;
+QNX resource manager serves it (`src/common/stream_server.cpp`, which
+serves any `StreamSource` from `stream_source.h`: the live stream, or
+hello9's pre-built A/V file released on a clock;
 `src/common/qnx/sys/pm.h` makes `<sys/iofunc.h>` compile), with `st_size` =
 the declared total and reads that block until the frame exists. io-media
 reads it sequentially in 64 KB, ~2.7 frames ahead, waits out pauses of at

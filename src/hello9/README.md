@@ -3,12 +3,40 @@
 Live H.264 streaming through the DM642 with io-media untouched. Runs the
 receiver's code (`src/common/hw_stream.h`: CS-MP4 header, own resource
 manager, gap fill) fed from a clip on the card, the way a phone would feed
-it. C++. Retired: all answered.
+it. Also tests io-media's play speed and an audio track in the stream. C++.
 
-- **Run:** `hello9 <sd_path> [test,test,...]` (default: every test, `c5,live,gap,slow,burst,s56,s112,f30,c9,stall`)
+- **Run:** `hello9 <sd_path> [test,test,...]` (default: `c5,spf,spl,spfast,av_aac,av_mp3,cs_aac,cs_mp3,lv_aac,lv_mp3`, ~6 min). Radio on, film with sound.
 - **Output:** `var/hello9.log` (`RESULT` lines, lag), `var/hello9/` (io-media queries, slog)
 
-## Verifies
+## Verifies (default run)
+
+Built, not yet run on the car.
+
+- `c5`: control, plain MP4 file.
+- `spf`: c5 with io-media's play speed (devctl `0x80040F0B`) changed while
+  it plays: 2000, 500, then 1000. Does the picture's counter follow?
+  Answer: the `+N ms speed` lines (io-media's answer), `t=` lines (TIME
+  position against wall time), the film.
+- `spl`: an on-time 25 fps live stream at 1100 and 1250. Can a faster
+  speed drain io-media's ~9 queued frames (lower `lag`), and what happens
+  when its reads catch up with the live edge?
+- `spfast`: the sender 10% too fast, so the lag grows; from 15 s a
+  controller plays at 1200 while the lag is 150 ms over its level. Answer:
+  `lag` in the `t=` lines falls back after each `speed 1000 -> 1200`.
+- `av_aac`, `av_mp3`: plain MP4s with sound (a beep with every white flash)
+  on `mixer:DSPOUT_TDM1_20_SAD`, the output heard in the car. Does
+  io-media play an MP4's audio track in sync with the picture? Answer:
+  `RESULT <test> track:` (io-media's track info), the film's sound.
+- `cs_aac`, `cs_mp3`: the same in the constant-size A/V layout
+  (`media/csav.py`): chunks of video frames plus audio frames, every
+  sample of a track the same size. AAC frames are padded with zero bytes,
+  which the DSP's decoder may or may not ignore; 48 kHz CBR MP3 needs no
+  padding.
+- `lv_aac`, `lv_mp3`: `cs_*` served through the stream server a chunk at a
+  time on the clip's own clock (`paced.h`), as a live stream with sound
+  would come. Answer: the `t=` lines (preads, waits) and the film.
+
+## Verifies (on request, answered)
 
 - `c5`: control, plain MP4 file.
 - `live`: the MMI-built stream, 25 fps, 30 s; lag.

@@ -81,6 +81,35 @@ python3 media/csmp4.py "$OUT/c9.h264" "$OUT/c9_h264_336_cs.mp4" "$FPS"
 rm -f "$OUT/c9.h264"
 ff -f lavfi -i "$(vf 720 336 'c11 live H.264, MMI-built stream')" "${CS264[@]}" "$OUT/c11_h264_336.h264"
 
+# v1-v4: hello9's sound tests. Each second starts with a white flash (3
+# frames) and a 1 kHz beep (120 ms, -12 dBFS), so a film shows whether
+# picture and sound stay together. 48 kHz stereo.
+# v1 / v2: ordinary MP4s (H.264 + AAC-LC / + MP3), moov first.
+# v3 / v4: the same as constant-size A/V MP4s (media/csav.py), the layout
+# a live stream with sound would use; hello9 also serves them live.
+avf() { # avf <label>
+  echo "$(vf 720 336 "$1"),drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(n\\,$FPS)\\,3)'"
+}
+BEEP=(-f lavfi -i "aevalsrc=exprs=0.25*sin(2*PI*1000*t)*lt(mod(t\\,1)\\,0.12):s=48000:c=stereo:d=$D")
+MP3=(-c:a libmp3lame -b:a 128k -ar 48000 -ac 2)
+AAC48=(-c:a aac -b:a 128k -ar 48000 -ac 2)
+ff -f lavfi -i "$(avf 'v1 H.264 + AAC')" "${BEEP[@]}" "${X264[@]}" "${AAC48[@]}" \
+  -shortest -movflags +faststart "$OUT/v1_av_aac.mp4"
+ff -f lavfi -i "$(avf 'v2 H.264 + MP3')" "${BEEP[@]}" "${X264[@]}" "${MP3[@]}" \
+  -shortest -movflags +faststart "$OUT/v2_av_mp3.mp4"
+ff -f lavfi -i "$(avf 'v3 const-size H.264 + AAC')" "${CS264[@]}" "$OUT/v3.h264"
+ff "${BEEP[@]}" "${AAC48[@]}" -f adts "$OUT/v3.aac"
+python3 media/csav.py "$OUT/v3.h264" "$OUT/v3.aac" aac "$OUT/v3_cs_aac.mp4" "$FPS"
+ff -f lavfi -i "$(avf 'v4 const-size H.264 + MP3')" "${CS264[@]}" "$OUT/v4.h264"
+ff "${BEEP[@]}" "${MP3[@]}" -write_xing 0 -id3v2_version 0 -f mp3 "$OUT/v4.mp3"
+python3 media/csav.py "$OUT/v4.h264" "$OUT/v4.mp3" mp3 "$OUT/v4_cs_mp3.mp4" "$FPS"
+rm -f "$OUT"/v3.h264 "$OUT"/v3.aac "$OUT"/v4.h264 "$OUT"/v4.mp3
+# every A/V clip must decode cleanly on the desk (ffmpeg prints nothing)
+for f in "$OUT"/v?_*.mp4; do
+  err=$(ffmpeg -hide_banner -v error -i "$f" -f null - 2>&1)
+  [[ -z "$err" ]] || { echo "$f does not decode cleanly: $err" >&2; exit 1; }
+done
+
 # a1, a2: hello12's SBC audio (raw SBC frames, ffmpeg's encoder: 44.1 kHz
 # stereo, bitpool 54, 120-byte frames, ~331 kbit/s), 20 s each at -12 dBFS.
 # a1: a 0.5 s 880 Hz ping every 2 s. a2: a tone rising from 440 Hz for 2 s,

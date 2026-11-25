@@ -13,6 +13,7 @@ extern "C" {
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 struct Player::iom_state {
 	struct iom g;
@@ -86,21 +87,24 @@ std::string Player::open(const std::string &name, const std::string &url)
 		fail("set speed", rc);
 	if ((rc = iom_set_time_notify(&g_->g, kTimeNotifyMs)) != EOK)
 		fail("set time notification", rc);
-	output_ = nullptr;
-	for (const char *o : kOutputs) {
-		rc = iom_attach_output(&g_->g, o);
+	output_.clear();
+	std::vector<std::string> outs = outputs_;
+	if (outs.empty())
+		outs.assign(std::begin(kOutputs), std::end(kOutputs));
+	for (const std::string &o : outs) {
+		rc = iom_attach_output(&g_->g, o.c_str());
 		if (rc == EOK) {
 			output_ = o;
 			break;
 		}
-		fail(o, rc);
+		fail(o.c_str(), rc);
 	}
-	if (output_ == nullptr)
+	if (output_.empty())
 		return "no output would attach";
 	rc = iom_attach_input(&g_->g, 1, url.c_str());
 	if (rc != EOK)
 		return fail("attach input", rc);
-	log_msg("  player: graph %s, output %s (id %d), input %s", g_->g.path, output_,
+	log_msg("  player: graph %s, output %s (id %d), input %s", g_->g.path, output_.c_str(),
 	        g_->g.output, url.c_str());
 	return "";
 }
@@ -112,6 +116,14 @@ std::string Player::play()
 	t_play_ = log_ms();
 	int rc = iom_play(&g_->g);
 	return rc == EOK ? "" : fail("play", rc);
+}
+
+std::string Player::set_speed(int speed)
+{
+	if (g_ == nullptr)
+		return "no graph";
+	int rc = iom_set_speed(&g_->g, speed);
+	return rc == EOK ? "" : fail("set speed", rc);
 }
 
 void Player::remember(u32 type, i64 a, i64 b)

@@ -9,6 +9,7 @@
 #include "csmp4.h"
 #include "h264.h"
 #include "live_stream.h"
+#include "paced.h"
 #include "schedule.h"
 
 #include <algorithm>
@@ -1177,6 +1178,121 @@ void test_with_clip()
 }
 } // namespace
 
+// ---- hello9's paced A/V file (media/csav.py's layout) ----
+
+void put32(std::vector<u8> &v, u32 x)
+{
+	for (int i = 3; i >= 0; i--)
+		v.push_back((u8)(x >> (8 * i)));
+}
+
+std::vector<u8> mkbox(const char *type, const std::vector<u8> &body, bool full = false)
+{
+	std::vector<u8> v;
+	put32(v, (u32)(8 + (full ? 4 : 0) + body.size()));
+	v.insert(v.end(), type, type + 4);
+	if (full)
+		put32(v, 0);
+	v.insert(v.end(), body.begin(), body.end());
+	return v;
+}
+
+std::vector<u8> cat(std::initializer_list<std::vector<u8>> parts)
+{
+	std::vector<u8> v;
+	for (const auto &p : parts)
+		v.insert(v.end(), p.begin(), p.end());
+	return v;
+}
+
+// ftyp + moov (two traks: video stco/stsc first, audio after) + mdat of
+// chunks x chunk bytes; stco offsets k * chunk + skew_k (skew_k for the
+// last chunk only).
+std::vector<u8> av_file(u32 chunks, u32 chunk, u32 video_per_chunk, u32 skew_last = 0)
+{
+	auto trak = [&](u32 off_in_chunk, u32 per_chunk, u32 data_off) {
+		std::vector<u8> stsc, stco;
+		put32(stsc, 1);
+		put32(stsc, 1);
+		put32(stsc, per_chunk);
+		put32(stsc, 1);
+		put32(stco, chunks);
+		for (u32 k = 0; k < chunks; k++)
+			put32(stco, data_off + k * chunk + off_in_chunk + (k + 1 == chunks ? skew_last : 0));
+		std::vector<u8> stbl = cat({mkbox("stsc", stsc, true), mkbox("stco", stco, true)});
+		return mkbox("trak", mkbox("mdia", mkbox("minf", mkbox("stbl", stbl))));
+	};
+	std::vector<u8> ftyp = mkbox("ftyp", std::vector<u8>(8, 0));
+	// sizes don't depend on the offsets: build once for the length
+	u32 head = (u32)(ftyp.size() + mkbox("moov", cat({trak(0, video_per_chunk, 0),
+	                                                  trak(100, 15, 0)})).size() + 8);
+	std::vector<u8> moov = mkbox("moov", cat({trak(0, video_per_chunk, head),
+	                                          trak(100, 15, head)}));
+	std::vector<u8> f = cat({ftyp, moov});
+	put32(f, 8 + chunks * chunk);
+	f.insert(f.end(), {'m', 'd', 'a', 't'});
+	CHECK_EQ(f.size(), head);
+	for (u32 i = 0; i < chunks * chunk; i++)
+		f.push_back((u8)i);
+	return f;
+}
+
+void test_paced()
+{
+	paced::Layout l;
+	std::vector<u8> f = av_file(10, 1000, 8);
+	CHECK_OK(paced::parse_layout(f, l));
+	CHECK_EQ(l.chunks, 10);
+	CHECK_EQ(l.chunk, 1000);
+	CHECK_EQ(l.video_per_chunk, 8);
+	CHECK_EQ(l.data_off + 10 * 1000, f.size());
+
+	CHECK(!paced::parse_layout(av_file(10, 1000, 8, 4), l).empty());   // uneven chunks
+	std::vector<u8> cut = f;
+	cut.pop_back();
+	CHECK(!paced::parse_layout(cut, l).empty());                         // file shorter
+	CHECK(!paced::parse_layout(std::vector<u8>(64, 0), l).empty());      // no boxes
+
+	paced::PacedFile p;
+	CHECK(!p.configure(f, 0).empty());
+	CHECK_OK(p.configure(f, 25));
+	CHECK_EQ(p.slot_ms(), 320);
+	CHECK_EQ(p.slots_per_s(), 3);
+	CHECK_EQ(p.total(), f.size());
+	u64 off = p.data_off();
+	// before start(): the header only
+	CHECK_EQ(p.fill(5000), 0);
+	CHECK_EQ(p.available(), off);
+	p.start(1000);
+	CHECK_EQ(p.fill(1000), 0);
+	CHECK_EQ(p.fill(1319), 0);
+	CHECK_EQ(p.available(), off);
+	CHECK_EQ(p.fill(1320), 1);                // chunk 0 complete at 320 ms
+	CHECK_EQ(p.frames(), 1);
+	CHECK_EQ(p.available(), off + 1000);
+	CHECK_EQ(p.fill(1000 + 3 * 320 + 5), 2);
+	CHECK_EQ(p.available(), off + 3000);
+	CHECK_EQ(p.fill(1000 + 100 * 320), 7);    // capped at the last chunk
+	CHECK_EQ(p.frames(), 10);
+	CHECK_EQ(p.available(), f.size());
+
+	// read: the file's bytes; ahead counts chunks not released yet
+	paced::PacedFile q;
+	CHECK_OK(q.configure(f, 25));
+	q.start(0);
+	q.fill(320);
+	u8 buf[2500];
+	StreamSource::ReadInfo info;
+	CHECK_EQ(q.read(off + 500, buf, 2500, &info), 2500);
+	CHECK(std::memcmp(buf, f.data() + off + 500, 2500) == 0);
+	CHECK_EQ(info.ahead, 2);                  // bytes 1000..3000 past the edge
+	CHECK_EQ(q.read(f.size() - 10, buf, 100, &info), 10);
+	CHECK_EQ(q.read(f.size(), buf, 100, &info), 0);
+	q.finish();
+	CHECK(q.finished());
+	CHECK_EQ(q.available(), f.size());
+}
+
 int main()
 {
 	test_parse();
@@ -1194,5 +1310,6 @@ int main()
 	test_shown_frame();
 	test_burst();
 	test_with_clip();
+	test_paced();
 	CHECK_DONE();
 }

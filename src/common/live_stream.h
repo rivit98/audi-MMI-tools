@@ -49,6 +49,7 @@
 
 #include "csmp4.h"
 #include "h264.h"
+#include "stream_source.h"
 
 #include "types.h"
 #include <mutex>
@@ -106,7 +107,7 @@ struct Stats {
 	i64 behind_max = 0;    // furthest behind the newest frame io-media read
 };
 
-class Stream {
+class Stream : public StreamSource {
 public:
 	// Build the header; drops whatever was there. "" or what is wrong.
 	std::string configure(const Config &c);
@@ -116,10 +117,10 @@ public:
 
 	Push push(const u8 *annexb, usize n, u64 now_ms, std::string *why = nullptr);
 	// Appends skip frames if a gap calls for it; returns how many.
-	unsigned fill(u64 now_ms);
+	unsigned fill(u64 now_ms) override;
 	// End of stream: reads past the last frame get EOF from now on.
-	void finish();
-	bool finished() const;
+	void finish() override;
+	bool finished() const override;
 	// An IDR is wanted from the sender (a frame was dropped); cleared by
 	// the call.
 	bool sync_wanted();
@@ -129,21 +130,19 @@ public:
 	bool catching_up() const;
 
 	// ---- serving ----
-	u64 data_off() const { return data_off_; }
-	u32 sample_size() const { return cfg_.sample_size; }
-	u32 declared() const { return declared_; }
-	u64 total() const { return data_off_ + (u64)declared_ * cfg_.sample_size; }
+	u64 data_off() const override { return data_off_; }
+	u32 sample_size() const override { return cfg_.sample_size; }
+	u32 declared() const override { return declared_; }
+	u64 total() const override { return data_off_ + (u64)declared_ * cfg_.sample_size; }
+	unsigned slots_per_s() const override { return cfg_.fps; }
 	// Bytes [0, available()) exist now.
-	u64 available() const;
-	u64 frames() const;
-	// What one read() served as filler instead of frames.
-	struct ReadInfo {
-		unsigned evicted = 0;   // frames no longer kept (past ring_frames)
-		unsigned ahead = 0;     // frames not pushed yet (a far read)
-	};
+	u64 available() const override;
+	u64 frames() const override;
+	// ReadInfo (stream_source.h): what one read() served as filler instead
+	// of frames; evicted = past ring_frames, ahead = not pushed yet (a far read).
 	// Copy [off, off + n) into dst; n is clamped at total(). Bytes past
 	// available() (a "far" read) come as filler frames. Returns the count.
-	usize read(u64 off, u8 *dst, usize n, ReadInfo *info = nullptr);
+	usize read(u64 off, u8 *dst, usize n, ReadInfo *info = nullptr) override;
 	// When frame k was pushed (real or skip), or -1 if unknown / no longer kept.
 	i64 push_ms(u64 k) const;
 	// The frame io-media shows at its TIME position pos_ms, or -1. Its

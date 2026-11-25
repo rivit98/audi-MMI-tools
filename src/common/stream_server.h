@@ -1,5 +1,6 @@
 // stream_server.h - a QNX resource manager that serves a live H.264 stream
-// (live_stream.h, a CS-MP4 in memory) at a path io-media can open, e.g.
+// (live_stream.h, a CS-MP4 in memory; or any other StreamSource,
+// stream_source.h) at a path io-media can open, e.g.
 // /dev/audi_stream/live.mp4. Plays on the car (hello9 "live",
 // docs/phone-mirroring.md 7.10).
 //
@@ -10,14 +11,14 @@
 //
 // One thread runs the resource manager: io_read either answers at once or
 // queues the request, and every 10 ms (dispatch timeout) the stream's gap
-// fill runs (live::Stream::fill) and the queue is served as far as it can
+// fill runs (StreamSource::fill) and the queue is served as far as it can
 // be. start() and stop() are called from the owner's thread.
 //
 // The path must end in .mp4: io-media picks its demuxer by extension.
 #ifndef COMMON_STREAM_SERVER_H
 #define COMMON_STREAM_SERVER_H
 
-#include "live_stream.h"
+#include "stream_source.h"
 
 #include <atomic>
 #include "types.h"
@@ -73,7 +74,7 @@ public:
 
 	// Serve stream (configured, outliving the server) at path. "" or what
 	// failed.
-	std::string start(const char *path, live::Stream *stream);
+	std::string start(const char *path, StreamSource *stream);
 	// End of stream (stream->finish()), waiting reads get what is there,
 	// then the path goes away and the thread stops.
 	void stop();

@@ -58,7 +58,7 @@ struct Pending {
 } // namespace
 
 struct StreamServer::Impl {
-	live::Stream *stream = nullptr;
+	StreamSource *stream = nullptr;
 	u64 data_off = 0, total = 0;
 	u32 sample_size = 0;
 	unsigned fps = 25;
@@ -114,7 +114,7 @@ struct StreamServer::Impl {
 		else if (p.off + n > avail)
 			n = avail - p.off;
 		buf.resize(n);
-		live::Stream::ReadInfo info;
+		StreamSource::ReadInfo info;
 		n = stream->read(p.off, buf.data(), (usize)n, &info);
 		MsgReply(p.rcvid, (int)n, buf.data(), (int)n);
 		if (!p.pread)
@@ -363,7 +363,7 @@ StreamServer::~StreamServer()
 	stop();
 }
 
-std::string StreamServer::start(const char *path, live::Stream *stream)
+std::string StreamServer::start(const char *path, StreamSource *stream)
 {
 	if (impl_ != nullptr)
 		return "already serving";
@@ -374,7 +374,7 @@ std::string StreamServer::start(const char *path, live::Stream *stream)
 	d->data_off = stream->data_off();
 	d->total = stream->total();
 	d->sample_size = stream->sample_size();
-	d->fps = stream->config().fps;
+	d->fps = stream->slots_per_s() ? stream->slots_per_s() : 1;
 
 	d->dpp = dispatch_create();
 	if (d->dpp == nullptr) {

@@ -33,10 +33,17 @@ public:
 
 	~Player() { close(); }
 
+	// The outputs open() tries, in order (default: TDM2_20, TDM3_20,
+	// TDM1_51_SAD, all unheard in the car; docs/platform-notes.md 9). Call
+	// before open().
+	void set_outputs(std::vector<std::string> outputs) { outputs_ = std::move(outputs); }
 	// Create graph <name>, attach the first output that works and the input.
 	// "" or what failed (with io-media's iom_errno).
 	std::string open(const std::string &name, const std::string &url);
 	std::string play();
+	// Play speed, 1000 = normal (open() sets 1000). Any time, playing or not.
+	// "" or what failed.
+	std::string set_speed(int speed);
 	// Read and log the events waiting. on_time(ms since play, position ms)
 	// for every TIME event.
 	void poll(const std::function<void(unsigned, i64)> &on_time);
@@ -48,7 +55,7 @@ public:
 	// "TIME 12.3 s of 3600.0 s", "STATUS state 4 speed 1000", ...
 	static std::string describe(const PlayEvent &e);
 	const std::string &name() const { return name_; }
-	const char *output() const { return output_; }
+	const char *output() const { return output_.empty() ? nullptr : output_.c_str(); }
 
 private:
 	struct iom_state;
@@ -62,7 +69,8 @@ private:
 	unsigned events_n_ = 0;
 	iom_state *g_ = nullptr;
 	std::string name_;
-	const char *output_ = nullptr;
+	std::vector<std::string> outputs_;
+	std::string output_;
 	unsigned t_play_ = 0;
 	bool blind_ = false;
 	PlayStats st_;

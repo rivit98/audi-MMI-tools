@@ -7,9 +7,30 @@
 // src/hello9/README.md). hello9 feeds a raw H.264 clip from the card (c11, Annex-B, as an encoder
 // emits it) frame by frame, the way a phone would, and the MMI builds
 // everything else. The driver turns the knob when the moving test picture
-// is visible. Tests, in order:
+// is visible. Default tests, in order:
 //
 //   c5      control: a plain MP4 (720x336) from the card, plays every run
+//   spf     c5 with io-media's play speed changed while it plays: 2000 at
+//           4 s, 500 at 8 s, 1000 at 14 s. Does the DSP's picture follow?
+//   spl     a live stream (25 fps, on time) at 1100 from 10 s, 1000 from
+//           20 s, 1250 from 25 s, 1000 from 35 s: faster than the frames
+//           come, so io-media's ~9 queued frames should drain (less lag)
+//           until its reads wait
+//   spfast  frames come at 27.5 fps against a 25 fps stream, so the lag
+//           grows; from 15 s speed 1200 whenever the lag is 150 ms over
+//           its level, 1000 once back within 50 ms: can speed replace
+//           shedding frames?
+//   av_aac / av_mp3   plain MP4s with sound (a beep with every white flash,
+//           once a second) on mixer:DSPOUT_TDM1_20_SAD, the output heard in
+//           the car: does io-media play an MP4's audio track, in sync?
+//   cs_aac / cs_mp3   the same as constant-size A/V MP4s (media/csav.py):
+//           the layout a live stream with sound would use (AAC frames padded
+//           with zero bytes, MP3 constant by itself)
+//   lv_aac / lv_mp3   cs_* served through the stream server, a chunk at a
+//           time on the clip's own clock (paced.h), as a live stream with
+//           sound would come
+//
+// On request (answered; src/hello9/README.md):
 //   live    steady 25 fps, 30 s; the header declares the receiver's
 //           default (~1.6 h)
 //   gap     pauses of 2 s at 8 s and 5 s at 16 s, gap fill on: the
@@ -23,7 +44,6 @@
 //   f30     15 s, the stream timed at 30 fps (frames pushed at 30 fps)
 //           s56 / s112 / f30 vs live: is io-media's ~0.5 s delay a queue
 //           of bytes or of frames? (docs/phone-mirroring.md 7.10)
-// and also (every test runs by default):
 //   c9      constant-size MP4 file (plays)
 //   stall   the gap test without gap fill (the "stall")
 //
@@ -35,7 +55,7 @@
 // <sd>/hello9/ (io-media queries, the system log after the tests).
 //
 // usage: hello9 <sd_path> [test,test,...]
-//        (default: all, c5,live,gap,slow,burst,s56,s112,f30,c9,stall)
+//        (default: c5,spf,spl,spfast,av_aac,av_mp3,cs_aac,cs_mp3,lv_aac,lv_mp3)
 #include "types.h"
 extern "C" {
 #include "log.h"
@@ -46,7 +66,9 @@ extern "C" {
 
 #include "csmp4.h"
 #include "h264.h"
+#include "camera.h"
 #include "hw_stream.h"
+#include "paced.h"
 #include "player.h"
 #include "schedule.h"
 #include "ui.h"
@@ -69,7 +91,7 @@ extern "C" {
 
 namespace {
 
-constexpr unsigned kWatchdogS = 600;    // ~5.5 min run (every test)
+constexpr unsigned kWatchdogS = 900;    // ~6 min default run; every test ~11 min
 constexpr unsigned kIntroMs = 12000;
 constexpr unsigned kLabelMs = 7000;
 constexpr unsigned kStartMs = 1000;     // play -> video displayable
@@ -80,7 +102,22 @@ constexpr const char *kLivePath = "/dev/hello9/live.mp4";
 constexpr const char *kRawClip = "c11_h264_336.h264";
 constexpr const char *kFooter = "hello9 - streaming test. Pull the SD card to stop.";
 
-enum class Kind { File, Live };
+enum class Kind { File, Live, Paced };
+
+// io-media's play speed (1000 = normal) from at_ms after play.
+struct SpeedStep {
+	unsigned at_ms;
+	int speed;
+};
+
+// The one output heard in the car; it replaces the radio while it plays
+// (docs/platform-notes.md 9).
+constexpr const char *kHeardOutput = "mixer:DSPOUT_TDM1_20_SAD?delay=130";
+constexpr const char *kPacedPath = "/dev/hello9/av.mp4";
+// spfast's controller: speed kCtlSpeed while the lag is more than kCtlOnMs
+// over the lag before it started, back to 1000 within kCtlOffMs of it.
+constexpr int kCtlSpeed = 1200;
+constexpr i64 kCtlOnMs = 150, kCtlOffMs = 50;
 
 struct Test {
 	const char *name;
@@ -98,47 +135,107 @@ struct Test {
 	unsigned declared_s;              // 0: as many frames as fit (the receiver's default)
 	unsigned s_mul = 1;               // frames padded to s_mul x the clip's S
 	unsigned stream_fps = kFps;       // the rate the stream is timed at
+	std::vector<SpeedStep> speeds = {};
+	unsigned ctl_from_ms = 0;         // Live: lag-driven speed from then on (0: off)
+	bool sound = false;               // the heard output (kHeardOutput)
 };
 
 const char kSeen[] = "\n\nTurn the main knob ONE click when you see the moving test picture "
                      "(its name and a counting number).";
+const char kSeenSpeed[] =
+	"\n\nTurn the main knob ONE click when you see the moving test picture, and ONE more "
+	"click each time its counter visibly speeds up or slows down.";
+const char kSeenSound[] =
+	"\n\nRadio ON, film WITH SOUND. Turn the main knob ONE click when you see the moving "
+	"test picture. Every white flash should come with a beep: say out loud if the beeps "
+	"are missing, late, early or choppy.";
 const char kSeenStall[] =
 	"\n\nTurn the main knob ONE click when you see the moving test picture, and ONE "
 	"more click each time it starts moving again after it froze.";
 
+// What each kind of test asks the driver (kSeen...).
+const char *seen_text(const Test &t)
+{
+	if (t.sound)
+		return kSeenSound;
+	if (!t.speeds.empty() || t.ctl_from_ms)
+		return kSeenSpeed;
+	return t.stalls.empty() ? kSeen : kSeenStall;
+}
+
 const std::vector<Test> kTests = {
 	{"c5", "Control: plain MP4", "The 720x336 video seen on every run.", Kind::File,
 	 true, "c5_h264_336.mp4", 8000, 0, {}, 1, false, 0},
+	// io-media's play speed (devctl 0x80040F0B): does the DSP's picture follow it?
+	{.name = "spf", .title = "Play speed, file (18 s)",
+	 .what = "The control video at normal speed, then twice as fast (4 s), then half speed "
+	         "(6 s), then normal again.",
+	 .kind = Kind::File, .by_default = true, .clip = "c5_h264_336.mp4", .watch_ms = 18000,
+	 .speeds = {{4000, 2000}, {8000, 500}, {14000, 1000}}},
+	{.name = "spl", .title = "Play speed, live stream (40 s)",
+	 .what = "A live stream at normal speed, then 10% faster (10 s), normal (5 s), 25% faster "
+	         "(10 s), normal. Faster than the frames come: the picture may stutter.",
+	 .kind = Kind::Live, .by_default = true, .watch_ms = 40000, .fps = kFps, .burst = 1,
+	 .fill = true, .declared_s = 600,
+	 .speeds = {{10000, 1100}, {20000, 1000}, {25000, 1250}, {35000, 1000}}},
+	{.name = "spfast", .title = "Play speed against a fast sender (45 s)",
+	 .what = "Frames come 10% too fast, so the delay grows. After 15 s the MMI plays faster "
+	         "whenever the delay has grown, to bring it back.",
+	 .kind = Kind::Live, .by_default = true, .watch_ms = 45000, .fps = 27.5, .burst = 1,
+	 .fill = true, .declared_s = 600, .ctl_from_ms = 15000},
+	// sound in the same MP4 as the picture, on the output heard in the car
+	{.name = "av_aac", .title = "Picture + AAC sound, plain MP4 (20 s)",
+	 .what = "A video with a beep every second, played on the car's speakers.",
+	 .kind = Kind::File, .by_default = true, .clip = "v1_av_aac.mp4", .watch_ms = 20000,
+	 .sound = true},
+	{.name = "av_mp3", .title = "Picture + MP3 sound, plain MP4 (20 s)",
+	 .what = "The same with MP3 sound.", .kind = Kind::File, .by_default = true,
+	 .clip = "v2_av_mp3.mp4", .watch_ms = 20000, .sound = true},
+	{.name = "cs_aac", .title = "Picture + AAC sound, stream layout (20 s)",
+	 .what = "The same video and beeps, laid out as a live stream with sound would be.",
+	 .kind = Kind::File, .by_default = true, .clip = "v3_cs_aac.mp4", .watch_ms = 20000,
+	 .sound = true},
+	{.name = "cs_mp3", .title = "Picture + MP3 sound, stream layout (20 s)",
+	 .what = "The same with MP3 sound.", .kind = Kind::File, .by_default = true,
+	 .clip = "v4_cs_mp3.mp4", .watch_ms = 20000, .sound = true},
+	{.name = "lv_aac", .title = "Picture + AAC sound, live (20 s)",
+	 .what = "The stream-layout video sent live by the MMI, a piece at a time, as a phone "
+	         "stream with sound would come.",
+	 .kind = Kind::Paced, .by_default = true, .clip = "v3_cs_aac.mp4", .watch_ms = 20000,
+	 .sound = true},
+	{.name = "lv_mp3", .title = "Picture + MP3 sound, live (20 s)",
+	 .what = "The same with MP3 sound.", .kind = Kind::Paced, .by_default = true,
+	 .clip = "v4_cs_mp3.mp4", .watch_ms = 20000, .sound = true},
 	{"live", "Live stream (30 s)",
 	 "hello9 sends the video frame by frame, like a phone would, and builds the stream "
 	 "header itself.",
-	 Kind::Live, true, nullptr, 30000, kFps, {}, 1, true, 0},
+	 Kind::Live, false, nullptr, 30000, kFps, {}, 1, true, 0},
 	{"gap", "Live stream with pauses (36 s)",
 	 "The stream stops twice (2 s and 5 s), like a phone whose screen stands still. The "
 	 "picture freezes: that is part of the test.",
-	 Kind::Live, true, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, true, 600},
+	 Kind::Live, false, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, true, 600},
 	{"slow", "Slow live stream (20 s)",
 	 "Frames come at 15 a second instead of 25: the picture runs slower, but should not "
 	 "stop.",
-	 Kind::Live, true, nullptr, 20000, 15, {}, 1, true, 600},
+	 Kind::Live, false, nullptr, 20000, 15, {}, 1, true, 600},
 	{"burst", "Live stream in bursts (20 s)",
-	 "Frames come five at a time, five times a second.", Kind::Live, true, nullptr, 20000,
+	 "Frames come five at a time, five times a second.", Kind::Live, false, nullptr, 20000,
 	 kFps, {}, 5, true, 600},
 	{"s56", "Live stream, bigger frames (15 s)",
 	 "The same stream, every frame padded to twice the size: does the delay change?",
-	 Kind::Live, true, nullptr, 15000, kFps, {}, 1, true, 600, 2},
+	 Kind::Live, false, nullptr, 15000, kFps, {}, 1, true, 600, 2},
 	{"s112", "Live stream, much bigger frames (15 s)",
-	 "Every frame padded to four times the size.", Kind::Live, true, nullptr, 15000, kFps, {}, 1,
+	 "Every frame padded to four times the size.", Kind::Live, false, nullptr, 15000, kFps, {}, 1,
 	 true, 600, 4},
 	{"f30", "Live stream at 30 fps (15 s)",
-	 "The stream timed at 30 frames a second: the counter runs a little fast.", Kind::Live, true,
+	 "The stream timed at 30 frames a second: the counter runs a little fast.", Kind::Live, false,
 	 nullptr, 15000, 30, {}, 1, true, 600, 1, 30},
 	{"c9", "Constant-size MP4", "A file with every frame padded to the same size (plays).",
-	 Kind::File, true, "c9_h264_336_cs.mp4", 8000, 0, {}, 1, false, 0},
+	 Kind::File, false, "c9_h264_336_cs.mp4", 8000, 0, {}, 1, false, 0},
 	{"stall", "Live stream with pauses, no fill (36 s)",
 	 "As the pause test, without the MMI filling the pauses. The picture freezes: that is "
 	 "part of the test.",
-	 Kind::Live, true, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, false, 600},
+	 Kind::Live, false, nullptr, 36000, kFps, {{200, 2000}, {400, 5000}}, 1, false, 600},
 };
 
 const char *sd_path;
@@ -309,6 +406,7 @@ private:
 struct Query {
 	int video = -1;               // 1 video stream, 0 none, -1 unknown
 	unsigned w = 0, h = 0;
+	std::string track;            // GetTrackInfo's line (audio and video)
 };
 
 Query query_graph(const std::string &graph, const std::string &log_name)
@@ -333,6 +431,13 @@ Query query_graph(const std::string &graph, const std::string &log_name)
 	if (FILE *f = std::fopen(qlog.c_str(), "r")) {
 		char line[300];
 		while (std::fgets(line, sizeof(line), f) != nullptr) {
+			if (q.track.empty() && (std::strstr(line, "video") != nullptr ||
+			                        std::strstr(line, "audio") != nullptr) &&
+			    std::strstr(line, "get_video_info") == nullptr) {
+				q.track = line;
+				while (!q.track.empty() && (q.track.back() == '\n' || q.track.back() == '\r'))
+					q.track.pop_back();
+			}
 			if (std::strstr(line, ", no video") != nullptr)
 				q.video = 0;
 			else if (std::strstr(line, ", video ('") != nullptr)
@@ -403,6 +508,8 @@ std::string knob_report(const Outcome &o, usize *count)
 
 void result_line(const Test &t, const Outcome &o)
 {
+	if (!o.q.track.empty())
+		log_msg("RESULT %s track: %s", t.name, o.q.track.c_str());
 	const PlayStats &ps = *o.ps;
 	usize knobs = 0;
 	std::string ks = knob_report(o, &knobs);
@@ -419,11 +526,96 @@ void result_line(const Test &t, const Outcome &o)
 	summary.push_back(line);
 }
 
+// A test's speed steps, applied as play time passes; every change and
+// io-media's answer logged.
+class SpeedPlan {
+public:
+	explicit SpeedPlan(const Test &t) : steps_(t.speeds) {}
+	// ms since play; set: the graph's set_speed.
+	void apply(unsigned since_play, Player &p)
+	{
+		while (next_ < steps_.size() && since_play >= steps_[next_].at_ms)
+			set(steps_[next_++].speed, since_play, p, "plan");
+	}
+	void set(int speed, unsigned since_play, Player &p, const char *why)
+	{
+		std::string err = p.set_speed(speed);
+		log_msg("  +%u ms speed %d -> %d (%s): %s", since_play, cur_, speed, why,
+		        err.empty() ? "ok" : err.c_str());
+		changes_++;
+		if (!err.empty()) {
+			if (errors_++ == 0)
+				first_error_ = err;
+			return;
+		}
+		// time spent at a speed other than 1000
+		if (cur_ != 1000 && fast_since_ != 0)
+			fast_ms_ += since_play - fast_since_;
+		cur_ = speed;
+		fast_since_ = speed != 1000 ? since_play : 0;
+	}
+	int speed() const { return cur_; }
+	std::string str(unsigned end_ms) const
+	{
+		unsigned fast = fast_ms_ + (cur_ != 1000 && fast_since_ ? end_ms - fast_since_ : 0);
+		char b[160];
+		std::snprintf(b, sizeof(b), "speed changes=%u errors=%u%s%s off_1000=%.1fs", changes_,
+		              errors_, errors_ ? " first: " : "", first_error_.c_str(), fast / 1000.0);
+		return b;
+	}
+
+private:
+	std::vector<SpeedStep> steps_;
+	usize next_ = 0;
+	int cur_ = 1000;
+	unsigned changes_ = 0, errors_ = 0, fast_ms_ = 0, fast_since_ = 0;
+	std::string first_error_;
+};
+
+// spfast: speed kCtlSpeed while the lag is kCtlOnMs over its level before
+// ctl_from_ms, 1000 once it is back within kCtlOffMs.
+class SpeedCtl {
+public:
+	explicit SpeedCtl(const Test &t) : from_ms_(t.ctl_from_ms) {}
+	void lag(unsigned since_play, i64 lag, SpeedPlan &plan, Player &p)
+	{
+		if (from_ms_ == 0)
+			return;
+		if (since_play < from_ms_) {
+			// the level: the lowest lag of the first seconds, before the
+			// fast sender has added much (the first 3 s, after the picture)
+			if (since_play < 4000 && (base_ == INT64_MIN || lag < base_))
+				base_ = lag;
+			return;
+		}
+		if (base_ == INT64_MIN)
+			return;
+		if (plan.speed() == 1000 && lag > base_ + kCtlOnMs) {
+			char why[64];
+			std::snprintf(why, sizeof(why), "lag %lld ms, level %lld", (long long)lag,
+			              (long long)base_);
+			plan.set(kCtlSpeed, since_play, p, why);
+		} else if (plan.speed() != 1000 && lag <= base_ + kCtlOffMs) {
+			char why[64];
+			std::snprintf(why, sizeof(why), "lag %lld ms, level %lld", (long long)lag,
+			              (long long)base_);
+			plan.set(1000, since_play, p, why);
+		}
+	}
+	i64 base() const { return base_; }
+
+private:
+	unsigned from_ms_;
+	i64 base_ = INT64_MIN;
+};
+
 // c5 / c9: an MP4 file on the card.
 bool run_file(const Test &t, const std::string &graph)
 {
 	const std::string src = clip_path(t.clip);
 	Player player;
+	if (t.sound)
+		player.set_outputs({kHeardOutput});
 	std::string err = player.open(graph, src);
 	if (err.empty())
 		err = player.play();
@@ -437,11 +629,20 @@ bool run_file(const Test &t, const std::string &graph)
 	}
 	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
 	std::thread query;
+	SpeedPlan speeds(t);
+	unsigned last_stats = 0;
 	bool stop = false;
 	while (!stop) {
 		unsigned now = log_ms() - o.t_play;
 		if (now >= kStartMs + t.watch_ms)
 			break;
+		speeds.apply(now, player);
+		if (now - last_stats >= 1000) {
+			last_stats = now;
+			log_msg("  t=%5.1f s: pos %lld ms, speed %d, %u TIME events", now / 1000.0,
+			        (long long)player.stats().max_pos_ms, speeds.speed(),
+			        player.stats().time_events);
+		}
 		if (!o.video_on && now >= kStartMs) {
 			query = std::thread([&o, graph, &t] {
 				o.q = query_graph(graph, std::string("query_") + t.name + ".log");
@@ -461,6 +662,8 @@ bool run_file(const Test &t, const std::string &graph)
 		query.join();
 	o.ps = &player.stats();
 	result_line(t, o);
+	if (!t.speeds.empty())
+		log_msg("RESULT %s %s", t.name, speeds.str(log_ms() - o.t_play).c_str());
 	return quit_poll() == QUIT_NONE;
 }
 
@@ -500,10 +703,14 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 	feeder.start();
 
 	Outcome out;
-	auto on_time = [&](unsigned, i64 pos) {
+	SpeedPlan speeds(t);
+	SpeedCtl ctl(t);
+	auto on_time = [&](unsigned since_play, i64 pos) {
 		i64 lag = hw.lag_ms(pos);
-		if (lag != INT64_MIN)
+		if (lag != INT64_MIN) {
 			out.lags.add(lag);
+			ctl.lag(since_play, lag, speeds, hw.player());
+		}
 	};
 	std::thread query;
 	unsigned last_stats = 0;
@@ -534,11 +741,14 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 			                       : -1;
 			log_msg("  t=%5.1f s: pushed %u (+%u skips, %u gaps), served to frame %lld, %u reads "
 			        "(%u waited, max %u ms), lead max %lld last %lld frames, %u waiting, "
-			        "pos %lld ms, lag %lld ms",
+			        "pos %lld ms, lag %lld ms, speed %d",
 			        now / 1000.0, ls.real, ls.skips, ls.gaps, served, s.reads, s.waited,
 			        s.wait_ms_max, lead_max(s), (long long)s.lead_frames_last, s.waiting_now,
-			        (long long)hw.player().stats().max_pos_ms, (long long)out.lags.last);
+			        (long long)hw.player().stats().max_pos_ms, (long long)out.lags.last,
+			        speeds.speed());
 		}
+		if (hw.playing())
+			speeds.apply(log_ms() - hw.play_ms(), hw.player());
 		if (hw.playing() && log_ms() - hw.play_ms() >= kStartMs + t.watch_ms)
 			break;
 		if (!hw.playing() && now > 10000) {
@@ -573,9 +783,111 @@ bool run_live(const Test &t, const std::string &graph, const Clip &clip)
 	        feeder.first_refusal().c_str(), ls.frames, ls.real, ls.idr, ls.skips, ls.gaps,
 	        ls.too_big, ls.wait_idr, ls.bad, ls.max_frame, hw.stream().sample_size(),
 	        ls.evicted_reads);
+	if (!t.speeds.empty() || t.ctl_from_ms)
+		log_msg("RESULT %s %s, lag level %lld ms", t.name,
+		        speeds.str(out.t_play ? log_ms() - out.t_play : 0).c_str(), (long long)ctl.base());
 	char line[160];
 	std::snprintf(line, sizeof(line), "       reads %u, waited %u (max %u ms), skips %u, refused %u",
 	              s.reads, s.waited, s.wait_ms_max, ls.skips, feeder.refused());
+	summary.push_back(line);
+	return quit_poll() == QUIT_NONE;
+}
+
+// lv_aac / lv_mp3: a constant-size A/V MP4 (media/csav.py) from the card,
+// released chunk by chunk on its own clock through the stream server, as a
+// live stream with sound would come.
+bool run_paced(const Test &t, const std::string &graph)
+{
+	std::vector<u8> file;
+	if (FILE *f = std::fopen(clip_path(t.clip).c_str(), "rb")) {
+		std::fseek(f, 0, SEEK_END);
+		long size = std::ftell(f);
+		std::fseek(f, 0, SEEK_SET);
+		file.resize(size > 0 ? (usize)size : 0);
+		if (std::fread(file.data(), 1, file.size(), f) != file.size())
+			file.clear();
+		std::fclose(f);
+	}
+	paced::PacedFile src;
+	std::string err = file.empty() ? std::string("cannot read ") + t.clip
+	                               : src.configure(std::move(file), kFps);
+	if (!err.empty()) {
+		log_msg("FAIL %s: %s", t.name, err.c_str());
+		summary.push_back(std::string(t.name) + ": " + err);
+		return quit_poll() == QUIT_NONE;
+	}
+	const paced::Layout &l = src.layout();
+	log_msg("  paced: %llu bytes, data at %llu, %u chunks of %u bytes (%u video frames, %u ms)",
+	        (unsigned long long)src.total(), (unsigned long long)l.data_off, l.chunks, l.chunk,
+	        l.video_per_chunk, src.slot_ms());
+
+	StreamServer server;
+	err = server.start(kPacedPath, &src);
+	Player player;
+	player.set_outputs({kHeardOutput});
+	Outcome o;
+	if (err.empty()) {
+		src.start(log_ms());
+		err = player.open(graph, kPacedPath);
+		if (err.empty())
+			err = player.play();
+	}
+	o.t_play = log_ms();
+	if (!err.empty()) {
+		log_msg("FAIL %s: %s", t.name, err.c_str());
+		summary.push_back(std::string(t.name) + ": " + err);
+		player.close();
+		server.stop();
+		log_notes(server);
+		return quit_poll() == QUIT_NONE;
+	}
+	auto on_time = [&](unsigned since_play, i64 pos) { o.lags.add((i64)since_play - pos); };
+	std::thread query;
+	unsigned last_stats = 0;
+	bool stop = false;
+	while (!stop) {
+		unsigned now = log_ms() - o.t_play;
+		if (now >= kStartMs + t.watch_ms)
+			break;
+		if (!o.video_on && now >= kStartMs && camera::clear()) {
+			query = std::thread([&o, graph, &t] {
+				o.q = query_graph(graph, std::string("query_") + t.name + ".log");
+			});
+			vout::show();
+			o.video_on = true;
+			o.t_video = log_ms();
+		}
+		player.poll(on_time);
+		log_notes(server);
+		if (now - last_stats >= 1000) {
+			last_stats = now;
+			StreamStats s = server.stats();
+			log_msg("  t=%5.1f s: released %llu of %u chunks, %u reads (%u preads, %u waited, "
+			        "max %u ms), lead last %lld chunks, %u waiting, pos %lld ms",
+			        now / 1000.0, (unsigned long long)src.frames(), l.chunks, s.reads, s.preads,
+			        s.waited, s.wait_ms_max, (long long)s.lead_frames_last, s.waiting_now,
+			        (long long)player.stats().max_pos_ms);
+		}
+		stop = sleep_quit(20);
+	}
+	if (o.video_on)
+		vout::hide();
+	player.poll(on_time);
+	player.close();
+	server.stop();
+	if (query.joinable())
+		query.join();
+	log_notes(server);
+	o.ps = &player.stats();
+	result_line(t, o);
+	StreamStats s = server.stats();
+	log_msg("RESULT %s stream: opens=%u reads=%u preads=%u bytes=%llu read=%u..%u waited=%u "
+	        "wait_max=%u ms lead_max=%lld chunks unblocked=%u far=%u eof=%u",
+	        t.name, s.opens, s.reads, s.preads, (unsigned long long)s.bytes, s.min_read,
+	        s.max_read, s.waited, s.wait_ms_max, lead_max(s), s.unblocked, s.far, s.eof);
+	char line[160];
+	std::snprintf(line, sizeof(line), "       reads %u (%u preads), waited %u (max %u ms)",
+	              s.reads, s.preads, s.waited, s.wait_ms_max);
 	summary.push_back(line);
 	return quit_poll() == QUIT_NONE;
 }
@@ -587,9 +899,9 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 	char title[96];
 	std::snprintf(title, sizeof(title), "Test %d/%d: %s", n, total, t.title);
 	log_msg("== test %d/%d %s: %s (%s)", n, total, t.name, t.title,
-	        t.kind == Kind::File ? t.clip : kRawClip);
+	        t.kind == Kind::Live ? kRawClip : t.clip);
 
-	if (t.kind == Kind::File && access(clip_path(t.clip).c_str(), R_OK) != 0) {
+	if (t.kind != Kind::Live && access(clip_path(t.clip).c_str(), R_OK) != 0) {
 		log_msg("FAIL %s: %s missing", t.name, clip_path(t.clip).c_str());
 		summary.push_back(std::string(t.name) + ": clip missing");
 		return true;
@@ -600,14 +912,22 @@ bool run_test(int n, int total, const Test &t, const Clip *clip, const std::stri
 		return true;
 	}
 
-	ui::show(title, std::string(t.what) + (t.stalls.empty() ? kSeen : kSeenStall), kFooter);
+	ui::show(title, std::string(t.what) + seen_text(t), kFooter);
 	if (sleep_quit(kLabelMs))
 		return false;
 	ui::hide();
 
 	char gname[48];
 	std::snprintf(gname, sizeof(gname), "hello9_%d_%u", (int)getpid(), ++graphs);
-	return t.kind == Kind::File ? run_file(t, gname) : run_live(t, gname, *clip);
+	switch (t.kind) {
+	case Kind::File:
+		return run_file(t, gname);
+	case Kind::Paced:
+		return run_paced(t, gname);
+	case Kind::Live:
+		break;
+	}
+	return run_live(t, gname, *clip);
 }
 
 bool selected(const char *only, const Test &t)
@@ -678,14 +998,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	char intro[600];
+	char intro[700];
 	std::snprintf(intro, sizeof(intro),
-	              "Park the car. %zu test videos, one after the other, with a screen before "
-	              "each. Turn the main knob ONE click whenever you see the moving test picture. "
-	              "Most run for 15-36 s; in the pause test the picture freezes twice, which is "
-	              "part of the test.\n\nLeave the card in until the results screen has gone.",
+	              "Park the car, radio ON, and film the screen WITH SOUND. %zu test videos, one "
+	              "after the other, with a screen before each that says what to watch. Turn the "
+	              "main knob ONE click whenever you see the moving test picture. Some tests "
+	              "change the playing speed; the last six play beeps on the car's speakers (the "
+	              "radio goes quiet).\n\nLeave the card in until the results screen has gone.",
 	              run.size());
-	ui::show("hello9: streaming test (~4.5 min)", intro, kFooter);
+	ui::show("hello9: streaming test (~6 min)", intro, kFooter);
 	if (!sleep_quit(kIntroMs)) {
 		int n = 0;
 		for (const Test *t : run)

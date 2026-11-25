@@ -115,7 +115,8 @@ HBDSI  := $(call common,hbdsi hbdsi_wire)
 UI     := $(call commonxx,ui)
 SBCPARSE := $(call commonxx,sbc)
 CAMERA := $(wildcard src/common/camera/*.cpp src/common/camera/*.h)
-LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_stream) $(CAMERA) $(IOM)
+LIVE   := $(call commonxx,h264 csmp4 live_stream stream_server player vout hw_stream) \
+          src/common/stream_source.h $(CAMERA) $(IOM)
 
 # Apps: build/<app> from src/<app>/*.c + the src/common groups it uses.
 # APPS is everything `make` builds, and `make sd` puts all of them in the
@@ -390,7 +391,8 @@ check: build/$(APP)
 # hello6's clips 9 and 10 are c7 and c8, written to the card while they play.
 CLIPS_hello6   := c1_mpeg2_576.mpg c2_mpeg4_480.avi c3_h264_480.mp4 c4_h264_800.mp4 \
                   c5_h264_336.mp4 c6_h264_336_na.mp4 c7_h264_336_frag.mp4 c8_h264_336.mpg
-CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264
+CLIPS_hello9   := c5_h264_336.mp4 c9_h264_336_cs.mp4 c11_h264_336.h264 \
+                  v1_av_aac.mp4 v2_av_mp3.mp4 v3_cs_aac.mp4 v4_cs_mp3.mp4
 CLIPS_hello10  := c3_h264_480.mp4
 CLIPS_hello12  := a1_sbc_ping.sbc a2_sbc_sweep.sbc
 FWTOOLS_hello5 := testapp-file
@@ -431,7 +433,7 @@ MEDIA_IMAGE := mmi-media
 build/.media-image: media/Dockerfile
 	docker build -t $(MEDIA_IMAGE) media
 	mkdir -p build && touch $@
-build/clips/.done: media/mkclips.sh media/csmp4.py build/.media-image
+build/clips/.done: media/mkclips.sh media/csmp4.py media/csav.py build/.media-image
 	rm -rf build/clips && mkdir -p build/clips
 	docker run --rm -u $(shell id -u):$(shell id -g) -v $(CURDIR):/src -w /src \
 	    $(MEDIA_IMAGE) bash media/mkclips.sh build/clips
@@ -525,9 +527,10 @@ build/test_hello8: tests/test_hello8.cpp tests/check.h src/hello8/checks.cpp src
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/hello8 -Isrc/common \
 	    -o $@ $(filter %.cpp,$^)
 # LIVE's pure part (H.264 bits, CS-MP4 header, the live stream with gap
-# fill) and hello9's release schedule
+# fill) and hello9's release schedule and paced A/V file
 build/test_live: tests/test_live.cpp tests/check.h $(call commonxx,h264 csmp4 live_stream) \
-    src/hello9/schedule.cpp src/hello9/schedule.h
+    src/common/stream_source.h src/hello9/schedule.cpp src/hello9/schedule.h \
+    src/hello9/paced.cpp src/hello9/paced.h
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
 	    -Isrc/hello9 -o $@ $(filter %.cpp,$^)
