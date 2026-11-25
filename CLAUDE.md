@@ -15,7 +15,7 @@ make sdk                         # once: mmi-sdk image (toolchain + sysroot from
 make                             # cross-compile all apps into build/
 make test                        # host unit tests (ASan/UBSan), incl. protobuf + live-stream checks
 make sd                          # build/sd/ for the car: every app in apps/, run.sh starts the runner (menu)
-tools/sync_sd.sh /media/$USER/CARD       # rsync build/sd/ to the mounted card (host; changes only, keeps var/)
+tools/sync_sd.sh /media/$USER/CARD       # rsync build/sd/ to the mounted card (host; changes only, clears var/ after asking)
 make addr APP=x ADDR="0x804..."  # crash address -> function, file:line (apps are ET_EXEC, unstripped)
 make apk / apk-test / apk-install        # Android sender (android/Makefile, adb in a container)
 make aoa-host                    # desk: the PC plays the MMI for the phone app (stop host adb first)

@@ -420,7 +420,7 @@ sd: $(addprefix build/,$(APPS)) $(SD_FILES) $(if $(SD_CLIPS),build/clips/.done)
 	$(RUN) python3 -I /toolkit-builder/encoder.py encode \
 	    /toolkit-core/copie_scr_plain.sh build/sd/copie_scr.sh
 	@echo "SD card layout ready in build/sd/ - copy its contents to the card root:"
-	@echo "  tools/sync_sd.sh <card mount point>   (rsync: only changes, keeps the card's var/)"
+	@echo "  tools/sync_sd.sh <card mount point>   (rsync: only changes, deletes the card's var/ after asking)"
 	@echo "  in apps/ (the runner's menu): $(SD_MENU)"
 	@echo "  clips: $(or $(SD_CLIPS),none)"
 	@echo "  unit tools: $(or $(notdir $(SD_FWTOOLS)),none)"

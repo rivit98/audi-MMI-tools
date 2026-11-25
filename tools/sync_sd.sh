@@ -1,17 +1,32 @@
 #!/bin/bash
 # sync_sd.sh - copy build/sd/ (make sd) to a mounted SD card, changes only.
 #
-#   tools/sync_sd.sh /media/$USER/CARD
+#   tools/sync_sd.sh [-y] [--keep-logs] /media/$USER/CARD
 #
 # rsync -rt: FAT has no owners or modes, so only files and times;
 # --modify-window=1: FAT keeps times to 2 s; --delete: files no longer in
-# build/sd/ go from the card too, except var/ (the car's logs: copy it off
-# first). make sd copies with cp -p, so unchanged files keep their times and
-# are skipped. Runs on the host: the card is mounted here, not in Docker.
+# build/sd/ go from the card too, the last run's logs in var/ included (copy
+# var/ off first: the script asks before deleting them, -y doesn't ask,
+# --keep-logs keeps them). make sd copies with cp -p, so unchanged files keep
+# their times and are skipped. Runs on the host: the card is mounted here,
+# not in Docker.
 set -euo pipefail
 
+yes=0
+keep_logs=0
+while [[ $# -gt 0 && "$1" == -* ]]; do
+  case "$1" in
+  -y) yes=1 ;;
+  --keep-logs) keep_logs=1 ;;
+  *)
+    echo "$0: unknown option $1" >&2
+    exit 2
+    ;;
+  esac
+  shift
+done
 if [[ $# -ne 1 || -z "$1" ]]; then
-  echo "usage: $0 <sd card mount point>" >&2
+  echo "usage: $0 [-y] [--keep-logs] <sd card mount point>" >&2
   exit 2
 fi
 card="${1%/}"
@@ -45,7 +60,22 @@ vfat | msdos | exfat) ;;
   ;;
 esac
 
-rsync -rt --modify-window=1 --delete --exclude=/var/ --itemize-changes --stats \
+exclude=()
+if [[ $keep_logs -eq 1 ]]; then
+  exclude=(--exclude=/var/)
+else
+  logs=0
+  [[ -d "$card_real/var" ]] && logs="$(find "$card_real/var" -type f | wc -l)"
+  if [[ $logs -gt 0 && $yes -eq 0 ]]; then
+    read -r -p "$card/var: $logs files from the last run will be deleted (copied off?) [y/N] " answer
+    if [[ "$answer" != [yY] ]]; then
+      echo "nothing changed (--keep-logs syncs and keeps var/)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+rsync -rt --modify-window=1 --delete "${exclude[@]}" --itemize-changes --stats \
   "$src/" "$card_real/"
 echo "syncing ..."
 sync
