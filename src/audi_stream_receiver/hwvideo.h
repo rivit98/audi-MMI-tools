@@ -47,6 +47,11 @@ void stop(const char *why);
 bool status_pop(u8 *code);
 // Main loop: the video has (or is about to have) the screen.
 bool active();
+// Main loop: its own screen is closed (true) or up (false). The picture goes
+// on only while it is closed: closing it later shows the HMI's displayables,
+// which would cover the picture (a restart after an io-media error raced
+// the main loop's screen this way).
+void screen_released(bool released);
 
 } // namespace hwvideo
 

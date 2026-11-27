@@ -132,6 +132,7 @@ int main(int argc, char *argv[])
 	if (!shown)
 		log_msg("FAIL screen; running headless (log only)");
 	screen_up = shown;
+	hwvideo::screen_released(!shown);
 	camera::Takeover takeover;
 	hwvideo::start();
 	if (shown)
@@ -147,12 +148,15 @@ int main(int argc, char *argv[])
 			log_msg("screen: closed for the H.264 video");
 			screen_close();
 			screen_up = false;
+			hwvideo::screen_released(true);
 		} else if (shown && !hwvideo::active() && !screen_up && camera::clear()) {
 			log_msg("screen: back after the H.264 video");
+			hwvideo::screen_released(false);
 			screen_up = screen_open() == 0;
 			if (!screen_up) {
 				log_msg("FAIL screen: could not open it again; headless from now on");
 				shown = false;
+				hwvideo::screen_released(true);
 			}
 			last_version = ~0u;               // redraw
 		}

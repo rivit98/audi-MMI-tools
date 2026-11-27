@@ -39,6 +39,10 @@ struct HwOptions {
 	// for a new vcap_mode
 	bool video_on_already = false;
 	vout::Mode vcap_mode = vout::Mode::Keep;
+	// Empty, or false while the picture must wait: the owner's own screen
+	// is still up, and closing it later would show the HMI's displayables
+	// over the picture.
+	std::function<bool()> may_show;
 };
 
 class HwStream {

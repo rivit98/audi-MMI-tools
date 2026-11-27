@@ -87,6 +87,7 @@ u64 win_bytes = 0;                 // frames taken into the stream this window (
 u32 win_max_bytes = 0;
 
 std::atomic<bool> is_active{false};
+std::atomic<bool> screen_free{false};   // the main loop's screen is closed
 std::atomic<bool> quit{false};
 std::thread thread;
 bool thread_started = false;
@@ -265,6 +266,7 @@ void setup(const std::vector<u8> &payload)
 	o.graph = g;
 	o.video_on_already = video_held;
 	o.vcap_mode = vout::Mode::Weave;
+	o.may_show = [] { return screen_free.load(); };
 	picture_mode = o.vcap_mode;
 
 	h264::Sps sps;
@@ -732,6 +734,11 @@ bool status_pop(u8 *code)
 bool active()
 {
 	return is_active;
+}
+
+void screen_released(bool released)
+{
+	screen_free = released;
 }
 
 } // namespace hwvideo

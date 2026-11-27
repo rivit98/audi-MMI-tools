@@ -64,7 +64,7 @@ std::string HwStream::poll(const std::function<void(unsigned, i64)> &on_time)
 	}
 	// not over the rear camera: the picture comes when it has gone
 	if (playing_ && !video_on_ && opts_.show_video && log_ms() - t_play_ >= opts_.video_after_ms &&
-	    camera::clear()) {
+	    camera::clear() && (!opts_.may_show || opts_.may_show())) {
 		vout::show(opts_.vcap_mode);
 		video_on_ = true;
 		t_video_ = log_ms();

@@ -105,7 +105,8 @@ the frames io-media holds (learnt before), counted as `from the read position`.
 - io-media catch-up: when io-media reads over 12 frames behind, the frames
   in between are dropped, an IDR asked for, and the stream plays on. A
   frame over 64 KB raises the frame size to 128 KB with one restart.
-- Restart after an io-media error: the stream comes back by itself.
+- Restart after an io-media error: the stream comes back by itself (but see
+  below: its picture stayed hidden).
 
 **Doesn't work / known**
 - After ~190 s io-media reads slower than 25 fps at ~6 Mbit/s and falls
@@ -117,5 +118,10 @@ the frames io-media holds (learnt before), counted as `from the read position`.
 - 256 KB frames made io-media fall behind and fail ~45 s in: hence the 128 KB cap.
 
 **Built, not yet confirmed on the car**
+- The picture after an io-media error restart: the restarted stream played,
+  but its picture went on while the app's own screen was still closing, and
+  the close showed the HMI's displayables over it (black until the user
+  restarted). The picture now waits until the app's screen is closed
+  (`hwvideo::screen_released`).
 - The 2 GiB cap's planned restart (a short black gap every ~10.6 min with
   128 KB frames).
