@@ -197,6 +197,10 @@ NDK). Differences from the car app:
   is exactly 720x464 at x 70-789, y 0-463: a 1:1 crop of it gives the MMI a
   full-width map with no bar, rail or scaling, 464 of the 480 lines the MMI
   shows.
+- **"800x480 1:1" video size** (the fourth entry of the app's Video size
+  list; the others stay as they were): margins 10 / 16 + `ui_config`, the
+  map card at x 70 copied with nearest sampling into a 720x464 H.264
+  picture (`AaGeometry`). Built, not yet confirmed on the phone or car.
 - **Video size setting: 16:9 without the rail.** At 800x480 Android Auto
   draws its bar at the bottom [repo, desk]. At 1280x720 and 1920x1080 it
   draws it as a rail on the left instead, 59 of 720 columns of the scaled

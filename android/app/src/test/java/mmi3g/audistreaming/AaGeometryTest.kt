@@ -9,11 +9,13 @@ class AaGeometryTest {
     private val m800 = AaGeometry.MODES[0]
     private val m720 = AaGeometry.MODES[1]
     private val m1080 = AaGeometry.MODES[2]
+    private val m1to1 = AaGeometry.MODES[3]
 
     @Test
     fun modesAndTheirDpi() {
-        assertEquals(listOf("800x480", "1280x720", "1920x1080"), AaGeometry.MODES.map { it.toString() })
+        assertEquals(listOf("800x480", "1280x720", "1920x1080", "800x480 1:1"), AaGeometry.MODES.map { it.toString() })
         assertEquals(140, m800.dpi)
+        assertEquals(140, m1to1.dpi)
         assertEquals(210, m720.dpi)
         assertEquals(315, m1080.dpi)
     }
@@ -52,6 +54,29 @@ class AaGeometryTest {
         assertEquals(1f, q[2], 1e-6f)
         assertEquals(0f, q[1], 1e-6f)
         assertEquals(1f, q[5], 1e-6f)
+    }
+
+    @Test
+    fun oneToOneCopiesTheMapCardBesideTheRail() {
+        // desk: margins 10 / 16 + ui_config at 140 dpi -> 70 px rail, map card x 70-789, y 0-463
+        assertTrue(m1to1.oneToOne)
+        assertTrue(m1to1.hasRail)
+        assertEquals(70, m1to1.rail)
+        assertEquals(720 to 464, m1to1.picW to m1to1.picH)
+        val g = AaGeometry.geometry(m1to1)
+        assertEquals(ScreenCrop.Geometry(800, 480, 70, 0, 720, 464, 1), g)
+        assertTrue(!g.scaled)
+        assertTrue(!GlBox.linear(g))          // nearest: a plain copy
+        val q = GlBox.quadTex(g)
+        assertEquals(70f / 800, q[0], 1e-6f)
+        assertEquals(790f / 800, q[2], 1e-6f)
+        // the other modes keep the scaled 720x432 picture, no margins
+        for (m in AaGeometry.MODES.take(3)) {
+            assertTrue(!m.oneToOne)
+            assertEquals(720 to 432, m.picW to m.picH)
+        }
+        // a 790x480 area is 5:3 or narrower: the bar, no rail (desk)
+        assertTrue(!AaGeometry.Mode(800, 480, 10, 0).hasRail)
     }
 
     @Test

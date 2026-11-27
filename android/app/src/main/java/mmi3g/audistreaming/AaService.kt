@@ -45,10 +45,10 @@ import java.util.concurrent.Executors
  * server. This service connects to it on 127.0.0.1:5277, and tries again
  * every [RETRY_MS] until it answers and after every session.
  *
- * The session asks for the chosen video size ([mode]: 800x480, 1280x720,
- * 1920x1080) without margins (Android Auto ignores a width margin), and the
- * whole frame is scaled into the MMI's 720x432 H.264 picture with its
- * shape kept ([AaGeometry]). Only system sounds are advertised: music and navigation stay
+ * The session asks for the chosen video size ([mode], [AaGeometry]): the
+ * whole frame scaled into the MMI's 720x432 H.264 picture with its shape
+ * kept, or ("800x480 1:1") margins + ui_config and the UI's 720x464 copied
+ * 1:1. Only system sounds are advertised: music and navigation stay
  * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
  *
  * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
@@ -319,7 +319,7 @@ class AaService : Service() {
         val m = mode
         sessionMode = m
         AppLog.i("AA mode: asking for ${m} video at ${m.dpi} dpi")
-        val s = AaNative(callbacks, true, false, 0, 0, m.w, m.h, m.dpi, "Audi MMI")
+        val s = AaNative(callbacks, true, false, m.marginW, m.marginH, m.oneToOne, m.w, m.h, m.dpi, "Audi MMI")
         session = s
         sessions++
         fpsDecoded = 0
@@ -363,7 +363,7 @@ class AaService : Service() {
     }
 
     private fun newEncoder(fps: Int): HwEncoder? {
-        val e = HwEncoder(PIC_W, PIC_H, fps, Streaming.bitRate, false, handler, mmi::onConfig, mmi::onFrame) { why ->
+        val e = HwEncoder(sessionMode.picW, sessionMode.picH, fps, Streaming.bitRate, false, handler, mmi::onConfig, mmi::onFrame) { why ->
             AppLog.w("AA mode H.264: $why")
             pipelineFailed = why
         }
@@ -411,8 +411,8 @@ class AaService : Service() {
         val caps = Streaming.link?.videoCaps
         val fps = wantFps()
         val e = newEncoder(fps) ?: return false
-        val g = AaGeometry.geometry(sessionMode, PIC_W, PIC_H)
-        val sc = GlScaler(e.surface!!, PIC_W, PIC_H, g, fps)
+        val g = AaGeometry.geometry(sessionMode)
+        val sc = GlScaler(e.surface!!, g.picW, g.picH, g, fps)
         sc.previewWhole = true
         if (!sc.start()) {
             pipelineFailed = "GL: ${sc.error}"
@@ -435,7 +435,7 @@ class AaService : Service() {
         }
         pipelineFailed = ""
         AppLog.i("AA mode: picture path up: ${e.description}, Android Auto's $sessionMode, rail ${sessionMode.rail} px left out, " +
-            "${g.keptW}x${g.keptH} -> ${g.picW}x${g.picH} in ${PIC_W}x$PIC_H")
+            "${g.keptW}x${g.keptH} -> ${g.picW}x${g.picH}${if (g.scaled) "" else " (1:1)"}")
         return true
     }
 
@@ -562,9 +562,6 @@ class AaService : Service() {
         private const val BYE_WAIT_MS = 300L
         private const val STATUS_LOG_MS = 5000L
         private const val SETTLE_MS = 700L       // as the mirroring's FPS_SETTLE_MS
-        // the MMI's H.264 picture (H264.pictureSize(720, 576)), Android Auto's 800x480 scaled 0.9
-        const val PIC_W = 720
-        const val PIC_H = 432
         const val NO_SERVER = "Waiting for Android Auto's head unit server on this phone."
 
         @Volatile private var instance: AaService? = null

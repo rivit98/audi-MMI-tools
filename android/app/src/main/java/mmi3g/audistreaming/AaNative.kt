@@ -8,7 +8,7 @@ package mmi3g.audistreaming
  * calls ([rx], [tick], [start], [touch], [bye]).
  */
 class AaNative(callbacks: Callbacks, audio: Boolean, audioMedia: Boolean, marginW: Int, marginH: Int,
-               videoW: Int, videoH: Int, dpi: Int, name: String) : AutoCloseable {
+               uiConfig: Boolean, videoW: Int, videoH: Int, dpi: Int, name: String) : AutoCloseable {
     interface Callbacks {
         /** Bytes for the phone, in order. */
         fun send(data: ByteArray)
@@ -19,7 +19,7 @@ class AaNative(callbacks: Callbacks, audio: Boolean, audioMedia: Boolean, margin
         fun audio(channel: Int, data: ByteArray)
     }
 
-    private var handle = nativeCreate(callbacks, audio, audioMedia, marginW, marginH, 0, videoW, videoH, dpi, name)
+    private var handle = nativeCreate(callbacks, audio, audioMedia, marginW, marginH, uiConfig, 0, videoW, videoH, dpi, name)
 
     /** VERSION_REQUEST; false: Failed ([error]). */
     fun start(cert: String, key: String): Boolean = nativeStart(handle, cert, key)
@@ -71,7 +71,8 @@ class AaNative(callbacks: Callbacks, audio: Boolean, audioMedia: Boolean, margin
         fun drainLog(): Array<String> = nativeDrainLog() ?: emptyArray()
 
         @JvmStatic private external fun nativeCreate(cb: Callbacks, audio: Boolean, audioMedia: Boolean,
-                                                     marginW: Int, marginH: Int, videoFps: Int, videoW: Int,
+                                                     marginW: Int, marginH: Int, uiConfig: Boolean,
+                                                     videoFps: Int, videoW: Int,
                                                      videoH: Int, dpi: Int, name: String): Long
         @JvmStatic private external fun nativeStart(h: Long, cert: String, key: String): Boolean
         @JvmStatic private external fun nativeRx(h: Long, data: ByteArray, n: Int)
