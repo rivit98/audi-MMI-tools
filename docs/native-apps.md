@@ -629,14 +629,15 @@ after ~18 s. Both are handled by retrying.
 **Protocol** (`proto.h` = `android/.../Proto.kt`): frames of
 `type u8 | len u16 LE | payload`, at most 2048 B. `HELLO`/`HELLO_REPLY`,
 `VIDEO_CAPS`, `VIDEO_START` + `VIDEO_DATA` chunks, `VIDEO_ACKS`,
-`VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`. Types `0x02`/`0x03`/`0x08`/`0x0A`
-and formats 1 (JPEG) / 2 (PNG) are retired: don't reuse them.
+`VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`, `STREAM_SETTINGS`. Types
+`0x02`/`0x03`/`0x08`/`0x0A`/`0x0F`–`0x12` and formats 1 (JPEG) / 2 (PNG) are
+retired: don't reuse them.
 
-**Screen streaming, measured:** hardware H.264: 25 fps, ~0.6 s lag, MMI
-CPU ~24 % ([src/audi_stream_receiver/README.md](../src/audi_stream_receiver/README.md)). Streaming stops when the phone locks (Android revokes
-MediaProjection). CPU-decoded JPEG pictures (stb_image) managed ~3 fps:
-~100 ms of MMI work per picture capped them near 10 fps, so the receiver
-takes H.264 only.
+**Streaming, measured:** the phone app's Android Auto picture as hardware
+H.264: 25 fps, MMI lag ~300–400 ms
+([src/audi_stream_receiver/README.md](../src/audi_stream_receiver/README.md)).
+CPU-decoded JPEG pictures (stb_image) managed ~3 fps: ~100 ms of MMI work
+per picture capped them near 10 fps, so the receiver takes H.264 only.
 
 **Desk testing:** `make aoa-host` makes the PC play the MMI's part, so
 phone-app bugs and MMI bugs can be told apart without the car.

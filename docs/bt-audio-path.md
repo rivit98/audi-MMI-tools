@@ -153,12 +153,9 @@ live audio, not the source management. **[confirmed: [hello12](../src/hello12/RE
 `s` and `S` play a live stream from our resource manager, 512-byte reads,
 short reads fine]**
 
-**The phone's audio reaches the MMI as SBC over USB** [built, not yet run
-on the car]: the phone app captures its own playback, encodes it with
-BlueZ's SBC encoder and sends it in AUDIO_* messages
-([audi_stream_receiver](../src/audi_stream_receiver/README.md)), which
-checks and logs it but doesn't play it yet. Fed to a live `sbc:` input it
-would play like hello12's stream.
+**Phone audio over USB as SBC** would play the same way, fed to a live
+`sbc:` input like hello12's stream. The phone app doesn't send audio:
+Android Auto's music and navigation stay on the phone, over Bluetooth.
 
 **PCM is only reachable on a type-2 graph**: the codec comes from devctl
 `0x40100520`, and codec 0 is `PCM`. There is no `pcm:` prefix.

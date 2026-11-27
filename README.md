@@ -50,7 +50,7 @@ the rear camera library (is the camera up; ch4's telegrams) in
 | [hello10](src/hello10/README.md) | 800×480 video: io-media capture-width probe, a second io-media |
 | [hello11](src/hello11/README.md) | read only: rear-camera, light (night map) and light-sensor / dimming signals on `/dev/ipc/ch4`, `/dev/ipc/ch5`, ndr and slog |
 | [hello12](src/hello12/README.md) | live SBC audio through io-media's Bluetooth reader (DSP decode, own resource manager); a stand-in for the Bluetooth stack's `/dev/wms/player1` |
-| [audi_stream_receiver](src/audi_stream_receiver/README.md) | phone screen over USB (AOA): hardware H.264; phone app in [android/](android/), with an Android Auto mode ([docs/android-auto.md](docs/android-auto.md) §4.3) |
+| [audi_stream_receiver](src/audi_stream_receiver/README.md) | Android Auto from the phone over USB (AOA) as hardware H.264; phone app in [android/](android/) ([docs/android-auto.md](docs/android-auto.md) §4.3) |
 | [android_auto](src/android_auto/README.md) | Android Auto head unit, proof of connectivity: AOA, TLS, services; the phone's video counted, not shown |
 | [runner](src/runner/README.md) | test menu: lists every binary in the card's `apps/` by file name; the main knob chooses, its press runs it (run.sh starts it) |
 
@@ -92,7 +92,7 @@ What is built but not yet confirmed is listed in each app's README and in
 | [cpp-apps.md](docs/cpp-apps.md) · [sdk/include-c++](sdk/include-c++/README.md) | C++ rules · how the C++ runtime is put together |
 | [qnx-sh-fpu-div0.md](docs/qnx-sh-fpu-div0.md) | why a divide by zero is a fatal SIGFPE |
 | [usb-stack.md](docs/usb-stack.md) | io-usb / libusbdi behaviour, AOA |
-| [phone-mirroring.md](docs/phone-mirroring.md) | video decoder, display path, streaming options and results |
+| [phone-mirroring.md](docs/phone-mirroring.md) | phone video as hardware H.264: decoder, display path, live stream, options and results |
 | [android-auto.md](docs/android-auto.md) | what an Android Auto receiver would need |
 | [rear-camera.md](docs/rear-camera.md) | how the HMI shows the rear camera; what apps must not do |
 | [bt-audio-path.md](docs/bt-audio-path.md) | how Bluetooth music reaches the speakers (BT stack, `/dev/wms`, io-media's `a2dp_player`); feeding that path from an app |

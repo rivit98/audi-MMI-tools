@@ -1,7 +1,7 @@
 // sbc.h - SBC frame headers and their CRC, a clip's frame index, and the
 // real-time release of a live SBC stream (pure: tests/test_hello12.cpp,
-// tests/test_audio_rx.cpp checks the parser and the CRC against BlueZ's
-// encoder). hello12 and audi_stream_receiver use it.
+// tests/test_sbc.cpp checks the parser and the CRC against BlueZ's
+// encoder). hello12 uses it.
 //
 // SBC frame header (A2DP spec 12.6): sync 0x9C; byte 1 = sampling frequency
 // (2 bits: 16, 32, 44.1, 48 kHz), blocks (2 bits: 4, 8, 12, 16), channel

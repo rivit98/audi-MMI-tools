@@ -15,8 +15,7 @@ two places that the existing `audi_stream_receiver` work cannot answer:
 
 1. **Live H.264 video at 800x480.** The DM642 hardware decoder refuses
    800-wide input [repo]; live H.264 at up to 720 wide works only through a
-   CS-MP4 stream ([native-apps.md](native-apps.md) §10), the path hardware
-   mirroring uses. Cropping the SPS of an 800x480 stream to 720 stays
+   CS-MP4 stream ([native-apps.md](native-apps.md) §10). Cropping the SPS of an 800x480 stream to 720 stays
    black (section 4.1). The way around it is on the phone: the phone app's
    Android Auto mode decodes Android Auto's video and sends the MMI a
    720x432 stream (section 4.3). Software decode on the SH4 is fast
@@ -91,15 +90,15 @@ video channel. The head unit acks each frame (the acks pace the phone, up
 to `max_unacked` in flight), shows the picture full screen, and sends
 touch, knob and button events back on the input channel.
 
-**The same pipeline as hardware mirroring.** This is the H.264 path of
-[phone-mirroring.md](phone-mirroring.md): there the phone app encodes
+**The phone app's H.264 pipeline.** This is the H.264 path of
+[phone-mirroring.md](phone-mirroring.md): the phone app encodes
 H.264 and audi_stream_receiver feeds the frames through VIDEO (`hw_stream`,
 `csmp4`, `stream_server`, `player`, `vout`, the rear-camera handover) to
 the DM642, which plays a live CS-MP4 stream on screen [repo]. VIDEO does not
 care where the frames come from, so android_auto can hand AA's frames to
 the same `HwStream`. What differs is who controls the encoder:
 
-| | Mirroring (H.264) | Android Auto |
+| | Phone app (H.264) | Android Auto |
 |---|---|---|
 | Encoder settings | ours: 720x432, 25 fps, Baseline | the phone's, from the offered list only: **800x480 minimum** |
 | Width | 720: plays [repo] | 800: **io-media refuses width > 720 or height > 576** (`FUN_080d1760`), and the DSP decoder and its video signal are 720 wide (phone-mirroring §7.14) [repo]; cropped to 720 in the SPS it stays black [repo] |
@@ -108,7 +107,7 @@ the same `HwStream`. What differs is who controls the encoder:
 | Pacing | batched `VIDEO_ACKS` | the protocol's media acks, held to 25 fps (ack pacing) |
 
 So the 720-wide limit is the one blocker, the same one an 800x480 clip hit
-in the mirroring tests.
+in hello6's tests.
 
 **Margin + SPS crop: does not work [repo].** The idea was to
 offer 800x480 with `width_margin = 80` (the phone keeps the car UI in the
@@ -155,8 +154,7 @@ reach the screen through io-media. The options left:
 The DM642 can't show what Android Auto sends, but it shows what the phone
 app sends. So the "Audi streaming" app on the phone also acts as the head
 unit for Android Auto on the **same phone** ("self mode", as open-headunit
-and Headunit Reloaded do), and sends the MMI the picture through the
-mirroring's H.264 path.
+and Headunit Reloaded do), and sends the MMI the picture as its own H.264 stream.
 
 ```
 Android Auto (phone)  --TCP 127.0.0.1:5277-->  AaService (same phone)
@@ -200,7 +198,9 @@ NDK). Differences from the car app:
 - **"800x480 1:1" video size** (the fourth entry of the app's Video size
   list; the others stay as they were): margins 10 / 16 + `ui_config`, the
   map card at x 70 copied with nearest sampling into a 720x464 H.264
-  picture (`AaGeometry`). Built, not yet confirmed on the phone or car.
+  picture (`AaGeometry`). Works on the car at 25 fps [repo]: the MMI's lag
+  is ~60 ms higher than at 720x432 (medians ~370-400 against ~320 ms); the
+  lag seen on screen was larger, so the rest is on the phone [estimate].
 - **Video size setting: 16:9 without the rail.** At 800x480 Android Auto
   draws its bar at the bottom [repo, desk]. At 1280x720 and 1920x1080 it
   draws it as a rail on the left instead, 59 of 720 columns of the scaled
@@ -218,7 +218,7 @@ NDK). Differences from the car app:
   GPU's frame clock draws exactly "Max fps" a second into the encoder (at
   most 25, the MMI's stream rate) and drops the rest. No ack pacing
   (`fps=0`): the acks go at once. "Max fps", "H.264 rate"
-  and "Keep screen on" are the mirroring's settings, shown on both pages. A
+  and "Keep screen on" are the app's stream settings. A
   new rate or bit rate gets a new encoder that the GPU draws into
   (`GlScaler.retarget`); the decoder keeps running, so Android Auto never
   notices, and only the MMI restarts its stream.
@@ -229,16 +229,17 @@ NDK). Differences from the car app:
 - **Input.** The phone shows the same 720x432 picture; touches on it go to
   Android Auto as touch events (`Session::touch`), mapped back to the
   800x480 video's pixels.
-- **Modes.** The app has two pages, Screen (mirroring) and Android Auto;
-  sliding between them switches the mode, and only one streams to the MMI.
-  The MMI side (audi_stream_receiver) is unchanged.
+- **The only mode.** The app opens on its Android Auto page and starts the
+  mode; Start / Stop switch it. The MMI side is audi_stream_receiver.
 
 **On the car [repo]:** the relay ran for 27 min at a steady 25 fps with the
 phone locked and its screen off; MMI-side lag 300-430 ms, MMI CPU ~55-60 %;
 the rear camera took the screen and gave it back. With 256 KB frame slots
 io-media fell behind and failed with EIO ~45 s after each config; the MMI
 now caps frames at 128 KB and catches io-media up (audi_stream_receiver's
-README) [built, not yet confirmed on the car].
+README); in ~10-minute sessions io-media then catches up about every 30 s
+after ~190 s, and a stream longer than 2 GiB ended in EIO, now a planned
+restart (phone-mirroring §7.9, §7.13) [repo].
 
 **Open:**
 
@@ -266,9 +267,9 @@ README) [built, not yet confirmed on the car].
 - **1280x720 or 1920x1080 instead of 800x480**, with dpi raised to match:
   more pixels for the same UI, scaled down by more for sharper text. Margins
   with `ui_config` would keep the UI in a 5:3 corner of these 16:9 frames. Only if 0.9 at 800x480 looks soft on the car.
-- **A plain mirror fallback:** if self mode fails, mirroring Android Auto's
-  own phone-screen UI is not possible either (Google removed it); the
-  Screen page with Google Maps is the fallback.
+- **No fallback:** if self mode fails, there is nothing else: Android
+  Auto's own phone-screen UI is gone (Google removed it), and the app has
+  no screen mirroring (phone-mirroring §4).
 
 ### 4.2 Audio
 
@@ -294,8 +295,8 @@ at first.
    services, knob input.
 
 Go/no-go after steps 2 and 3. If software decode is under ~15 fps and no
-live audio path exists, AA would be a poor experience and plain
-mirroring stays the better investment.
+live audio path exists, AA on the MMI itself would be a poor experience;
+the phone relay (section 4.3) avoids both.
 
 ## 6. Existing implementations
 

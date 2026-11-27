@@ -1,8 +1,10 @@
-# Phone screen mirroring on the MMI 3G+
+# Phone video on the MMI 3G+: hardware H.264
 
-How an Android phone's screen (Redmi Note 8 Pro, 1080×2340) reaches this
-unit's 800×480 display: over an Android Open Accessory (AOA) bulk link to
-`audi_stream_receiver`, as hardware-decoded H.264. It is landscape only.
+How a picture from an Android phone (Redmi Note 8 Pro) reaches this unit's
+800×480 display: over an Android Open Accessory (AOA) bulk link to
+`audi_stream_receiver`, as H.264 decoded by the unit's DM642 DSP. The
+picture is Android Auto, run by the phone app's Android Auto mode
+([android-auto.md](android-auto.md) §4.3).
 
 Every claim is labelled:
 
@@ -18,16 +20,16 @@ not covered here.
 
 ## 1. Summary
 
-Two paths are built and work on the car, both in `audi_stream_receiver`
+The path is built and works on the car: `audi_stream_receiver`
 (src/audi_stream_receiver/README.md) and the phone app in `android/`:
 
 | Path | How | On the car |
 |---|---|---|
-| **H.264** | The phone encodes 720×432 Baseline; the MMI serves it to `io-media-nvidia` as a live constant-sample-size MP4 (CS-MP4) through its own resource manager; the DM642 DSP decodes it onto VCAP 0 input 1 | ~25 fps, sharp text, lag ~0.5 s, MMI CPU ~30 % (§7.10–7.13) |
+| **H.264** | The phone encodes 720×432 (or 720×464) Baseline; the MMI serves it to `io-media-nvidia` as a live constant-sample-size MP4 (CS-MP4) through its own resource manager; the DM642 DSP decodes it onto VCAP 0 input 1 | 25 fps, sharp text, MMI lag ~300–400 ms, unit CPU ~45–50 % (§7.10–7.13) |
 
-The phone app's Android Auto mode uses the H.264 path: the phone runs the
-Android Auto session itself and sends the MMI a 720×432 stream
-([android-auto.md](android-auto.md) §4.3).
+The phone runs the Android Auto session itself, takes Android Auto's
+picture through its own decoder and a GL copy, and encodes the MMI's
+stream ([android-auto.md](android-auto.md) §4.3).
 
 What the H.264 path rests on:
 
@@ -217,35 +219,18 @@ These let us test the decoder without writing any io-media client code.
 
 ## 3. Phone side
 
-| Piece | How | Feasibility |
-|---|---|---|
-| Capture | MediaProjection → VirtualDisplay. One consent dialog per session, no root. Needs a foreground service. | High: standard API since Android 5 |
-| H.264 | VirtualDisplay → `MediaCodec` encoder surface, Baseline Level 3. Built and working on the car (§7.12, §7.13). | Confirmed on this phone |
-| Transport | AOA bulk link, `audi_stream_receiver`'s protocol | Confirmed working |
-| Input (not built) | **AOA v2 HID**: the accessory registers a HID device with the phone over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57 `SEND_HID_EVENT`). This is what scrcpy's OTG mode uses. The knob from `/dev/ipc/ch8` maps to keyboard D-pad, Enter and Back, or to a mouse. No adb, no root. | High. The MMI side reuses the existing `usbd_setup_vendor` path. |
+The phone app's Android Auto mode makes the picture
+([android-auto.md](android-auto.md) §4.3): Android Auto's own H.264 is
+decoded on the phone, its UI part copied 1:1 or scaled into the MMI's
+picture by the GPU (`GlScaler.kt`) on a fixed frame clock, and encoded
+again by `MediaCodec` (§7.12). Transport: the AOA bulk link with
+`audi_stream_receiver`'s protocol.
 
-### Landscape only
-
-There are two ways to force it, neither needs root:
-
-- (a) An app with the `WRITE_SETTINGS` special permission (granted once by
-  the user) sets `ACCELEROMETER_ROTATION=0` and `USER_ROTATION=1`.
-- (b) A `SYSTEM_ALERT_WINDOW` overlay declared with `screenOrientation=landscape`.
-  "Rotation control" apps use this trick.
-
-Use (a) and restore the old settings when the session ends.
-
-Geometry for the 2340×1080 panel (aspect 2.17) on 800×480 (aspect 1.67):
-
-| Mode | Phone area captured | Shown on MMI | Encode at (H.264, ×16) |
-|---|---|---|---|
-| Letterbox | whole screen | 800×369, black bars top and bottom | 720×336, scaled up by VCAP |
-| Fill (crop sides) | centre 1800×1080 | 800×480 | 704×416 (800 wide is refused, §7.8) |
-
-Letterbox is the safe default: nothing is cut off, and 720×336 is far inside
-Level 3. A MediaProjection VirtualDisplay of a different aspect ratio
-letterboxes by itself. The built H.264 path encodes 720×432 (5:3, the
-screen's shape) with the letterbox inside it (§7.12).
+Input to the phone is not built. The way that would need no root and no
+adb: **AOA v2 HID**: the accessory registers a HID device with the phone
+over control transfers (54 `REGISTER_HID`, 56 `SET_HID_REPORT_DESC`, 57
+`SEND_HID_EVENT`), as scrcpy's OTG mode does; the MMI side reuses the
+existing `usbd_setup_vendor` path (§5).
 
 ---
 
@@ -253,6 +238,7 @@ screen's shape) with the letterbox inside it (§7.12).
 
 | Option | Why not |
 |---|---|
+| Mirroring the phone's screen (MediaProjection → VirtualDisplay → H.264) | Worked on the car: 720×432 at 25 fps, sharp text through a capture at k× the picture, box-filtered k:1 on the GPU [confirmed]. Replaced by Android Auto: a UI made for a car screen, landscape, with no consent dialog per session and no stop when the phone locks |
 | Raw pixels (dirty tiles + LZ4, or DXT1 tiles) drawn with GL | GL upload ~50 MB/s with one upload in flight, so busy content (scrolling, maps) drops to ~15 fps; H.264 gives 25 fps at a fixed bandwidth with the SH4 mostly idle |
 | Talking to the DSP driver directly (`/dev/nvdsprm0`, `/dev/nvminirm0`, `NVshm-*`) | Reverse engineering a private NVIDIA protocol with no symbols; only worth it to cut io-media's ~0.5 s lag |
 | Software H.264 on the SH4 | Decoding keeps up: 800×480 Baseline at ~38 fps decode only, ~25 ms per P frame, ~54 ms per IDR (h264bsd) **[confirmed]**. Getting the picture on screen doesn't: CPU writes into the VFB and `gf_draw_blit2` from a RAM surface show it at ~5 fps (~155 ms of ~200 ms per picture in the draw) **[confirmed]**; `gf_draw_image` (BGRA, RGB565, planar I420) returns 0 and draws nothing **[confirmed]**; the first GL texture upload after those tests froze the whole unit (gpu-results.md §6). The test and the decoder were removed from the repo. H.264 through the DSP costs ~10% CPU |
@@ -604,7 +590,7 @@ frames are sync) and `ctts` are optional. Box handlers:
   NALs) is padded to S bytes with one filler NAL (type 12, `ff…ff 80`),
   which decoders discard.
 - **Live:** the header is fixed before any frame exists, so a resource
-  manager can serve `/dev/mirror/live.mp4`: header from memory, frame k's
+  manager can serve `/dev/audi_stream/live.mp4`: header from memory, frame k's
   bytes when frame k has arrived over AOA, with reads blocking until then.
   The phone sends unpadded frames; the MMI pads. A frame larger than
   S − 6 is dropped and a sync frame requested.
@@ -827,27 +813,24 @@ arrival (`burst`) doesn't show.
 
 ### 7.12 The phone side, latency and tuning tools
 
-- **Phone (Audi streaming app, Format "H.264", Android 10+):**
-  `HwEncoder.kt` is MediaCodec with a Surface input at 720×432
-  (`H264.pictureSize`: as wide as the MMI allows, the screen's 5:3).
-  Baseline 3.0, CBR where offered, an IDR every 10 s at most (they are the
-  big frames; the MMI asks for one when it needs it). The **Max fps
-  slider** (1–25) sets the rate. Through the GPU step (§7.13) frames are
-  drawn on a fixed clock (`FrameClock.kt`): exactly one per 1/fps, a still
-  screen drawn again, the tick's time as the frame's. Without it (direct
-  path) `KEY_MAX_FPS_TO_ENCODER` caps the rate and
-  `KEY_REPEAT_PREVIOUS_FRAME_AFTER` (1/fps) keeps it up on a still screen;
-  the two together let ~26 fps through on a Redmi Note 8 Pro, and every
-  frame over the MMI's 25 a second stays in its stream as lag (+~40 ms a
-  second: 0.5 s → 3.3 s in 3 minutes) [confirmed]. The MMI caps that
+- **Phone (Audi streaming app, Android Auto mode, Android 10+):**
+  `HwEncoder.kt` is MediaCodec with a Surface input at the mode's picture
+  (720×432 scaled, or 720×464 copied 1:1). Baseline 3.0, CBR where
+  offered, an IDR every 10 s at most (they are the big frames; the MMI asks
+  for one when it needs it). The **Max fps slider** (1–25) sets the rate.
+  The GPU step (`GlScaler.kt`) draws on a fixed clock (`FrameClock.kt`):
+  exactly one frame per 1/fps, a still picture drawn again, the tick's time
+  as the frame's. A rate above 25 would stay in the MMI's stream as lag:
+  a sender at ~26 fps grew the lag by ~40 ms a second (0.5 s → 3.3 s in
+  3 minutes) [confirmed]. The MMI caps that
   (`live_stream.h`, clock cap): a stream more than 500 ms ahead of its frame
   clock drops what comes until it is on time again, then goes on from an
   IDR it asks for; the picture jumps to the present once. The
   `H264_CONFIG` always says 25 fps, the MMI's clock: timing
   the stream at the slider's rate would make io-media's ~9-frame queue
   cost 9/fps seconds (1.8 s at 5 fps), while at 25 the MMI's skip frames
-  make up the difference (hello9 `slow`). The capture path into the
-  encoder is in §7.13.
+  make up the difference (hello9 `slow`). A lower rate doesn't lighten
+  io-media's work: the skips keep it at 25 frames a second.
 - **Frames are never lost silently** (the ones after would be garbage):
   they queue on the phone while acks are outstanding (up to 12 in
   flight); 25 queued = something is stuck, so the queue is dropped and an
@@ -862,16 +845,18 @@ arrival (`burst`) doesn't show.
   restarts (new config, stream full)
   keep the picture and swap only the graph; an io-media ERROR ends the
   stream without touching VCAP and starts it again from the same config
-  (up to 3 per 60 s; one more and the phone is sent back to pictures with
-  `REFUSED`). After a `REFUSED` the phone tries H.264 again after 5 s,
-  doubling up to 60 s [unverified: built, not yet run on the car].
+  (up to 3 per 60 s; one more and the phone is sent `REFUSED`): the
+  stream came back by itself after an io-media error [confirmed]. After a
+  `REFUSED` the phone tries H.264 again after 5 s, doubling up to 60 s
+  [unverified: built, not yet run on the car].
 - **Desk:** `make aoa-host` speaks H.264 like the MMI (limits, config,
   the same frame checks and statuses) and writes
   `build/aoa-host/stream.h264`.
-- **Whole delay:** stream a stopwatch app showing milliseconds and
-  photograph the phone next to the MMI: phone clock − MMI clock = the whole
-  delay (capture, encoder, USB, MMI, io-media, DSP, display). Several
-  photos; the camera's own exposure blurs the last digit.
+- **Whole delay:** photograph the phone's preview next to the MMI while
+  something moves (a stopwatch in Android Auto's media app, the map):
+  the difference is the whole delay (decoder, GL copy, encoder, USB, MMI,
+  io-media, DSP, display). Several photos; the camera's own exposure blurs
+  the last digit.
 - **Tuning (hello9):** `s56` / `s112` (frames padded 2× / 4×) and `f30`
   (stream at 30 fps) against `live`, from the `lag` in their RESULT lines.
   Lag the same with bigger frames = the queue is frames (bigger frames
@@ -879,13 +864,12 @@ arrival (`burst`) doesn't show.
   `s56` −120 / −54 ms, `s112` +22 / −34 ms, `f30` −58 / −31 ms. Not bytes,
   so large frames are free; 30 fps isn't worth changing the stream clock for.
 
-**Open:** whether repeat-previous-frame really keeps a still screen at
-the slider's rate on this phone, and the robustness list (§7.10).
+**Open:** the robustness list (§7.10).
 
-### 7.13 Phone H.264 on the car; text sharpness
+### 7.13 Phone H.264 on the car
 
 **On the car [confirmed]:** the phone's H.264 plays on the MMI, and works
-well in use: 720×432 Baseline, POC type 0, sharp text.
+well in use: 720×432 or 720×464 Baseline, POC type 0, sharp text.
 - **Start:** after an `H264_CONFIG` the phone sends nothing until the MMI's
   `PLAYING`, then starts at an IDR: the first IDR is in 30–60 ms after
   `PLAYING`, with nothing refused. Frames sent before `PLAYING` would be
@@ -893,15 +877,19 @@ well in use: 720×432 Baseline, POC type 0, sharp text.
 
 - **Frame rate:** through the GPU step exactly the Max fps slider's rate
   (13.0, 15.0, 25.0 a second, steady for minutes); skip frames fill up to 25.
-- **Lag (MMI side):** medians 300–355 ms on every stream, the first one of a
-  session included, and flat over a 3.5-minute stream at 15 fps and a
-  7.5-minute session (25 fps only for ~40 s); the clock cap never fires. This `lag` starts when a frame reaches
-  the MMI: the phone's capture, encoder, queue (up to 12 frames in flight
-  plus 25 queued, ~1.5 s at 25 fps) and USB are not in it, so lag that grows
-  over a long session would be on the phone side and needs the whole-delay
-  photo (§7.12) to see.
-- **CPU:** MMI ~30 % (receiver 6–9 %, up to 15 % with frames padded to
-  160 KB).
+- **Lag (MMI side):** medians ~300–355 ms at 720×432 and ~370–400 ms at
+  720×464 (~7 % more macroblocks), the first stream of a session included;
+  the clock cap never fires. This `lag` starts when a frame reaches
+  the MMI: the phone's decoder, GL copy, encoder, queue (up to 12 frames in
+  flight plus 25 queued, ~1.5 s at 25 fps) and USB are not in it, so lag
+  that grows or differs between the modes on the phone side needs the
+  whole-delay photo (§7.12) to see.
+- **io-media falls behind after ~190 s** at ~6 Mbit/s with 132 KB frames, at
+  either picture size and at 15 or 25 fps from the phone: its reads stop
+  waiting, the reader drifts 6–10 frames behind, and the receiver catches up
+  (drops to the newest, asks for an IDR) about every 30 s, the lag swinging
+  ~100–570 ms. Before ~190 s it reads exactly 25 frames a second.
+- **CPU:** the unit ~45–50 % during Android Auto (receiver 11–15 %).
 
 **Restarts cost a short break in the picture.** An `H264_CONFIG` with other
 contents restarts the graph. Keeping them rare [confirmed]:
@@ -922,68 +910,17 @@ contents restarts the graph. Keeping them rare [confirmed]:
   Input/output error` (2 in 30 streams, 1 in 10) or `bad event size 1000`,
   and the next restart recovers.
 
-**Direct capture at the old 2.5 Mbit/s blurs text.** With the virtual display
-drawing straight into the encoder at 720×432, Android scales the 2340×1080
-screen 3.25:1 in one bilinear step (2×2 taps per output pixel out of ~3×3
-covered: thin strokes are hit or missed). A k× capture box-averaged
-k:1 fixes it. Smaller parts: the letterbox (the
-screen is 720×332 of the 720×432), 4:2:0 chroma, 2.5 Mbit/s CBR (~12 KB a
-frame at 25 fps) and the VCAP's ×1.11 to 800×480.
-
-**k× capture + GPU box filter, 4 Mbit/s default:** text is sharp on the car.
-Neither the *Sharp H.264* switch alone nor the rate (2.5 to 8 Mbit/s) made a
-visible difference. The higher rates are applied (at 6–8 Mbit/s IDRs pass
-64 KB and the frame size grows to 144 KB), but a phone UI at 720×432 is
-mostly still, and its P-frames need a fraction of 2.5 Mbit/s whatever the
-target, so the extra bits go nowhere; the encoder is not what limits the
-picture. What would show is fast motion (map scrolling, video). The cost of a
-high rate: bigger IDRs, frames padded to 144 KB (more MMI CPU) and a stream
-declared for 19 instead of 41 minutes. The phone's status line shows the
-real rate (`N of M kbit/s`).
-
-- `GlScaler.kt` / `GlBox.kt`: the virtual display renders at the screen's
-  shape into a SurfaceTexture, sized so the part kept is k× the picture
-  (k = the largest ≤ 4 that stays within the screen: ×3 landscape, ×4
-  portrait). A GLES2 pass box-filters it k:1 into the
-  encoder's input surface (EGL_RECORDABLE_ANDROID) on the frame clock
-  (§7.12): even k with (k/2)² bilinear taps at 2×2 corners, odd k
-  with k² nearest taps, highp coordinates. GL setup failing (or drawing
-  failing later) falls back to the direct path for the rest of the
-  session. Shaders checked with glslang; `GlBoxTest` covers the taps.
-- Switch **Sharp H.264** (default on, off = k 1) for an A/B; drop-down
-  **H.264 rate** 2.5 / 4 (default) / 6 Mbit/s (8 made IDRs of up to ~170 KB,
-  over the MMI's 128 KB frames). The rate restarts the
-  encoder like the fps slider; the switch doesn't. The status line shows
-  `(x3)` or `(direct)` and the rate.
-
-**H.264 is landscape only [built, not yet on the car]:** a portrait screen
-fills only a narrow strip of the MMI (table below) with unreadable text. While
-the phone is portrait the GPU step draws a "Turn the phone to landscape" card
-(`Notice.kt`) into the same stream instead, so the MMI doesn't restart, and
-the screen comes back on turning the phone. The direct path can't draw it:
-its picture stops (the MMI holds the last frame).
-
-**The navigation bar stays off the MMI [confirmed]**
-(`ScreenCrop.kt`, checkbox *Hide navigation buttons*, default on, Android 11+):
-the bar's edge comes from `WindowMetrics` (it follows the rotation), and only
-the rest of the capture reaches the picture. A rotation
-or a change of the switches resizes the capture under the same encoder, so the
-MMI doesn't restart. Without the GPU step (GL failed) the bar stays. The picture
-limits don't change: 720×432 is still sent, more of it is content. With a
-132 px bar on 2340×1080:
-
-| Phone | Bar kept: picture → panel | Bar left out: picture → panel |
-|---|---|---|
-| Landscape | 720×332 → 800×369 | 720×352 → 800×391 |
-| Portrait | 198×432 → 220×480 | 210×432 → 233×480 |
-
-Android's own scaling step is also closer to 1:1 (2340 → 2289 instead of 2160).
-An app in front that hides the bar can't be detected, so a full-screen video or
-game loses the same strip.
+**H.264 rate:** 2.5 / 4 (default) / 6 Mbit/s; 8 made IDRs of up to
+~170 KB, over the MMI's 128 KB frames. A rate change restarts the encoder
+like the fps slider. Higher rates cost bigger IDRs, frames padded to 132 KB
+(more MMI CPU) and a shorter stream before the 2 GiB restart (§7.9).
 
 **Open questions:**
 
-- Whether lag grows on the phone side over long sessions (whole-delay photo).
+- Whether lag grows on the phone side over long sessions, and whether the
+  1:1 mode's visible lag is on the phone (whole-delay photo, `adb logcat`).
+- Why io-media falls behind after ~190 s, and whether a lower rate or
+  smaller frames keep it at 25.
 - Whether the video displayable can be shown 1:1 (720×432 centred, no
   VCAP resample) instead of scaled to 800×480.
 - Whether a 720×480 anamorphic stream (§7.14) looks better than 720×432.
