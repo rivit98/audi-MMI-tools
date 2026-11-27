@@ -27,9 +27,8 @@ import java.util.concurrent.Executors
 
 /**
  * Android Auto mode: this app is the Android Auto head unit for Android
- * Auto on the same phone ("self mode"), and the MMI shows its picture
- * through the H.264 path the screen mirroring uses
- * (docs/android-auto.md, "Phone relay").
+ * Auto on the same phone ("self mode"), and the MMI shows its picture as
+ * H.264, decoded by its DM642 (docs/android-auto.md, "Phone relay").
  *
  * ```
  * Android Auto (head unit server, 127.0.0.1:5277) --TCP--> AaNative session
@@ -51,7 +50,7 @@ import java.util.concurrent.Executors
  * 1:1. Only system sounds are advertised: music and navigation stay
  * on the phone (Bluetooth to the car); system sounds play here ([AaAudio]).
  *
- * The H.264 settings are the screen mirroring's ([Streaming]): "Max fps"
+ * The H.264 settings are [Streaming]'s ([StreamOptions]): "Max fps"
  * is the frame clock's rate (what Android Auto sends above it is dropped),
  * then "H.264 rate" and "Keep screen on". A new rate or bit
  * rate, once settled, gets a new encoder that the scaler draws into
@@ -60,8 +59,8 @@ import java.util.concurrent.Executors
  *
  * Everything runs on one thread ("aa"): the session (single-threaded), the
  * decoder's and encoder's callbacks, [MmiH264]. The socket has a reader and
- * a writer thread of its own. Only one mode streams at a time: the activity
- * stops [CaptureService] before it starts this.
+ * a writer thread of its own. STREAM_SETTINGS tells the MMI's log what
+ * the stream runs with.
  */
 class AaService : Service() {
     private lateinit var thread: HandlerThread
@@ -95,6 +94,8 @@ class AaService : Service() {
     private var fpsDecoded = 0
     private var fps = 0.0
     private var settingsChangeAt = 0L
+    private var settingsLink: AccessoryLink? = null   // the link the settings went to
+    private var settingsSent = ""                     // and what they were
     private lateinit var screenLock: PowerManager.WakeLock
 
     private val tick = Runnable { onTick() }
@@ -345,6 +346,7 @@ class AaService : Service() {
         if (s != null) next = s.tick(TICK_MS.toInt()).toLong().coerceIn(1L, TICK_MS)
         drainLog()
         followSettings()
+        sendSettings()
         sendToMmi()
         showStatus()
         handler.postDelayed(tick, next)
@@ -358,12 +360,12 @@ class AaService : Service() {
 
     /** The H.264 rate the settings ask for: "Max fps", at most the MMI's. */
     private fun wantFps(): Int {
-        val mmiFps = Streaming.link?.videoCaps?.h264Fps?.takeIf { it > 0 } ?: CaptureService.MAX_FPS
-        return Streaming.maxFps.coerceIn(CaptureService.MIN_FPS, mmiFps.coerceAtMost(CaptureService.MAX_FPS))
+        val mmiFps = Streaming.link?.videoCaps?.h264Fps?.takeIf { it > 0 } ?: Streaming.MAX_FPS
+        return Streaming.maxFps.coerceIn(Streaming.MIN_FPS, mmiFps.coerceAtMost(Streaming.MAX_FPS))
     }
 
     private fun newEncoder(fps: Int): HwEncoder? {
-        val e = HwEncoder(sessionMode.picW, sessionMode.picH, fps, Streaming.bitRate, false, handler, mmi::onConfig, mmi::onFrame) { why ->
+        val e = HwEncoder(sessionMode.picW, sessionMode.picH, fps, Streaming.bitRate, handler, mmi::onConfig, mmi::onFrame) { why ->
             AppLog.w("AA mode H.264: $why")
             pipelineFailed = why
         }
@@ -446,6 +448,25 @@ class AaService : Service() {
         scaler = null
         mmi.enc?.release()
         mmi.encoderGone()
+    }
+
+    /** STREAM_SETTINGS to the link when a stream starts on it or a setting
+     * changes: the MMI logs them; up= (ms since the phone booted) lines its
+     * log up with ours. */
+    private fun sendSettings() {
+        val link = Streaming.link ?: return
+        val e = mmi.enc ?: return
+        if (link.videoCaps == null) return                    // no MMI app yet
+        val text = "mode=aa video=${sessionMode.w}x${sessionMode.h}${if (sessionMode.oneToOne) "_1:1" else ""} " +
+            "pic=${e.w}x${e.h} max_fps=${Streaming.maxFps} bit_rate_kbit=${Streaming.bitRate / 1000} " +
+            "keep_screen_on=${if (Streaming.keepScreenOn) 1 else 0} " +
+            "frame_kb=${mmi.frameBytes / 1024} android=${Build.VERSION.SDK_INT}"
+        if (link === settingsLink && text == settingsSent) return
+        settingsLink = link
+        settingsSent = text
+        val line = "up=${SystemClock.elapsedRealtime()} $text"
+        link.sendSettings(line)
+        AppLog.i("AA mode: settings sent: $line")
     }
 
     private fun sendToMmi() {
@@ -561,7 +582,7 @@ class AaService : Service() {
         private const val TICK_MS = 20L
         private const val BYE_WAIT_MS = 300L
         private const val STATUS_LOG_MS = 5000L
-        private const val SETTLE_MS = 700L       // as the mirroring's FPS_SETTLE_MS
+        private const val SETTLE_MS = 700L
         const val NO_SERVER = "Waiting for Android Auto's head unit server on this phone."
 
         @Volatile private var instance: AaService? = null

@@ -47,7 +47,7 @@ object AaGeometry {
     /** In the order of the "Video size" list (strings.xml aa_video_sizes). */
     val MODES = listOf(Mode(800, 480), Mode(1280, 720), Mode(1920, 1080), Mode(800, 480, 10, 16))
     private const val BASE_H = 480
-    /** The picture the scaled modes fill (H264.pictureSize(720, 576)). */
+    /** The picture the scaled modes fill (the MMI's 720 wide, 5:3 like its 800x480 screen). */
     const val SCALED_W = 720
     const val SCALED_H = 432
     private const val BASE_DPI = 140
@@ -56,18 +56,18 @@ object AaGeometry {
     /** The decoded frame without the rail, into the picW x picH picture:
      * filling it if the shape is within [MAX_STRETCH], else fitted with its
      * shape kept (the scaler centres it, black around it). */
-    fun geometry(mode: Mode, picW: Int = mode.picW, picH: Int = mode.picH): ScreenCrop.Geometry {
+    fun geometry(mode: Mode, picW: Int = mode.picW, picH: Int = mode.picH): FrameGeometry {
         if (mode.oneToOne)
-            return ScreenCrop.Geometry(mode.w, mode.h, mode.rail, 0, mode.picW, mode.picH, 1)
+            return FrameGeometry(mode.w, mode.h, mode.rail, 0, mode.picW, mode.picH, 1)
         val keptW = mode.w - mode.rail
         val stretch = keptW.toDouble() * picH / (mode.h.toDouble() * picW)
         if (abs(stretch - 1) <= MAX_STRETCH) {
-            return ScreenCrop.Geometry(mode.w, mode.h, mode.rail, 0, picW, picH, 1, keptW, mode.h)
+            return FrameGeometry(mode.w, mode.h, mode.rail, 0, picW, picH, 1, keptW, mode.h)
         }
         val s = minOf(picW.toDouble() / keptW, picH.toDouble() / mode.h)
         val w = (keptW * s).roundToInt().coerceIn(2, picW)
         val h = (mode.h * s).roundToInt().coerceIn(2, picH)
-        return ScreenCrop.Geometry(mode.w, mode.h, mode.rail, 0, w, h, 1, keptW, mode.h)
+        return FrameGeometry(mode.w, mode.h, mode.rail, 0, w, h, 1, keptW, mode.h)
     }
 
     /** How far from its own shape the kept part may be drawn to fill the

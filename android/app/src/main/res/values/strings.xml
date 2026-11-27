@@ -1,45 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Audi streaming</string>
-    <string name="how_to">Tap Stream screen and allow the capture: the MMI shows this phone\'s screen. Tap the i button next to an option to see what it does.</string>
-    <string name="stream_start">Stream screen</string>
-    <string name="stream_stop">Stop stream</string>
     <string name="max_fps">Max %1$d fps</string>
-    <string name="keep_screen_on">Keep screen on while streaming</string>
-    <string name="hide_nav_bar">Hide navigation buttons on the MMI</string>
+    <string name="keep_screen_on">Keep screen on while Android Auto runs</string>
     <string name="version">Version %1$s UTC</string>
     <string name="info_about">About %1$s</string>
-    <string name="info_stream_title">Stream screen</string>
-    <string name="info_stream">Starts or stops sending this phone\'s screen to the MMI. It can be tapped once the phone is connected to audi_stream_receiver on the MMI, and Android asks to allow the capture each time.\n\nThe video is H.264, decoded by the MMI\'s video chip: smooth, up to 25 fps, about half a second behind the phone. It needs Android 10 or newer.\n\nStreaming carries on when you switch apps, turn the phone, or unplug and replug. It ends when you stop it here or from its notification, and when the phone locks.\n\nDon\'t start or stop it while reversing: that can hide the rear camera picture until the next time the camera comes on.</string>
     <string name="info_fps_title">Max fps</string>
-    <string name="info_fps">The most pictures a second the phone sends (1 to 25). Set it to 25 for smooth video: that is the rate the MMI\'s video stream runs at, so 25 is the limit.\n\nLower means choppier motion but no extra delay, because the MMI fills the gaps by repeating the last picture. A still screen sends fewer frames anyway.\n\nThe line next to Stop stream shows the rate the MMI really achieves.\n\nAndroid Auto: the rate of Android Auto\'s picture on the MMI. 25 for smooth video. A change applies within about a second, with a short break in the MMI\'s picture.</string>
+    <string name="info_fps">The most pictures a second the phone sends (1 to 25). Set it to 25 for smooth video: that is the rate the MMI\'s video stream runs at, so 25 is the limit.\n\nLower means choppier motion, not less work for the MMI: it fills the gaps by repeating the last picture.\n\nA change applies within about a second, with a short break in the MMI\'s picture.</string>
     <string name="info_bit_rate_title">H.264 rate</string>
-    <string name="info_bit_rate">How much video data is sent a second. A higher rate keeps text and fast-moving content cleaner. A lower rate sends less over USB. It does not change the picture size, which is always 720x432.\n\n4 Mbit/s (default) gives sharp text on the car. 2.5 can blur text. 6 gives bigger key frames: if the picture freezes now and then, go back to 4.\n\nA change while streaming applies within about a second.</string>
-    <string name="info_sharp_title">Sharp H.264</string>
-    <string name="info_sharp">On: the phone captures its screen at several times the picture size and the GPU averages it down, so thin text strokes are not lost. Off: the screen is scaled down in one step, with less work for the GPU.\n\nThe difference on its own is small, and H.264 rate may matter as much. Leave it on unless you are comparing the two. If the GPU setup fails, the app goes to direct scaling by itself, and the status line shows (direct) instead of (x3).\n\nA change while streaming applies within about a second.</string>
-    <string name="send_audio">Send phone audio (test: the MMI only logs it)</string>
-    <string name="info_send_audio_title">Send phone audio</string>
-    <string name="info_send_audio">While the screen is mirrored, the sound the phone plays (music, videos, games) is captured, compressed to SBC (the Bluetooth music format) and sent to the MMI over USB. For now the MMI only checks and logs it and saves the first 20 s to the SD card; the phone keeps playing the sound as usual.\n\nNeeds the microphone permission (Android asks once; it is how Android lets an app capture another app\'s sound) and Android 10. Some apps don\'t allow their sound to be captured.\n\nAndroid Auto mode: not used.</string>
+    <string name="info_bit_rate">How much video data is sent a second. A higher rate keeps text and fast-moving content cleaner. A lower rate sends less over USB. It does not change the picture size.\n\n4 Mbit/s (default) gives sharp text on the car. 2.5 can blur text. 6 gives bigger key frames: if the picture freezes now and then, go back to 4.\n\nA change while streaming applies within about a second.</string>
     <string name="info_keep_screen_on_title">Keep screen on</string>
-    <string name="info_keep_screen_on">Locking the phone ends the stream, so this stops the screen timing out and locking by itself while streaming, even with another app in front. The phone\'s screen may dim, but the MMI\'s picture stays bright.\n\nThe power button still turns the screen off and ends the stream. The phone uses more battery with this on.\n\nAndroid Auto: keeps the phone\'s screen on while that mode runs.</string>
-    <string name="info_hide_nav_bar_title">Hide navigation buttons</string>
-    <string name="info_hide_nav_bar">Leaves the phone\'s navigation bar out of the picture, so the rest of the screen fills more of the MMI. The phone itself doesn\'t change. Needs Android 11 or newer.\n\nThe app can\'t see when the app in front goes full screen, so a full-screen video or game loses the same strip at that edge. Turn this off to see the whole screen.\n\nThis needs the GPU step: if the GPU setup fails, the buttons stay. A change while streaming applies at once.</string>
-    <string name="mode_screen">Screen</string>
-    <string name="mode_aa">Android Auto</string>
+    <string name="info_keep_screen_on">Keeps the phone\'s screen on (it may dim) while Android Auto runs, even with another app in front. The phone uses more battery with this on.</string>
     <string name="aa_start">Start</string>
     <string name="aa_stop">Stop</string>
     <string name="aa_settings">Open Android Auto settings</string>
     <string name="aa_off">Android Auto mode is off. Tap Start.</string>
-    <string name="aa_how_to">Slide back to Screen to mirror the phone\'s screen instead. Only one of the two runs at a time.\n\nOnce, on the phone: open Android Auto\'s settings (button above), tap Version at the bottom about ten times until developer settings are on, then in the menu (three dots) tap Start head unit server. This app connects to it and the MMI shows Android Auto.\n\nTouch the picture above to use Android Auto. Music and navigation sound stay on the phone (Bluetooth to the car).</string>
+    <string name="aa_how_to">Once, on the phone: open Android Auto\'s settings (button above), tap Version at the bottom about ten times until developer settings are on, then in the menu (three dots) tap Start head unit server. This app connects to it and the MMI shows Android Auto.\n\nTouch the picture above to use Android Auto. Music and navigation sound stay on the phone (Bluetooth to the car).</string>
     <string name="aa_video_size">Video size</string>
     <string name="info_aa_video_size_title">Video size</string>
     <string name="info_aa_video_size">The picture size Android Auto draws. The app scales it to the MMI\'s 720x432 (or copies it, 1:1).\n\n800x480: the same shape as the MMI\'s screen, the whole picture with Android Auto\'s bar at the bottom.\n\n1280x720 and 1920x1080 (16:9): Android Auto puts its bar in a rail on the left. The MMI shows everything except the rail, filling its screen; the picture here keeps the rail, so tap home, apps and the mic here. Android Auto draws more pixels for the same layout, so text can be sharper. 1920x1080 works the phone harder.\n\n800x480 1:1 (test): Android Auto lays its UI out for the MMI\'s 720x464 with the rail on the left, and the app copies that part pixel for pixel: no scaling, sharpest text, a full-width map with no bar. If it misbehaves, pick another size.\n\nA new size makes Android Auto reconnect (about 2 seconds).</string>
     <string name="info_aa_title">Android Auto mode</string>
-    <string name="info_aa">This app becomes the car\'s Android Auto display, for Android Auto on this same phone (self mode). The MMI shows Android Auto through the same video path as the screen mirroring, and the picture above is what the MMI shows: touch it to use Android Auto.\n\nAndroid Auto starts this only through its developer head unit server: Android Auto settings, tap Version until developer settings are on, then menu, Start head unit server. The app tries to connect every 2 seconds and again after every session.\n\nAndroid Auto draws its screen at the chosen video size, and the app scales it to the MMI\'s 720x432 picture. It runs at up to 25 frames a second on the MMI. H.264 rate on the Screen page applies here too.\n\nThe mode starts when you slide to this page, and stops when you slide back to Screen or tap Stop.</string>
-    <string name="stream_options">Stream to the MMI (both modes)</string>
+    <string name="info_aa">This app becomes the car\'s Android Auto display, for Android Auto on this same phone (self mode). The MMI shows Android Auto as H.264, decoded by its video chip, and the picture above is what the MMI shows: touch it to use Android Auto.\n\nAndroid Auto starts this only through its developer head unit server: Android Auto settings, tap Version until developer settings are on, then menu, Start head unit server. The app tries to connect every 2 seconds and again after every session.\n\nAndroid Auto draws its screen at the chosen video size, and the app scales it to the MMI\'s 720x432 picture. It runs at up to 25 frames a second on the MMI. Max fps and H.264 rate below apply.\n\nThe mode starts with the app; Stop ends it.</string>
+    <string name="stream_options">Stream to the MMI</string>
     <string name="bit_rate">H.264 rate</string>
-    <string name="sharp">Sharp H.264 (GPU box downscale)</string>
-    <!-- in the order of CaptureService.BIT_RATES -->
+    <!-- in the order of Streaming.BIT_RATES -->
     <string-array name="bit_rates">
         <item>2.5 Mbit/s</item>
         <item>4 Mbit/s</item>

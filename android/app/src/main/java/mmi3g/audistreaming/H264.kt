@@ -66,17 +66,4 @@ object H264 {
         val stepped = (want + 16383) / 16384 * 16384
         return minOf(stepped, max).coerceAtLeast(current)
     }
-
-    /** The H.264 picture for the MMI: as wide as it allows (16-aligned),
-     * the MMI screen's 5:3 shape (800x480), 16-aligned height. 720x432
-     * with the MMI's 720x576 limit. */
-    fun pictureSize(maxW: Int, maxH: Int): Pair<Int, Int> {
-        var w = maxW / 16 * 16
-        var h = (w * 3 / 5) / 16 * 16
-        if (h > maxH) {
-            h = maxH / 16 * 16
-            w = (h * 5 / 3) / 16 * 16
-        }
-        return w to h
-    }
 }

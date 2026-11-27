@@ -11,18 +11,13 @@ import android.view.Surface
 
 /**
  * The phone's hardware H.264 encoder (MediaCodec) for the MMI's DM642:
- * Baseline, level 3.0, w x h, fed from a Surface (the screen capture's
- * virtual display draws into [surface]).
+ * Baseline, level 3.0, w x h, fed from a Surface ([GlScaler] draws into
+ * [surface]).
  *
  * - **Rate:** at most fps frames a second reach the encoder
- *   (KEY_MAX_FPS_TO_ENCODER, Android 10+). Behind [GlScaler] the frames
- *   come on its fixed clock, a still screen included ([repeatPrevious]
- *   false). Straight from the virtual display, the last frame is repeated
- *   after 1/fps when the screen stands still (KEY_REPEAT_PREVIOUS_FRAME_
- *   AFTER): about fps either way, but the limit and the repeats together
- *   can make a little more (26 fps on a Redmi Note 8 Pro); the MMI drops
- *   frames when its stream gets too far ahead. The MMI's stream runs at
- *   25 fps and fills what is missing with skip frames.
+ *   (KEY_MAX_FPS_TO_ENCODER, Android 10+). The frames come on [GlScaler]'s
+ *   fixed clock, a still picture included. The MMI's stream runs at 25 fps
+ *   and fills what is missing with skip frames.
  * - **Frame size:** constant bit rate where the encoder offers it, and an
  *   IDR only at the start and when asked ([requestSync]): every frame must
  *   fit the MMI's per-frame size, and IDRs are the big ones.
@@ -35,7 +30,6 @@ class HwEncoder(
     val h: Int,
     val fps: Int,
     val bitRate: Int,
-    private val repeatPrevious: Boolean,
     private val handler: Handler,
     private val onConfig: (ByteArray, ByteArray) -> Unit,
     private val onFrame: (ByteArray, Boolean) -> Unit,
@@ -63,7 +57,6 @@ class HwEncoder(
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S)
             setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
             setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel3)
-            if (repeatPrevious) setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1_000_000L / fps)
             setInteger(MediaFormat.KEY_PRIORITY, 0)           // real time
             if (Build.VERSION.SDK_INT >= 29) setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps.toFloat())
             if (caps.encoderCapabilities.isBitrateModeSupported(

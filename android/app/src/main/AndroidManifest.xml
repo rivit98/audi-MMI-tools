@@ -5,19 +5,14 @@
         android:name="android.hardware.usb.accessory"
         android:required="true" />
 
-    <!-- screen streaming: a mediaProjection foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Android Auto mode: a connectedDevice foreground service (Android 14
          wants one of its listed permissions too: CHANGE_NETWORK_STATE), and
          a socket to Android Auto's head unit server on 127.0.0.1:5277 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- "Send phone audio": capturing other apps' playback (with the screen
-         projection) needs the record permission -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- "Keep screen on": a screen wake lock while streaming -->
+    <!-- "Keep screen on": a screen wake lock while Android Auto runs -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
@@ -43,11 +38,6 @@
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter" />
         </activity>
-
-        <service
-            android:name=".CaptureService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
 
         <service
             android:name=".AaService"

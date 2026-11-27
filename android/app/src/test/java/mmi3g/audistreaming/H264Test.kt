@@ -40,11 +40,4 @@ class H264Test {
         assertEquals(256 * 1024, H264.grow(64 * 1024, 200_000, 256 * 1024))     // 1.5 x need, capped
         assertEquals(256 * 1024, H264.grow(256 * 1024, 300_000, 256 * 1024))    // can't grow
     }
-
-    @Test
-    fun pictureSizeForTheMmi() {
-        assertEquals(720 to 432, H264.pictureSize(720, 576))
-        assertEquals(640 to 384, H264.pictureSize(640, 480))
-        assertEquals(400 to 240, H264.pictureSize(1280, 240))                   // height-bound
-    }
 }

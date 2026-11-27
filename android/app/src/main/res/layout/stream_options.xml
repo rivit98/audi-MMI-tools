@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The H.264 stream settings both modes use, included in both pages and
-     kept in step by StreamOptions (MainActivity). -->
+<!-- The H.264 stream settings (StreamOptions), included in the Android Auto page. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -70,22 +69,6 @@
 
         <ImageButton
             android:id="@+id/info_keep_screen_on"
-            style="@style/InfoButton" />
-    </LinearLayout>
-
-    <LinearLayout
-        style="@style/OptionRow"
-        android:paddingStart="12dp">
-
-        <CheckBox
-            android:id="@+id/send_audio"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/send_audio" />
-
-        <ImageButton
-            android:id="@+id/info_send_audio"
             style="@style/InfoButton" />
     </LinearLayout>
 </LinearLayout>

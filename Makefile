@@ -50,8 +50,7 @@ AA_CERT_SHA := 85b5043a09b1ba9464f745e6917bdbaa2bc582fe48cb727a7787c1a832a773e4 
 # (tests/check_aa_proto.py checks our hand-written protobuf against them).
 AA_PROTO     := third_party/aasdk-proto
 AA_PROTO_SHA := 095c1088225c88032b1b29a415df13a0b12a87bf80e07747d872aaa4151501f4
-# BlueZ's SBC codec (LGPL-2.1): the phone app encodes its audio with it
-# (android/app/src/main/cpp), the host tests check our SBC parser against it
+# BlueZ's SBC codec (LGPL-2.1): the host tests check our SBC parser against it
 SBC_VER := 2.0
 SBC     := third_party/sbc-$(SBC_VER)
 SBC_SHA := 8f12368e1dbbf55e14536520473cfb338c84b392939cc9b64298360fd4a07992
@@ -314,7 +313,7 @@ $(MBEDTLS)/.done: src/common/mbedtls/utctime-offset.patch
 	rm third_party/mbedtls.tar.bz2.part
 	patch -p1 -d $(MBEDTLS) < src/common/mbedtls/utctime-offset.patch
 	touch $@
-#   BlueZ sbc (LGPL-2.1): the phone app's SBC encoder, a reference for tests.
+#   BlueZ sbc (LGPL-2.1): a reference for the SBC parser's tests.
 $(SBC)/.done:
 	rm -rf $(SBC)
 	mkdir -p third_party
@@ -608,7 +607,7 @@ gusa-scan: $(addprefix build/,$(APPS))
 # Android sender: its own Makefile (android/Makefile), everything in Docker.
 # Its Android Auto mode needs mbedTLS and the head unit certificate:
 # android/Makefile asks for them with aa-sources.
-aa-sources: $(MBEDTLS)/.done $(AA_CERT)/.done $(SBC)/.done
+aa-sources: $(MBEDTLS)/.done $(AA_CERT)/.done
 apk:
 	$(MAKE) -C android
 apk-test:

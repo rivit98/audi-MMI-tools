@@ -9,8 +9,6 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
-import android.opengl.GLUtils
-import android.graphics.Bitmap
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -22,45 +20,35 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Between the virtual display and the H.264 encoder: the screen is
- * captured into [inputSurface] (a SurfaceTexture), and on every tick of a
- * [FrameClock] (exactly fps a second) the newest capture frame's kept part
- * ([ScreenCrop]) is box-filtered k:1 ([GlBox]) into the middle of the
- * encoder's input surface, black around it, with the tick's time, on its
- * own GL thread. A still screen is drawn again on every tick, so the
- * encoder needs no repeat-previous-frame and gets exactly fps frames a
- * second either way - more would pile up as lag on the MMI, which plays
- * exactly 25. [update] changes the geometry without touching the encoder,
- * so the MMI doesn't restart; a new capture size gets a new [inputSurface]
- * (the virtual display must be given it, then [dropOld]). [showNotice] draws a picture instead of the
- * screen (the portrait notice) until it is taken away.
+ * Between Android Auto's H.264 decoder ([AaDecoder]) and the encoder for
+ * the MMI: the decoder draws into [inputSurface] (a SurfaceTexture), and on
+ * every tick of a [FrameClock] (exactly fps a second) the newest frame's
+ * kept part ([FrameGeometry]) goes into the middle of the encoder's input
+ * surface, black around it, with the tick's time, on its own GL thread:
+ * copied 1:1, or scaled bilinear ([GlBox]). A still picture is drawn again
+ * on every tick, so the encoder gets exactly fps frames a second - more
+ * would pile up as lag on the MMI, which plays exactly 25.
  *
  * [start] and [release] block until the GL thread has done its part, so
  * after [release] nothing draws into the encoder's surface any more.
  *
- * The input needn't be a virtual display: the Android Auto mode ([AaService])
- * gives [inputSurface] to its H.264 decoder. [setPreview] also draws each
- * frame's picture into a phone-side surface (that mode's touch preview),
- * stretched to it and bilinear-filtered. [retarget] moves the drawing to a
- * new encoder (another rate) while the input stays: that mode's decoder
- * goes on undisturbed.
+ * [setPreview] also draws each frame's picture into a phone-side surface
+ * (the touch preview), stretched to it and bilinear-filtered. [retarget]
+ * moves the drawing to a new encoder (another rate) while the input stays:
+ * the decoder goes on undisturbed.
  */
 class GlScaler(
     private var target: Surface,
     val w: Int,
     val h: Int,
-    start: ScreenCrop.Geometry,
+    start: FrameGeometry,
     fps: Int,
 ) {
     @Volatile var fps = fps
         private set
     @Volatile var geometry = start
         private set
-    val k: Int get() = geometry.k
     var inputSurface: Surface? = null
-        private set
-    /** Capture frames that came from the virtual display. */
-    @Volatile var frames = 0
         private set
     /** Frames drawn into the encoder (one per tick). */
     @Volatile var drawn = 0
@@ -81,10 +69,6 @@ class GlScaler(
         private set
     private var texture: SurfaceTexture? = null
     private var tex = 0
-    // the input before the last size change, until [dropOld] (GL thread)
-    private var oldTex = 0
-    private var oldTexture: SurfaceTexture? = null
-    private var oldSurface: Surface? = null
     private var program = 0
     private var quadTex = floats(*GlBox.quadTex(start))
     private var aPos = 0
@@ -97,12 +81,6 @@ class GlScaler(
     private var clock: FrameClock? = null
     private var haveFrame = false
     private val tick = Runnable { onTick() }
-    // the notice (GL thread)
-    private var noticeProgram = 0
-    private var noticeTex = 0
-    private var noticeOn = false
-    private var nPos = 0
-    private var nTex = 0
 
     /** Drawing failed (after [start] succeeded): the encoder gets no new
      * frames, so the owner should start again without the scaler. */
@@ -136,66 +114,8 @@ class GlScaler(
         else Log.i(TAG, "GL scaler: $geometry -> ${w}x$h")
         return ok
     }
-
-    /** Before the virtual display goes to g's size: the next frames are
-     * expected at it. A new size comes with a new [inputSurface]: resizing
-     * a virtual display that keeps its surface leaves its output at the old
-     * size on some phones (MIUI 12.5 / Android 11: back in landscape the
-     * screen was squeezed into the portrait capture's 199 px). The display
-     * gets the new surface, then [dropOld] lets the old one go. False (and
-     * [failed]) if the GL thread couldn't. */
-    fun update(g: ScreenCrop.Geometry): Boolean {
-        val hd = handler ?: return false
-        val done = CountDownLatch(1)
-        hd.post {
-            try {
-                if (g.capW != geometry.capW || g.capH != geometry.capH) {
-                    releaseOld()
-                    oldTex = tex
-                    oldTexture = texture
-                    oldSurface = inputSurface
-                    oldTexture?.setOnFrameAvailableListener(null)
-                    newInput(g.capW, g.capH, hd)
-                    useFactor(g)
-                    haveFrame = false          // the old texture's frame is the old shape
-                } else if (g.k != geometry.k || g.scaled || geometry.scaled) {
-                    useFactor(g)
-                }
-                quadTex = floats(*GlBox.quadTex(g))
-                geometry = g
-            } catch (e: RuntimeException) {
-                Log.w(TAG, "GL scaler update", e)
-                error = e.message ?: e.toString()
-                dead = true
-            }
-            done.countDown()
-        }
-        return done.await(2, TimeUnit.SECONDS) && !dead
-    }
-
-    /** Draws [b] (the encoder's size) instead of the screen from the next
-     * tick on; null: the screen again. The bitmap is copied: the caller
-     * keeps it. False (and [failed]) if the GL thread couldn't. */
-    fun showNotice(b: Bitmap?): Boolean {
-        val hd = handler ?: return false
-        val done = CountDownLatch(1)
-        hd.post {
-            try {
-                if (b != null) uploadNotice(b)
-                noticeOn = b != null
-            } catch (e: RuntimeException) {
-                Log.w(TAG, "GL scaler notice", e)
-                error = e.message ?: e.toString()
-                dead = true
-            }
-            done.countDown()
-        }
-        return done.await(2, TimeUnit.SECONDS) && !dead
-    }
-
-    /** The preview shows the whole input frame, not only the kept part
-     * (the Android Auto mode: the rail the MMI's picture leaves out stays
-     * touchable on the phone). */
+    /** The preview shows the whole input frame, not only the kept part:
+     * the rail the MMI's picture leaves out stays touchable on the phone. */
     @Volatile var previewWhole = false
 
     /** Draws every frame's picture into [s] too, from the next tick on;
@@ -258,12 +178,6 @@ class GlScaler(
         return done.await(2, TimeUnit.SECONDS) && !dead
     }
 
-    /** The input surface before the last [update], once the virtual
-     * display draws into the new one. */
-    fun dropOld() {
-        handler?.post { releaseOld() }
-    }
-
     fun release() {
         val hd = handler ?: return
         val done = CountDownLatch(1)
@@ -309,15 +223,11 @@ class GlScaler(
         newInput(geometry.capW, geometry.capH, hd)
         useFactor(geometry)
 
-        val np = buildProgram(NOTICE_VERTEX_SHADER, NOTICE_FRAGMENT_SHADER)
-        noticeProgram = np
-        nPos = GLES20.glGetAttribLocation(np, "aPos")
-        nTex = GLES20.glGetAttribLocation(np, "aTex")
         clock = FrameClock(fps, System.nanoTime())
         hd.post(tick)
     }
 
-    /** A new texture and the capture surface into it, w x h. */
+    /** A new texture and the input surface into it, w x h. */
     private fun newInput(w: Int, h: Int, hd: Handler) {
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
@@ -333,17 +243,8 @@ class GlScaler(
         inputSurface = Surface(st)
     }
 
-    private fun releaseOld() {
-        oldSurface?.release()
-        oldSurface = null
-        oldTexture?.release()
-        oldTexture = null
-        if (oldTex != 0 && display != EGL14.EGL_NO_DISPLAY) GLES20.glDeleteTextures(1, intArrayOf(oldTex), 0)
-        oldTex = 0
-    }
-
     /** The shader depends on k, the texture's filter on k and scaling. */
-    private fun useFactor(g: ScreenCrop.Geometry) {
+    private fun useFactor(g: FrameGeometry) {
         val p = buildProgram(GlBox.VERTEX_SHADER, GlBox.fragmentShader(g))
         if (program != 0) GLES20.glDeleteProgram(program)
         program = p
@@ -355,7 +256,7 @@ class GlScaler(
         setFilter(if (GlBox.linear(g)) GLES20.GL_LINEAR else GLES20.GL_NEAREST)
     }
 
-    /** A new capture frame: latched now (the virtual display mustn't wait
+    /** A new decoded frame: latched now (the decoder mustn't wait
      * for its buffers), drawn on the next tick. */
     private fun latch() {
         val st = texture ?: return
@@ -364,7 +265,6 @@ class GlScaler(
             st.updateTexImage()
             st.getTransformMatrix(matrix)
             haveFrame = true
-            frames++
         } catch (e: RuntimeException) {
             Log.w(TAG, "GL scaler latch", e)
             error = e.message ?: e.toString()
@@ -377,7 +277,7 @@ class GlScaler(
         val hd = handler ?: return
         if (dead) return
         val t = c.take(System.nanoTime())
-        if (t >= 0 && (haveFrame || noticeOn)) draw(t)
+        if (t >= 0 && haveFrame) draw(t)
         if (!dead) hd.postDelayed(tick, c.delayMs(System.nanoTime()))
     }
 
@@ -385,11 +285,11 @@ class GlScaler(
         try {
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            if (noticeOn) drawNotice() else drawScreen()
+            drawScreen()
             EGLExt.eglPresentationTimeANDROID(display, surface, ptsNs)
             if (!EGL14.eglSwapBuffers(display, surface)) fail("eglSwapBuffers")
             drawn++
-            if (preview != EGL14.EGL_NO_SURFACE && haveFrame && !noticeOn) drawPreview()
+            if (preview != EGL14.EGL_NO_SURFACE) drawPreview()
         } catch (e: RuntimeException) {
             // the encoder's surface went away under us (stopping): stop drawing
             Log.w(TAG, "GL scaler draw", e)
@@ -461,39 +361,11 @@ class GlScaler(
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
-    private fun drawNotice() {
-        GLES20.glViewport(0, 0, w, h)
-        GLES20.glUseProgram(noticeProgram)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noticeTex)
-        GLES20.glEnableVertexAttribArray(nPos)
-        GLES20.glVertexAttribPointer(nPos, 2, GLES20.GL_FLOAT, false, 0, QUAD_POS)
-        GLES20.glEnableVertexAttribArray(nTex)
-        GLES20.glVertexAttribPointer(nTex, 2, GLES20.GL_FLOAT, false, 0, NOTICE_TEX)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-    }
-
-    private fun uploadNotice(b: Bitmap) {
-        if (noticeTex == 0) {
-            val ids = IntArray(1)
-            GLES20.glGenTextures(1, ids, 0)
-            noticeTex = ids[0]
-        }
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noticeTex)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
-        checkGl("notice texture")
-    }
-
     private fun tearDown() {
         dead = true
         handler?.removeCallbacks(tick)
         texture?.setOnFrameAvailableListener(null)
         dropPreview()
-        releaseOld()
         inputSurface?.release()
         inputSurface = null
         texture?.release()
@@ -501,12 +373,8 @@ class GlScaler(
         if (display != EGL14.EGL_NO_DISPLAY) {
             if (program != 0) GLES20.glDeleteProgram(program)
             if (tex != 0) GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
-            if (noticeProgram != 0) GLES20.glDeleteProgram(noticeProgram)
-            if (noticeTex != 0) GLES20.glDeleteTextures(1, intArrayOf(noticeTex), 0)
             program = 0
             tex = 0
-            noticeProgram = 0
-            noticeTex = 0
             EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             if (surface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, surface)
             if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
@@ -576,25 +444,5 @@ class GlScaler(
         private val QUAD_POS = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         // the whole input frame, in GlBox.quadTex's order
         private val WHOLE_TEX = floats(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
-        // the notice bitmap: its first row (t = 0) at the top
-        private val NOTICE_TEX = floats(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
-
-        private const val NOTICE_VERTEX_SHADER = """
-attribute vec4 aPos;
-attribute vec2 aTex;
-varying vec2 vTex;
-void main() {
-    gl_Position = aPos;
-    vTex = aTex;
-}
-"""
-        private const val NOTICE_FRAGMENT_SHADER = """
-precision mediump float;
-uniform sampler2D uTex;
-varying vec2 vTex;
-void main() {
-    gl_FragColor = texture2D(uTex, vTex);
-}
-"""
     }
 }

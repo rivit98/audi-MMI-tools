@@ -3,8 +3,8 @@ package mmi3g.audistreaming
 import android.os.SystemClock
 
 /**
- * An H.264 encoder's output to the MMI's hardware stream, shared by both
- * modes (screen mirroring, [CaptureService]; Android Auto, [AaService]).
+ * An H.264 encoder's output to the MMI's hardware stream, for the Android
+ * Auto mode ([AaService]).
  * Confined to the owner's thread: the encoder's callbacks and [step] run
  * there.
  *

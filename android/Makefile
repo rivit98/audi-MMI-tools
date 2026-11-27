@@ -14,8 +14,7 @@
 # The container sees the parent directory (/src, this directory is
 # /src/android): the Android Auto mode builds src/android_auto and
 # mbedTLS from third_party/ with the NDK (app/src/main/cpp), and bundles
-# aasdk's head unit certificate; the phone's audio is SBC-encoded with
-# BlueZ's codec (third_party/sbc-*). All fetched by the top Makefile.
+# aasdk's head unit certificate. Both fetched by the top Makefile.
 # The APK is signed with a fixed key in keystore/ (made once), so reinstalls
 # keep working after `make clean`.
 
@@ -36,9 +35,8 @@ SRC := $(shell find app/src -type f) app/build.gradle.kts build.gradle.kts \
        $(wildcard ../src/android_auto/*.cpp ../src/android_auto/*.h ../src/common/pb.h \
                   ../src/common/log.c ../src/common/log.h ../src/common/types.h \
                   ../src/common/mbedtls/*.h)
-# mbedTLS + the head unit certificate + BlueZ's SBC codec (the top Makefile's
-# pinned downloads)
-AA_SOURCES := ../third_party/mbedtls-3.6.7/.done ../third_party/aasdk-cert/.done ../third_party/sbc-2.0/.done
+# mbedTLS + the head unit certificate (the top Makefile's pinned downloads)
+AA_SOURCES := ../third_party/mbedtls-3.6.7/.done ../third_party/aasdk-cert/.done
 
 .PHONY: all image test install shell clean distclean aa-sources
 all: $(APK)

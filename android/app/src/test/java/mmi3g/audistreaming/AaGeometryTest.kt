@@ -23,7 +23,7 @@ class AaGeometryTest {
     @Test
     fun fiveThreeFillsThePicture() {
         val g = AaGeometry.geometry(m800, 720, 432)
-        assertEquals(ScreenCrop.Geometry(800, 480, 0, 0, 720, 432, 1, 800, 480), g)
+        assertEquals(FrameGeometry(800, 480, 0, 0, 720, 432, 1, 800, 480), g)
         assertTrue(g.scaled)
         assertTrue(GlBox.linear(g))           // bilinear, not nearest
         // the kept part is the whole texture
@@ -45,8 +45,8 @@ class AaGeometryTest {
     @Test
     fun sixteenNineLeavesTheRailOutAndFills() {
         val g = AaGeometry.geometry(m720, 720, 432)
-        assertEquals(ScreenCrop.Geometry(1280, 720, 105, 0, 720, 432, 1, 1175, 720), g)
-        assertEquals(ScreenCrop.Geometry(1920, 1080, 158, 0, 720, 432, 1, 1762, 1080),
+        assertEquals(FrameGeometry(1280, 720, 105, 0, 720, 432, 1, 1175, 720), g)
+        assertEquals(FrameGeometry(1920, 1080, 158, 0, 720, 432, 1, 1762, 1080),
             AaGeometry.geometry(m1080, 720, 432))
         // u from the rail's edge to the right edge, v the whole height
         val q = GlBox.quadTex(g)
@@ -64,7 +64,7 @@ class AaGeometryTest {
         assertEquals(70, m1to1.rail)
         assertEquals(720 to 464, m1to1.picW to m1to1.picH)
         val g = AaGeometry.geometry(m1to1)
-        assertEquals(ScreenCrop.Geometry(800, 480, 70, 0, 720, 464, 1), g)
+        assertEquals(FrameGeometry(800, 480, 70, 0, 720, 464, 1), g)
         assertTrue(!g.scaled)
         assertTrue(!GlBox.linear(g))          // nearest: a plain copy
         val q = GlBox.quadTex(g)

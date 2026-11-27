@@ -6,23 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GlBoxTest {
-    @Test
-    fun factorForTheRedmiNote8Pro() {
-        // landscape 2340x1080 -> 720x432 holds 720x332: x3 = 2160x996 fits, x4 = 2880 doesn't
-        assertEquals(3, GlBox.factor(2340, 1080, 720, 432))
-        // portrait 1080x2340 -> 199x432: x4 = 797x1728 fits
-        assertEquals(4, GlBox.factor(1080, 2340, 720, 432))
-    }
-
-    @Test
-    fun factorOneWhenThePictureIsAsBigAsTheScreen() {
-        assertEquals(1, GlBox.factor(720, 432, 720, 432))
-        assertEquals(1, GlBox.factor(1000, 600, 720, 432))
-        assertEquals(2, GlBox.factor(1440, 864, 720, 432))
-        assertEquals(1, GlBox.factor(0, 0, 720, 432))
-    }
-
-    /** Every capture pixel of the k x k block counts once: with bilinear
+    /** Every input pixel of the k x k block counts once: with bilinear
      * taps (even k) at a corner, each tap covers the 2x2 pixels around it. */
     @Test
     fun tapsCoverTheBlockExactlyOnce() {

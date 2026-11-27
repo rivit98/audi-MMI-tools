@@ -130,18 +130,6 @@ class ProtoTest {
     }
 
     @Test
-    fun fitKeepsShape() {
-        // Redmi Note 8 Pro, 2340x1080, into the 720x432 H.264 picture
-        assertEquals(VideoFit.Size(720, 332), VideoFit.fit(2340, 1080, 720, 432))
-        assertEquals(VideoFit.Size(198, 432), VideoFit.fit(1080, 2340, 720, 432))
-        // 1920 * (800 / 1920.0) must not come out as 799 (798)
-        assertEquals(VideoFit.Size(800, 450), VideoFit.fit(1920, 1080, 800, 452))
-        assertEquals(VideoFit.Size(432, 432), VideoFit.fit(1000, 1000, 720, 432))
-        assert(VideoFit.portrait(1080, 2340))
-        assert(!VideoFit.portrait(1000, 1000))        // square counts as landscape
-    }
-
-    @Test
     fun capsWithH264Limits() {
         // proto.h VIDEO_CAPS with H.264: 13 bytes + 720, 576, 25, 256 KB
         val p = byteArrayOf(0x20, 3, 0xe0.toByte(), 1, 0x90.toByte(), 1, 0xe0.toByte(), 1,
@@ -163,21 +151,5 @@ class ProtoTest {
         assertArrayEquals(byteArrayOf(0x0B, 12, 0, 25, 0, 0, 1, 0, 2, 0, 0x67, 0x42, 1, 0, 0x68), f)
         assertEquals(Proto.H264_SYNC, Proto.h264StatusOrNull(byteArrayOf(1)))
         assertNull(Proto.h264StatusOrNull(ByteArray(0)))
-    }
-
-    @Test
-    fun audioMessages() {
-        // = proto.h's AUDIO_CONFIG: SBC 44100 Hz, 2 ch, 16 blocks, 8 subbands,
-        // joint, loudness, bitpool 53, 119-byte frames
-        val c = Proto.audioConfig(44100, 2, 16, 8, 3, true, 53, 119)
-        assertArrayEquals(byteArrayOf(0x10, 13, 0, 1, 0x44, 0xAC.toByte(), 0, 0, 2, 16, 8, 3, 1, 53, 119, 0), c)
-        val frames = byteArrayOf(9, 9, 1, 2, 3, 9)
-        val d = Proto.audioData(0x01020304, 0x7fffffff, frames, 2, 3)
-        assertArrayEquals(byteArrayOf(0x11, 11, 0, 4, 3, 2, 1, -1, -1, -1, 0x7f, 1, 2, 3), d)
-        val caps = Proto.audioCapsOrNull(byteArrayOf(1, 0))!!
-        assertEquals(true, caps.sbc)
-        assertEquals(false, caps.plays)
-        assertEquals(false, Proto.audioCapsOrNull(byteArrayOf(2, 1))!!.sbc)
-        assertNull(Proto.audioCapsOrNull(byteArrayOf(1)))
     }
 }

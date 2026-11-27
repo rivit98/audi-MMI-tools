@@ -1,38 +1,20 @@
 package mmi3g.audistreaming
 
 /**
- * The pure half of [GlScaler]: a k x k box filter on the GPU.
- *
- * Without it the virtual display draws straight into the encoder at
- * 720x432, and Android scales the 2340x1080 screen down 3.25:1 in one
- * bilinear step: each output pixel looks at 2x2 of the ~3x3 screen pixels
- * it covers, so thin text strokes are hit or missed (blurry H.264 text). With it the virtual display runs at k times the picture,
- * Android's step is about 1:1 (2340 -> 2160 for k = 3), and every output
- * pixel is the average of the k x k capture pixels under it.
+ * The pure half of [GlScaler]'s drawing: a k x k box filter on the GPU (k = 1
+ * is a 1:1 copy), or a bilinear scale of a kept part of another size
+ * ([FrameGeometry.scaled]).
  */
 object GlBox {
-    /** The largest k <= MAX_FACTOR with k times the picture's content still
-     * within the screen (1 if even 2 is not). screenW x screenH is the part
-     * of the screen that is kept (ScreenCrop); it is fitted into the w x h
-     * picture, so that is the content k multiplies: 2340x1080 into 720x432
-     * is 720x332, k = 3; portrait 199x432, k = 4. */
-    fun factor(screenW: Int, screenH: Int, w: Int, h: Int): Int {
-        if (screenW <= 0 || screenH <= 0 || w <= 0 || h <= 0) return 1
-        val s = minOf(w.toDouble() / screenW, h.toDouble() / screenH)
-        val cw = screenW * s
-        val ch = screenH * s
-        return (MAX_FACTOR downTo 2).firstOrNull { cw * it <= screenW + 0.5 && ch * it <= screenH + 0.5 } ?: 1
-    }
-
     /** Even k: bilinear sampling, one tap at the corner shared by each 2x2
      * group (= their average). Odd k: nearest, one tap per pixel. */
     fun linear(k: Int): Boolean = k % 2 == 0
 
-    /** [linear] for g; a [ScreenCrop.Geometry.scaled] kept part is always
+    /** [linear] for g; a [FrameGeometry.scaled] kept part is always
      * bilinear (nearest would drop whole columns). */
-    fun linear(g: ScreenCrop.Geometry): Boolean = g.scaled || linear(g.k)
+    fun linear(g: FrameGeometry): Boolean = g.scaled || linear(g.k)
 
-    /** Where to sample, in capture pixels from the output pixel's centre
+    /** Where to sample, in input pixels from the output pixel's centre
      * (the centre of its k x k block): (k/2)^2 taps for even k, k^2 odd. */
     fun taps(k: Int): List<Pair<Double, Double>> {
         require(k in 1..MAX_FACTOR) { "factor $k" }
@@ -53,22 +35,22 @@ void main() {
 """
 
     /** The fragment shader for k: the taps unrolled. uStepX / uStepY are
-     * one capture pixel across / down in texture coordinates (through the
+     * one input pixel across / down in texture coordinates (through the
      * SurfaceTexture's transform). highp: mediump's 10-bit mantissa can't
      * tell 2880 pixels apart. */
     fun fragmentShader(k: Int): String = fragmentShader(taps(k))
 
-    /** The shader for g: k:1 box taps, or for a [ScreenCrop.Geometry.scaled]
+    /** The shader for g: k:1 box taps, or for a [FrameGeometry.scaled]
      * one [scaledTaps]. */
-    fun fragmentShader(g: ScreenCrop.Geometry): String =
+    fun fragmentShader(g: FrameGeometry): String =
         fragmentShader(if (g.scaled) scaledTaps(g) else taps(g.k))
 
     /** A scaled picture (any factor): n x n bilinear taps spread evenly over
-     * the capture pixels one picture pixel covers, n = that footprint
+     * the input pixels one picture pixel covers, n = that footprint
      * rounded (at least 1), so a shrink by more than ~1.5 averages what
-     * a single tap would skip (thin text). In capture pixels from the
+     * a single tap would skip (thin text). In input pixels from the
      * output pixel's centre, as [taps]. */
-    fun scaledTaps(g: ScreenCrop.Geometry): List<Pair<Double, Double>> {
+    fun scaledTaps(g: FrameGeometry): List<Pair<Double, Double>> {
         val fx = g.keptW.toDouble() / g.picW
         val fy = g.keptH.toDouble() / g.picH
         val n = maxOf(1, Math.round(maxOf(fx, fy)).toInt()).coerceAtMost(MAX_FACTOR)
@@ -95,7 +77,7 @@ void main() {
         return sb.toString()
     }
 
-    /** One capture pixel across and down, in texture coordinates: the
+    /** One input pixel across and down, in texture coordinates: the
      * linear part of the SurfaceTexture's column-major transform applied
      * to (1/srcW, 0) and (0, 1/srcH). Returns (xx, xy, yx, yy). */
     fun steps(m: FloatArray, srcW: Int, srcH: Int): FloatArray {
@@ -104,10 +86,10 @@ void main() {
         return floatArrayOf(m[0] * dx, m[1] * dx, m[4] * dy, m[5] * dy)
     }
 
-    /** Texture coordinates of [ScreenCrop.Geometry]'s kept part for the
+    /** Texture coordinates of [FrameGeometry]'s kept part for the
      * full-viewport triangle strip: bottom left, bottom right, top left, top
      * right, before the SurfaceTexture's transform (y up from the bottom). */
-    fun quadTex(g: ScreenCrop.Geometry): FloatArray {
+    fun quadTex(g: FrameGeometry): FloatArray {
         val u0 = g.cropX.toFloat() / g.capW
         val u1 = (g.cropX + g.keptW).toFloat() / g.capW
         val v0 = 1f - (g.cropY + g.keptH).toFloat() / g.capH

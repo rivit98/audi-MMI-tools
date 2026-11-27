@@ -28,10 +28,6 @@ import java.util.concurrent.Executors
  * allowed. Only how many are in flight is kept ([FlightWindow]): acks are
  * counts, for no id in particular. What the MMI says about the stream
  * (H264_STATUS) lands in [h264] for the streaming service to pick up.
- *
- * Audio: the MMI announces SBC in AUDIO_CAPS ([audioCaps]); [sendAudio]
- * queues one AUDIO_* message, or drops it when [AUDIO_QUEUED] are still
- * waiting for USB (the MMI then sees a gap in the frame numbers).
  */
 class AccessoryLink(
     private val usb: UsbManager,
@@ -51,10 +47,7 @@ class AccessoryLink(
 
     @Volatile var videoCaps: Proto.VideoCaps? = null
         private set
-    @Volatile var audioCaps: Proto.AudioCaps? = null
-        private set
-    private val audioQueued = java.util.concurrent.atomic.AtomicInteger(0)
-    /** Counters for the UI; written by the reader / capture threads. */
+    /** Counters for the UI; written by the reader / streaming threads. */
     class VideoStats {
         @Volatile var sent = 0
         @Volatile var shown = 0
@@ -66,7 +59,7 @@ class AccessoryLink(
     }
     val video = VideoStats()
 
-    /** H264_STATUS from the MMI, consumed by the capture service. */
+    /** H264_STATUS from the MMI, consumed by the streaming service. */
     class H264State {
         val sync = java.util.concurrent.atomic.AtomicBoolean(false)
         val configWanted = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -131,18 +124,6 @@ class AccessoryLink(
         write(frame)
     }
 
-    /** One AUDIO_* message (Proto); false (dropped) if [AUDIO_QUEUED] are
-     * still waiting. Any thread. */
-    fun sendAudio(frame: ByteArray): Boolean {
-        if (closed) return false
-        if (audioQueued.incrementAndGet() > AUDIO_QUEUED) {
-            audioQueued.decrementAndGet()
-            return false
-        }
-        write(frame) { audioQueued.decrementAndGet() }
-        return true
-    }
-
     /** The phone's streaming settings, for the MMI's log (Proto.streamSettings). */
     fun sendSettings(text: String) {
         write(Proto.streamSettings(text))
@@ -160,7 +141,7 @@ class AccessoryLink(
         main.post { listener.onClosed(this, reason) }
     }
 
-    private fun write(frame: ByteArray, done: (() -> Unit)? = null) {
+    private fun write(frame: ByteArray) {
         if (closed) return
         try {
             writer.execute {
@@ -168,12 +149,10 @@ class AccessoryLink(
                     output?.write(frame)
                 } catch (e: IOException) {
                     fail("write failed: ${e.message}")
-                } finally {
-                    done?.invoke()
                 }
             }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
-            done?.invoke()                       // closing: the writer is shut down
+            // closing: the writer is shut down
         }
     }
 
@@ -216,10 +195,6 @@ class AccessoryLink(
                 if (videoCaps != caps) Log.i(TAG, "MMI video caps $caps")
                 videoCaps = caps
             }
-            Proto.AUDIO_CAPS -> Proto.audioCapsOrNull(payload)?.let { caps ->
-                if (audioCaps != caps) Log.i(TAG, "MMI audio caps $caps")
-                audioCaps = caps
-            }
             Proto.VIDEO_ACKS -> Proto.videoAcksOrNull(payload)?.let(::onVideoAcks)
             Proto.H264_STATUS -> Proto.h264StatusOrNull(payload)?.let { code ->
                 Log.i(TAG, "MMI H264_STATUS $code")
@@ -246,7 +221,6 @@ class AccessoryLink(
         private const val TAG = "AudiStreaming"
         const val ACK_TIMEOUT_MS = 3000L
         const val H264_IN_FLIGHT = 12      // ~0.5 s at 25 fps; acked every ~0.2 s
-        const val AUDIO_QUEUED = 20        // AUDIO_DATA of ~49 ms each: ~1 s
         /** Who this is, in the MMI's log: the build first, then the phone. */
         val HELLO: String get() = "audi_streaming-android/1 build ${AppLog.version}, ${Build.MANUFACTURER} ${Build.MODEL}"
     }

@@ -25,20 +25,3 @@ set_target_properties(aa_jni PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
 target_include_directories(aa_jni PRIVATE ${ROOT}/src/android_auto ${ROOT}/src/common)
 target_compile_options(aa_jni PRIVATE -Wall -Wextra -O2)
 target_link_libraries(aa_jni mbedtls_aa log)
-
-# libsbc_jni.so: BlueZ's SBC encoder (LGPL-2.1, third_party/, fetched by the
-# top Makefile) for the phone's audio to the MMI (PhoneAudio.kt). Its
-# portable C only: the SIMD files are guarded to their own targets.
-set(SBC ${ROOT}/third_party/sbc-2.0)
-add_library(sbc_codec STATIC
-    ${SBC}/sbc/sbc.c ${SBC}/sbc/sbc_primitives.c ${SBC}/sbc/sbc_primitives_mmx.c
-    ${SBC}/sbc/sbc_primitives_iwmmxt.c ${SBC}/sbc/sbc_primitives_neon.c
-    ${SBC}/sbc/sbc_primitives_armv6.c ${SBC}/sbc/sbc_primitives_sse.c)
-target_include_directories(sbc_codec PUBLIC ${SBC})
-target_compile_options(sbc_codec PRIVATE -O2 -w)
-
-add_library(sbc_jni SHARED sbc_jni.cpp)
-set_target_properties(sbc_jni PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-target_include_directories(sbc_jni PRIVATE ${ROOT}/src/common)
-target_compile_options(sbc_jni PRIVATE -Wall -Wextra -O2)
-target_link_libraries(sbc_jni sbc_codec)

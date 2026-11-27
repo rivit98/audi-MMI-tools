@@ -31,15 +31,8 @@ package mmi3g.audistreaming
  *   streaming runs with, for the MMI's log only; older MMI apps log it as
  *   unknown and ignore it).
  *
- *   Phone audio, SBC (the MMI checks and logs it, it doesn't play it yet):
- *   AUDIO_CAPS 0x0F (MMI: codecs u8, bit 0 SBC; plays u8, 0 = logged only),
- *   sent with VIDEO_CAPS: audio goes only to an MMI that sent it.
- *   AUDIO_CONFIG 0x10 (phone: codec u8 = 1, rate u32, channels u8, blocks
- *   u8, subbands u8, mode u8 (3 joint), loudness u8, bitpool u8, frameLen
- *   u16) starts or restarts the stream. AUDIO_DATA 0x11 (phone: seq u32 =
- *   the first frame's number since the config, phoneMs u32 = when its
- *   first sample was captured, then whole SBC frames). AUDIO_STOP 0x12
- *   (phone, empty).
+ *   0x0F-0x12 were AUDIO_CAPS / AUDIO_CONFIG / AUDIO_DATA / AUDIO_STOP (the
+ *   screen mirroring's phone audio as SBC), retired.
  */
 object Proto {
     const val HELLO = 0x01
@@ -52,13 +45,6 @@ object Proto {
     const val H264_STATUS = 0x0C
     const val VIDEO_ACKS = 0x0D
     const val STREAM_SETTINGS = 0x0E
-    const val AUDIO_CAPS = 0x0F
-    const val AUDIO_CONFIG = 0x10
-    const val AUDIO_DATA = 0x11
-    const val AUDIO_STOP = 0x12
-
-    const val AUDIO_SBC = 1
-    const val AUDIO_DATA_HDR = 8
 
     /** VIDEO_START's format; 1 (JPEG) and 2 (PNG) are retired. */
     const val FMT_H264 = 3
@@ -91,41 +77,6 @@ object Proto {
                          val h264MaxFrame: Int = 0) {
         val h264: Boolean get() = takes(FMT_H264) && h264MaxW > 0 && h264MaxH > 0 && h264Fps > 0
         fun takes(format: Int): Boolean = formats and (1 shl (format - 1)) != 0
-    }
-
-    /** AUDIO_CAPS: which codecs the MMI takes (bit n-1 = codec n) and whether
-     * it plays them (false: it only checks and logs the stream). */
-    data class AudioCaps(val codecs: Int, val plays: Boolean) {
-        val sbc: Boolean get() = codecs and (1 shl (AUDIO_SBC - 1)) != 0
-    }
-
-    fun audioCapsOrNull(p: ByteArray): AudioCaps? =
-        if (p.size < 2) null else AudioCaps(p[0].toInt() and 0xff, p[1].toInt() != 0)
-
-    /** AUDIO_CONFIG for an SBC stream with these settings. */
-    fun audioConfig(rate: Int, channels: Int, blocks: Int, subbands: Int, mode: Int,
-                    loudness: Boolean, bitpool: Int, frameLen: Int): ByteArray {
-        val p = ByteArray(13)
-        p[0] = AUDIO_SBC.toByte()
-        put32(p, 1, rate)
-        p[5] = channels.toByte()
-        p[6] = blocks.toByte()
-        p[7] = subbands.toByte()
-        p[8] = mode.toByte()
-        p[9] = (if (loudness) 1 else 0).toByte()
-        p[10] = bitpool.toByte()
-        put16(p, 11, frameLen)
-        return encode(AUDIO_CONFIG, p)
-    }
-
-    /** AUDIO_DATA: [n] bytes of whole SBC frames from [frames], the first of
-     * them frame number [seq], captured at [phoneMs]. */
-    fun audioData(seq: Int, phoneMs: Int, frames: ByteArray, off: Int, n: Int): ByteArray {
-        val p = ByteArray(AUDIO_DATA_HDR + n)
-        put32(p, 0, seq)
-        put32(p, 4, phoneMs)
-        frames.copyInto(p, AUDIO_DATA_HDR, off, off + n)
-        return encode(AUDIO_DATA, p)
     }
 
     /** How many more pictures are done, since the last VIDEO_ACKS. */

@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The MMI link's status on top, then the two modes as pages side by side:
-     slide (or tap a tab) to switch between screen mirroring and Android Auto
-     (MainActivity, SwipePager). -->
+<!-- The MMI link's status on top, then the Android Auto mode (MainActivity). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -26,121 +24,10 @@
         android:paddingBottom="8dp"
         android:textSize="14sp" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/tab_screen"
-            style="@style/ModeTab"
-            android:text="@string/mode_screen" />
-
-        <TextView
-            android:id="@+id/tab_aa"
-            style="@style/ModeTab"
-            android:text="@string/mode_aa" />
-    </LinearLayout>
-
-    <mmi3g.audistreaming.SwipePager
-        android:id="@+id/pager"
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
-
-        <!-- page 0: screen mirroring -->
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <LinearLayout
-                style="@style/OptionRow"
-                android:paddingStart="8dp">
-
-                <Button
-                    android:id="@+id/stream"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:enabled="false"
-                    android:text="@string/stream_start" />
-
-                <TextView
-                    android:id="@+id/video_status"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:paddingStart="8dp"
-                    android:textSize="13sp" />
-
-                <ImageButton
-                    android:id="@+id/info_stream"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-            <include
-                android:id="@+id/screen_options"
-                layout="@layout/stream_options" />
-
-
-            <LinearLayout style="@style/OptionRow">
-
-                <Switch
-                    android:id="@+id/sharp"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/sharp" />
-
-                <ImageButton
-                    android:id="@+id/info_sharp"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-            <LinearLayout
-                style="@style/OptionRow"
-                android:paddingStart="12dp">
-
-                <CheckBox
-                    android:id="@+id/hide_nav_bar"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/hide_nav_bar" />
-
-                <ImageButton
-                    android:id="@+id/info_hide_nav_bar"
-                    style="@style/InfoButton" />
-            </LinearLayout>
-
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:padding="16dp"
-                android:text="@string/how_to"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/version"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:paddingBottom="16dp"
-                android:textSize="12sp" />
-        </LinearLayout>
-        </ScrollView>
-
-        <!-- page 1: Android Auto -->
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -217,7 +104,16 @@
                 android:padding="16dp"
                 android:text="@string/aa_how_to"
                 android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/version"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="16dp"
+                android:textSize="12sp" />
         </LinearLayout>
-        </ScrollView>
-    </mmi3g.audistreaming.SwipePager>
+    </ScrollView>
 </LinearLayout>
