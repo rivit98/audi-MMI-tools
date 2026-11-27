@@ -80,6 +80,12 @@ struct Config {
 	// width_margin / height_margin): the car UI is drawn in the rest
 	// (Android Auto ignores width_margin: the UI spans all 800 columns).
 	unsigned    margin_w = 0, margin_h = 0;
+	// Also send VideoConfiguration ui_config (field 11) with margins right
+	// margin_w / bottom margin_h: Android Auto then puts its UI area in the
+	// top-left corner (bmw-cic-androidauto) instead of centring it.
+	bool        ui_config = false;
+	// VideoConfiguration pixel_aspect_ratio_e4 (field 8), 0 = not sent.
+	unsigned    pixel_aspect_e4 = 0;
 	// The video Android Auto sends, also the touch screen's size: one of
 	// video_resolution()'s sizes (others fall back to 800x480).
 	unsigned    video_w = 800, video_h = 480;

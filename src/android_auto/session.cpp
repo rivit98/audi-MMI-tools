@@ -254,6 +254,15 @@ std::vector<u8> Session::discovery_response() const
 	unsigned vw = res ? cfg_.video_w : 800, vh = res ? cfg_.video_h : 480;
 	pb::Writer vconf, video;
 	vconf.u(1, res ? res : 1).u(2, kFps30).u(3, cfg_.margin_w).u(4, cfg_.margin_h).u(5, cfg_.dpi);
+	if (cfg_.pixel_aspect_e4)
+		vconf.u(8, cfg_.pixel_aspect_e4);
+	if (cfg_.ui_config) {
+		// UiConfig { margins = 1: Insets { bottom = 2, right = 4 } }
+		pb::Writer insets, ui;
+		insets.u(2, cfg_.margin_h).u(4, cfg_.margin_w);
+		ui.msg(1, insets);
+		vconf.msg(11, ui);
+	}
 	video.u(1, kCodecH264Bp).msg(4, vconf).b(5, true);
 	r.msg(1, service(kChVideo, 3, video));
 

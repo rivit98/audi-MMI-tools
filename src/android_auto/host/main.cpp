@@ -17,7 +17,12 @@
 // (execv), like tools/aoa_host.py.
 //
 // usage: aa_host [--out DIR] [--cert DIR] [--play] [--no-audio] [--version M.m] [--tls N] [--fps N]
+//                [--margins W H] [--ui-config] [--aspect E4] [--dpi N]
 //   --fps N  ack video frames at most N per second (default 25, 0 = at once)
+//   --margins W H  VideoConfiguration width_margin / height_margin
+//   --ui-config    also ui_config margins (right W, bottom H): UI area top-left
+//   --aspect E4    pixel_aspect_ratio_e4 (e.g. 11111 = pixels 1.11x wider)
+//   --dpi N        density (default 140)
 #include "types.h"
 #include <atomic>
 #include <csignal>
@@ -305,9 +310,19 @@ int main(int argc, char **argv)
 			tls = std::atoi(argv[++i]);
 		else if (a == "--fps" && i + 1 < argc)
 			cfg.video_fps = (unsigned)std::atoi(argv[++i]);
+		else if (a == "--margins" && i + 2 < argc) {
+			cfg.margin_w = (unsigned)std::atoi(argv[++i]);
+			cfg.margin_h = (unsigned)std::atoi(argv[++i]);
+		} else if (a == "--ui-config")
+			cfg.ui_config = true;
+		else if (a == "--aspect" && i + 1 < argc)
+			cfg.pixel_aspect_e4 = (unsigned)std::atoi(argv[++i]);
+		else if (a == "--dpi" && i + 1 < argc)
+			cfg.dpi = (unsigned)std::atoi(argv[++i]);
 		else {
 			std::fprintf(stderr, "usage: %s [--out DIR] [--cert DIR] [--play] [--no-audio] "
-			                     "[--version M.m] [--tls N] [--fps N]\n", argv[0]);
+			                     "[--version M.m] [--tls N] [--fps N] [--margins W H] [--ui-config] "
+			                     "[--aspect E4] [--dpi N]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -317,6 +332,9 @@ int main(int argc, char **argv)
 		log_msg("no head unit certificate in %s (make fetches it)", cert_dir.c_str());
 		return 1;
 	}
+	log_msg("video: %ux%u, margins %u x %u%s, dpi %u, pixel aspect e4 %u", cfg.video_w, cfg.video_h,
+	        cfg.margin_w, cfg.margin_h, cfg.ui_config ? " + ui_config (UI top-left)" : "", cfg.dpi,
+	        cfg.pixel_aspect_e4);
 	aa::Tls::set_debug(tls);
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);

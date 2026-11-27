@@ -468,6 +468,8 @@ void test_session(const std::string &crt, const std::string &key, const std::str
 	aa::Config cfg;
 	cfg.margin_w = 80;
 	cfg.margin_h = 48;
+	cfg.ui_config = true;            // checked against aasdk's protos with --pb
+	cfg.pixel_aspect_e4 = 11111;
 	aa::Session hu(cfg, phone);
 	phone.hu = &hu;
 
@@ -694,6 +696,49 @@ VideoOffer video_offer(const aa::Config &cfg)
 	return o;
 }
 
+// ui_config (field 11) = UiConfig { margins = 1: Insets { bottom 2, right 4 } }
+// and pixel_aspect_ratio_e4 (field 8), only when asked for.
+void test_ui_config()
+{
+	struct Null : aa::Host {
+		void send(const u8 *, usize) override {}
+		unsigned now_ms() override { return 0; }
+	} host;
+	for (int on = 0; on < 2; on++) {
+		aa::Config cfg;
+		cfg.margin_w = 80;
+		cfg.margin_h = 48;
+		cfg.ui_config = on != 0;
+		cfg.pixel_aspect_e4 = on ? 11111 : 0;
+		aa::Session hu(cfg, host);
+		std::vector<u8> d = hu.discovery_response();
+		pb::Reader r(d.data(), d.size());
+		pb::Field f;
+		bool found = false;
+		while (r.next(f)) {
+			u64 id = 0, aspect = 0, top = 7, bottom = 0, right = 0;
+			const u8 *sink, *conf, *ui, *ins;
+			usize sn, cn, un, in;
+			if (f.num != 1 || !pb::get_u(f.p, f.n, 1, id) || id != aa::kChVideo ||
+			    !pb::get_bytes(f.p, f.n, 3, sink, sn) || !pb::get_bytes(sink, sn, 4, conf, cn))
+				continue;
+			found = true;
+			CHECK_EQ(pb::get_u(conf, cn, 8, aspect), on != 0);
+			bool has_ui = pb::get_bytes(conf, cn, 11, ui, un);
+			CHECK_EQ(has_ui, on != 0);
+			if (!has_ui)
+				continue;
+			CHECK(pb::get_bytes(ui, un, 1, ins, in));
+			CHECK(pb::get_u(ins, in, 2, bottom) && pb::get_u(ins, in, 4, right));
+			CHECK(!pb::get_u(ins, in, 1, top));
+			CHECK_EQ(aspect, 11111u);
+			CHECK_EQ(bottom, 48u);
+			CHECK_EQ(right, 80u);
+		}
+		CHECK(found);
+	}
+}
+
 void test_video_size()
 {
 	CHECK_EQ(aa::video_resolution(800, 480), 1u);
@@ -759,6 +804,7 @@ int main(int argc, char **argv)
 	test_frames();
 	test_session(c, k, pbdir);
 	test_system_audio_only();
+	test_ui_config();
 	test_video_size();
 	test_bad_cert();
 	CHECK_DONE();
