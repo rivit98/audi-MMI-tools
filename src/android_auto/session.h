@@ -77,12 +77,12 @@ struct Config {
 	// until due (0: acked at once, as every other media message).
 	unsigned    video_fps = 25;
 	// Pixels of the 800x480 video the phone leaves black (VideoConfiguration
-	// width_margin / height_margin): the car UI is drawn in the rest
-	// (Android Auto ignores width_margin: the UI spans all 800 columns).
+	// width_margin / height_margin): the car UI is drawn in the rest,
+	// centred unless ui_config is set.
 	unsigned    margin_w = 0, margin_h = 0;
 	// Also send VideoConfiguration ui_config (field 11) with margins right
 	// margin_w / bottom margin_h: Android Auto then puts its UI area in the
-	// top-left corner (bmw-cic-androidauto) instead of centring it.
+	// top-left corner instead of centring it.
 	bool        ui_config = false;
 	// VideoConfiguration pixel_aspect_ratio_e4 (field 8), 0 = not sent.
 	unsigned    pixel_aspect_e4 = 0;

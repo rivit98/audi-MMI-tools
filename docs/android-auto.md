@@ -175,12 +175,21 @@ then menu, Start head unit server; it listens on 127.0.0.1:5277
 the same session code as the car app (`src/android_auto`, built with the
 NDK). Differences from the car app:
 
-- **The whole frame is scaled to the MMI's picture.** Android Auto ignores
-  a `width_margin` of 80 and draws its UI over all 800 columns [repo, desk
-  test with the phone app and on the car]: a 1:1 copy of the top-left
-  720x432 cut the UI's right edge off. The session asks for 800x480 with no
-  margins, and the GPU scales the whole frame bilinear to 720x432: 0.9 both
-  ways, so the 5:3 shape stays. Text is slightly softer than 1:1.
+- **The whole frame is scaled to the MMI's picture.** The session asks for
+  800x480 with no margins, and the GPU scales the whole frame bilinear to
+  720x432: 0.9 both ways, so the 5:3 shape stays. Text is slightly softer
+  than 1:1.
+- **Margins: the UI area is centred unless `ui_config` is sent** [repo, desk,
+  `aa_host --margins`]. With `width_margin` 80 / `height_margin` 48 alone,
+  Android Auto lays out its UI, bottom bar included, in 720x432 and centres
+  it (40 px black left and right, 24 px top and bottom); a top-left 1:1
+  crop cuts its right edge off. With VideoConfiguration field 11 `ui_config
+  { margins { bottom 48, right 80 } }` as well (as bmw-cic-androidauto
+  does), the same 720x432 sits in the top-left corner and the right 80
+  columns and bottom 48 lines stay black. Margins 80 / 0 give a 720x480 UI
+  with the bar at the bottom. So a 1:1 crop of the top-left 720x432 or
+  720x480 needs no scaling. `pixel_aspect_ratio_e4` (field 8) 11111 and
+  9000 change nothing: round icons stay 50x50 px.
 - **Video size setting: 16:9 without the rail.** At 800x480 Android Auto
   draws its bar at the bottom [repo, desk]. At 1280x720 and 1920x1080 it
   draws it as a rail on the left instead, 59 of 720 columns of the scaled
@@ -244,9 +253,8 @@ README) [built, not yet confirmed on the car].
   third-party app on 17.4+ as far as open-headunit knows; the app opens
   Android Auto's settings to make it two taps.
 - **1280x720 or 1920x1080 instead of 800x480**, with dpi raised to match:
-  more pixels for the same UI, scaled down by more for sharper text. Android
-  Auto ignores the width margin, so these 16:9 frames don't fit 5:3 without
-  cropping or black bars. Only if 0.9 at 800x480 looks soft on the car.
+  more pixels for the same UI, scaled down by more for sharper text. Margins
+  with `ui_config` would keep the UI in a 5:3 corner of these 16:9 frames. Only if 0.9 at 800x480 looks soft on the car.
 - **A plain mirror fallback:** if self mode fails, mirroring Android Auto's
   own phone-screen UI is not possible either (Google removed it); the
   Screen page with Google Maps is the fallback.
