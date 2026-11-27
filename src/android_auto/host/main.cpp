@@ -170,8 +170,12 @@ public:
 		for (int i = 0; i < 3; i++)
 			audio_[i] = std::fopen((out + "/" + names[i]).c_str(), "wb");
 		if (play) {
+			// No input probing (by default ffplay reads ~5 s of stream first and then
+			// plays that backlog at its own rate, so the picture stays seconds behind)
+			// and an external clock, so each frame is shown as soon as it is decoded.
 			player_ = popen("ffplay -loglevel warning -window_title 'Android Auto (desk)' "
-			                "-fflags nobuffer -flags low_delay -framedrop -f h264 -", "w");
+			                "-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 "
+			                "-sync ext -framedrop -f h264 -", "w");
 			if (player_ == nullptr)
 				log_msg("cannot start ffplay");
 		}
