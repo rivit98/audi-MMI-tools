@@ -2,7 +2,8 @@
 
 Sound from an app. Plays a generated ping train (`pulse.c`: 0.5 s ping every
 2 s) on io-media's `mixer:DSPOUT_TDM1_20_SAD`, one step at a time, each with
-an on-screen question for the listener.
+an on-screen question for the listener. Retired: every step that can run
+is answered (`d` stays disabled).
 
 - **Run:** `hello5 <sd_path> [steps] [outputs]` (default steps `pmntgv`, every step but `d`, which is disabled)
 - **Output:** `var/hello5.log` (`RESULT` lines), `hello5_<step>.log`, step `p`/`d` dumps
@@ -34,13 +35,19 @@ an on-screen question for the listener.
 **Works**
 - `TDM1_20_SAD` is heard clearly, with the radio or Bluetooth music on.
 - Its level follows the car's volume knob.
-- hello5's own io-media client plays; queued files play.
+- hello5's own io-media client plays; queued files play. In a phone video's
+  sound (880 Hz band) every ping of steps `m`, `n`, `t` and `v` stands
+  ~16–26 dB over the cabin noise.
 - The screen comes back over the MMI's Media screen (`screen_set_reshow`).
 
 **Doesn't work**
 - No mixing: `TDM1_20_SAD` mutes the radio and music while it plays.
 - The graph volume does nothing (io-media's mixer volume is an empty stub):
-  scale the samples to be quieter.
+  scale the samples to be quieter. Step `n`'s pings at volume 0 are as loud
+  as the others.
+- The 2.5 s chime (`beep.wav`, a fading 1175 Hz tone) is not measurable in
+  a phone video's sound, not even on `TDM1_20_SAD`, where the pings are:
+  for an audibility check by video, use the ping train.
 - Queued files add ~350 ms of silence each, and io-media sends one `FINISHED` per queue.
 - QSA (`libasound`): every device takes the data, nothing is heard.
 - Other mixer outputs are silent or mute the car's audio; `TDM1_51_SAD` won't attach while the radio plays.
