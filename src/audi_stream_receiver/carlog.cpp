@@ -47,7 +47,7 @@ void on_ch4(u32 ms, const u8 *, usize, const std::vector<ipc4::Telegram> &ts)
 {
 	std::lock_guard<std::mutex> lock(mu);
 	for (const ipc4::Telegram &t : ts) {
-		char line[400];
+		char line[512];
 		ipc4::Most m;
 		if (t.type != 1 || !ipc4::parse_most(t.body, m)) {
 			odd++;
@@ -56,9 +56,21 @@ void on_ch4(u32 ms, const u8 *, usize, const std::vector<ipc4::Telegram> &ts)
 			txt_q.push_back(line);
 			continue;
 		}
-		std::snprintf(line, sizeof(line), "[%7u ms] #%02x %s: %s", ms, t.counter,
-		              ipc4::most_key(m).c_str(), ipc4::hex(m.payload).c_str());
-		txt_q.push_back(line);
+		std::vector<ipc4::BapFn> fs;
+		if (ipc4::is_bap(m) && ipc4::parse_bap(m.payload, fs)) {
+			// one line per BAP function
+			for (const ipc4::BapFn &f : fs) {
+				std::snprintf(line, sizeof(line), "[%7u ms] #%02x %s: %s", ms, t.counter,
+				              ipc4::bap_key(f).c_str(), ipc4::hex(f.payload).c_str());
+				txt_q.push_back(line);
+			}
+		} else {
+			const char *nm = carsig::name(m);
+			std::snprintf(line, sizeof(line), "[%7u ms] #%02x %s%s%s: %s", ms, t.counter,
+			              ipc4::most_key(m).c_str(), *nm ? " " : "", nm,
+			              ipc4::hex(m.payload).c_str());
+			txt_q.push_back(line);
+		}
 		logger.feed(ms, m, lines_q);
 	}
 }

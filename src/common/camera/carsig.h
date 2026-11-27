@@ -1,8 +1,12 @@
 // carsig.h - the car's own signals on /dev/ipc/ch4 (docs/vehicle-data.md
-// §5.1-5.2), as log lines: every non-BAP function's changes, at most one
-// line per function per min_gap_ms (the changes in between are counted and
-// the latest value logged when the gap has passed; the light functions
-// 0x0C0C / 0x0C0D every change), and the night state.
+// §5.1-5.2), as log lines: the first value and every change of every
+// function, at most one line per function per gap (the changes in between
+// are counted and the latest value logged when the gap has passed), and the
+// night state. Gaps: none for the light functions 0x0C0C / 0x0C0D, car_gap
+// for the car-service blocks DA01 / D901 / FB01, min_gap for the rest
+// (cluster, unknown blocks, BAP). BAP streams are split per control unit
+// and function ("BAP 0B.1A"); the car's clock and a counter that change
+// every second are left out (kNoisyBap).
 // Pure (no locking, the time passed in), tests/test_carsig.cpp.
 //
 // Night: the HMI's night map follows DA01.0C0D's first byte (non-zero =
@@ -24,24 +28,51 @@ namespace carsig {
 
 constexpr u16 kDimmingFct = ipc4::kInteriorLightFct;   // 0x0C0D
 
-// What a function is (vehicle-data.md §5.1 and the firmware's dispatch), or "".
+// What a function is, from MMI3GApplication's car-service dispatch
+// (0x083c5414 / 0x083c5588) and its handlers' log strings; "" unknown. The
+// payload's byte layout is not decoded: the handlers read deserialised
+// fields.
 inline const char *name(const ipc4::Most &m)
 {
 	if (m.fblock == ipc4::kCarFblock) {
 		switch (m.fct) {
-		case 0x0C0A: return "clamp/energy";
+		case 0x0C0A: return "clamp/energy (clamp 15, battery charge, switch-off)";
 		case 0x0C0C: return "exterior light";
 		case 0x0C0D: return "dimming (night)";
-		case 0x0C0E: return "climate/sound";
-		case 0x0C10: return "driving state";
+		case 0x0C0E: return "sound info (engine rpm, blower, parking aid)";
+		case 0x0C10: return "driving state (speed, stop, direction)";
+		case 0x0C11: return "driving info (fuel warning, tank)";
+		case 0x0C12: return "oil level cyclic";
 		case 0x0C13: return "trailer";
+		case 0x0C1D: return "car service 0C1D";
 		case 0x0C36: return "crash";
+		case 0x0C3D: return "offroad (steering angle, locks, low gear)";
+		default: return "";
+		}
+	}
+	if (m.fblock == 0xD9) {
+		switch (m.fct) {
+		case 0x0531: return "oil level";
+		case 0x0540: return "car service D9 0540";
 		default: return "";
 		}
 	}
 	if (m.fblock == 0xDD)
 		return "cluster";
 	return "";
+}
+
+// The car-service blocks: logged with the short gap.
+inline bool is_car_service(u8 fblock)
+{
+	return fblock == ipc4::kCarFblock || fblock == 0xD9 || fblock == 0xFB;
+}
+
+// BAP functions that change every second whatever the car does: the
+// clock (LSG 0x11 fid 0x11, hh mm ss) and a counter (LSG 0x0F fid 0x2A).
+inline bool is_noisy_bap(const ipc4::BapFn &f)
+{
+	return (f.lsg == 0x11 && f.fid == 0x11) || (f.lsg == 0x0F && f.fid == 0x2A);
 }
 
 enum class Night { Unknown, Day, Night };
@@ -53,19 +84,27 @@ inline const char *night_name(Night n)
 
 class Logger {
 public:
-	explicit Logger(unsigned min_gap_ms = 5000) : gap_ms_(min_gap_ms) {}
+	explicit Logger(unsigned min_gap_ms = 5000, unsigned car_gap_ms = 1000)
+		: gap_ms_(min_gap_ms), car_gap_ms_(car_gap_ms)
+	{
+	}
 
-	// One telegram's function. BAP streams are left out (the clock and a
-	// counter change every second). Lines for the log go to out.
+	// One telegram's function; a BAP stream is fed per function. Lines for
+	// the log go to out.
 	void feed(unsigned ms, const ipc4::Most &m, std::vector<std::string> &out)
 	{
-		if (ipc4::is_bap(m))
+		if (ipc4::is_bap(m)) {
+			std::vector<ipc4::BapFn> fs;
+			ipc4::parse_bap(m.payload, fs);
+			for (const ipc4::BapFn &f : fs)
+				if (!is_noisy_bap(f))
+					change(ms, ipc4::bap_key(f), f.payload, gap_ms_, out);
 			return;
+		}
 		std::string key = ipc4::most_key(m);
 		const char *nm = name(m);
 		if (*nm)
 			key += std::string(" ") + nm;
-		Key &k = keys_[key];
 		if (m.fblock == ipc4::kCarFblock && m.fct == kDimmingFct && !m.payload.empty()) {
 			dimming_ = m.payload[0];
 			Night n = dimming_ != 0 ? Night::Night : Night::Day;
@@ -78,36 +117,18 @@ public:
 				night_changes_++;
 			}
 		}
-		if (!k.seen) {
-			k.seen = true;
-			k.value = k.logged = m.payload;
-			k.last_log_ms = ms;
-			out.push_back(key + " first [" + ipc4::hex(m.payload, 24) + "]");
-			return;
-		}
-		if (k.value == m.payload)
-			return;
-		k.value = m.payload;
-		k.window++;
 		// the light functions are rare and each value counts: never held
-		bool every = m.fblock == ipc4::kCarFblock &&
+		bool light = m.fblock == ipc4::kCarFblock &&
 		             (m.fct == kDimmingFct || m.fct == ipc4::kExteriorLightFct);
-		if (every || (ms - k.last_log_ms >= gap_ms_ && !k.pending)) {
-			out.push_back(key + " [" + ipc4::hex(k.logged, 24) + "] -> [" +
-			              ipc4::hex(k.value, 24) + "]");
-			k.logged = k.value;
-			k.last_log_ms = ms;
-			return;
-		}
-		k.pending = true;
-		k.held++;
+		unsigned gap = light ? 0 : is_car_service(m.fblock) ? car_gap_ms_ : gap_ms_;
+		change(ms, key, m.payload, gap, out);
 	}
 
 	// Call regularly: logs the held changes whose gap has passed.
 	void tick(unsigned ms, std::vector<std::string> &out)
 	{
 		for (auto &[key, k] : keys_)
-			if (k.pending && ms - k.last_log_ms >= gap_ms_)
+			if (k.pending && ms - k.last_log_ms >= k.gap_ms)
 				release(key, k, ms, out);
 	}
 
@@ -148,9 +169,38 @@ private:
 	struct Key {
 		bool seen = false, pending = false;
 		std::vector<u8> value, logged;   // now; as of the last line
-		unsigned last_log_ms = 0;
+		unsigned last_log_ms = 0, gap_ms = 0;
 		u32 held = 0, window = 0;
 	};
+
+	// One function's value: the first one, or a change (at once, or held
+	// until gap_ms has passed since the last line).
+	void change(unsigned ms, const std::string &key, const std::vector<u8> &v, unsigned gap_ms,
+	            std::vector<std::string> &out)
+	{
+		Key &k = keys_[key];
+		k.gap_ms = gap_ms;
+		if (!k.seen) {
+			k.seen = true;
+			k.value = k.logged = v;
+			k.last_log_ms = ms;
+			out.push_back(key + " first [" + ipc4::hex(v, 24) + "]");
+			return;
+		}
+		if (k.value == v)
+			return;
+		k.value = v;
+		k.window++;
+		if (gap_ms == 0 || (ms - k.last_log_ms >= gap_ms && !k.pending)) {
+			out.push_back(key + " [" + ipc4::hex(k.logged, 24) + "] -> [" +
+			              ipc4::hex(k.value, 24) + "]");
+			k.logged = k.value;
+			k.last_log_ms = ms;
+			return;
+		}
+		k.pending = true;
+		k.held++;
+	}
 
 	void release(const std::string &key, Key &k, unsigned ms, std::vector<std::string> &out)
 	{
@@ -165,7 +215,7 @@ private:
 		k.held = 0;
 	}
 
-	unsigned gap_ms_;
+	unsigned gap_ms_, car_gap_ms_;
 	std::map<std::string, Key> keys_;
 	Night night_ = Night::Unknown;
 	int dimming_ = -1;

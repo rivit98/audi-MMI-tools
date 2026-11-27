@@ -88,14 +88,14 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | `h264: tx H264_STATUS REFUSED (reason)` | why H.264 was refused |
 | `camera:` / `videoctrl` | rear camera on/off, VCAP changes |
 | `car: night: day -> NIGHT (DA01.0C0D byte 0 = N)` | the HMI's night state changed (`carlog.h`, `common/camera/carsig.h`); unknown until the first change after the start |
-| `car: <function> first / [a] -> [b]` | the car's ch4 functions (not BAP): first value and changes; at most one line per function per 5 s with the changes in between counted, the light functions `0x0C0C` / `0x0C0D` every change |
+| `car: <function> first / [a] -> [b]` | every ch4 function: first value and changes, the changes held back counted. Light functions `0x0C0C` / `0x0C0D`: every change. Car-service blocks `DA01` / `D901` / `FB01` (clamp/energy, driving state, fuel, oil, offroad, …): at most one line per function per 1 s. Cluster, unknown blocks and BAP functions (`BAP 0B.1A`): per 5 s; the BAP clock `11.11` and counter `0F.2A` are left out |
 | `car: 60.0 s:` | night state, changes per function, the ch4 reader's state and gaps (`stopped: gaps` = no camera BAP and no car lines from then on) |
 | `rx AUDIO_CONFIG` | the phone's SBC settings (or why refused) |
 | `audio: 10.0 s:` | good frames and how much of real time they cover, kbit/s, bad (header/CRC), missing (gaps in the frame numbers), silent frames, messages and the longest gap, `lag min/max/last` (arrival vs the phone's capture clock, from the first message) |
 | `audio: stream ended (why)` | totals; `audio: capture ->` the saved file |
 
-`var/audi_stream_receiver_ch4.txt` has every ch4 telegram, decoded (the previous run's is
-`*.prev.txt`).
+`var/audi_stream_receiver_ch4.txt` has every ch4 telegram, decoded and named, BAP streams one line
+per function (the previous run's is `*.prev.txt`).
 
 `lag` is MMI-side only (io-media's queue); the phone's capture, encoder and USB are not in it.
 It comes from io-media's TIME position while that clock matches the stream. After a catch-up

@@ -1,6 +1,7 @@
 // test_carsig.cpp - src/common/camera/carsig.h: the car-signal change log
-// (one line per function per gap, held changes counted) and the night state
-// from DA01.0C0D's first byte, on payloads logged on the car.
+// (one line per function per gap, held changes counted; car-service blocks
+// with the short gap; BAP per function, the clock left out) and the night
+// state from DA01.0C0D's first byte, on payloads logged on the car.
 #include "types.h"
 #include "carsig.h"
 #include "check.h"
@@ -70,46 +71,82 @@ void test_throttle()
 {
 	carsig::Logger lg(5000);
 	std::vector<std::string> out;
-	lg.feed(0, most(0xDA, 0x0C10, {0x02, 0x02}), out);
+	lg.feed(0, most(0xDD, 0x0333, {0x02, 0x02}), out);
 	CHECK_EQ(out.size(), 1u);
 
 	// first change after the gap: at once
 	out.clear();
-	lg.feed(6000, most(0xDA, 0x0C10, {0x03, 0x02}), out);
-	CHECK(has(out, "DA01.0C10/C driving state [02 02] -> [03 02]"));
+	lg.feed(6000, most(0xDD, 0x0333, {0x03, 0x02}), out);
+	CHECK(has(out, "DD01.0333/C cluster [02 02] -> [03 02]"));
 
 	// three more inside the gap: held
 	out.clear();
-	lg.feed(6500, most(0xDA, 0x0C10, {0x04, 0x02}), out);
-	lg.feed(7000, most(0xDA, 0x0C10, {0x05, 0x02}), out);
-	lg.feed(8000, most(0xDA, 0x0C10, {0x00, 0x00}), out);
+	lg.feed(6500, most(0xDD, 0x0333, {0x04, 0x02}), out);
+	lg.feed(7000, most(0xDD, 0x0333, {0x05, 0x02}), out);
+	lg.feed(8000, most(0xDD, 0x0333, {0x00, 0x00}), out);
 	CHECK_EQ(out.size(), 0u);
 	lg.tick(10999, out);
 	CHECK_EQ(out.size(), 0u);
 	lg.tick(11000, out);
-	CHECK(has(out, "DA01.0C10/C driving state [03 02] -> [00 00] (3 changes in 5.0 s)"));
+	CHECK(has(out, "DD01.0333/C cluster [03 02] -> [00 00] (3 changes in 5.0 s)"));
 
 	// a held change goes out at flush, too
 	out.clear();
-	lg.feed(12000, most(0xDA, 0x0C10, {0x01, 0x00}), out);
+	lg.feed(12000, most(0xDD, 0x0333, {0x01, 0x00}), out);
 	CHECK_EQ(out.size(), 0u);
 	lg.flush(12500, out);
-	CHECK(has(out, "DA01.0C10/C driving state [00 00] -> [01 00] (1 changes in 1.5 s)"));
+	CHECK(has(out, "DD01.0333/C cluster [00 00] -> [01 00] (1 changes in 1.5 s)"));
 
 	// window counts every change, then resets
 	std::string w = lg.window();
-	CHECK(w == "night unknown (byte 0 -); changes: DA01.0C10/C driving state x5");
+	CHECK(w == "night unknown (byte 0 -); changes: DD01.0333/C cluster x5");
 	CHECK(lg.window() == "night unknown (byte 0 -); changes: none");
 }
 
-void test_bap_left_out()
+void test_car_service()
+{
+	carsig::Logger lg(5000, 1000);
+	std::vector<std::string> out;
+	lg.feed(0, most(0xDA, 0x0C0A, {0x01, 0x02}), out);
+	CHECK(has(out, "DA01.0C0A/C clamp/energy (clamp 15, battery charge, switch-off) first [01 02]"));
+	lg.feed(0, most(0xD9, 0x0531, {0x05}), out);
+	CHECK(has(out, "D901.0531/C oil level first [05]"));
+	lg.feed(0, most(0xFB, 0x0D06, {0x00}), out);
+	CHECK(has(out, "FB01.0D06/C first [00]"));
+
+	// the short gap: 1 s, not 5 s
+	out.clear();
+	lg.feed(1000, most(0xDA, 0x0C10, {0x10}), out);
+	lg.feed(1200, most(0xDA, 0x0C10, {0x11}), out);
+	lg.feed(1500, most(0xDA, 0x0C10, {0x12}), out);
+	CHECK(has(out, "DA01.0C10/C driving state (speed, stop, direction) first [10]"));
+	CHECK_EQ(out.size(), 1u);
+	lg.tick(1999, out);
+	CHECK_EQ(out.size(), 1u);
+	lg.tick(2000, out);
+	CHECK(has(out, "DA01.0C10/C driving state (speed, stop, direction) [10] -> [12] (2 changes in 1.0 s)"));
+	out.clear();
+	lg.feed(1000, most(0xFB, 0x0D06, {0x01}), out);
+	CHECK(has(out, "FB01.0D06/C [00] -> [01]"));
+}
+
+void test_bap()
 {
 	carsig::Logger lg;
 	std::vector<std::string> out;
+	// the clock (11.11) is left out, every other function logged
 	lg.feed(0, most(ipc4::kBapFblock, ipc4::kBapFct, {0x11, 0x11, 0x03, 0x00, 0x0c, 0x0e, 0x1d}),
 	        out);
 	CHECK_EQ(out.size(), 0u);
 	CHECK_EQ(lg.keys(), 0u);
+	lg.feed(0, most(ipc4::kBapFblock, ipc4::kBapFct,
+	                {0x0B, 0x1A, 0x01, 0x00, 0x01, 0x17, 0x02, 0x00, 0x05, 0x06}),
+	        out);
+	CHECK(has(out, "BAP 0B.1A first [01]"));
+	CHECK(has(out, "BAP 0B.17 first [05 06]"));
+	out.clear();
+	lg.feed(6000, most(ipc4::kBapFblock, ipc4::kBapFct, {0x0B, 0x1A, 0x01, 0x00, 0x00}), out);
+	CHECK(has(out, "BAP 0B.1A [01] -> [00]"));
 	lg.feed(0, most(0xDD, 0x0333, {0x00, 0x01}), out);
 	CHECK(has(out, "DD01.0333/C cluster first [00 01]"));
 }
@@ -120,6 +157,7 @@ int main()
 {
 	test_night();
 	test_throttle();
-	test_bap_left_out();
+	test_car_service();
+	test_bap();
 	CHECK_DONE();
 }
