@@ -680,8 +680,13 @@ clip files]:**
   past the current file size is refused.
 - A live server reports `st_size` = the declared total, so its `mdat`
   ends there.
-- A live stream has to stay under 4 GB, about 1.6 h at 28 KB × 25 fps.
-  A longer session can reopen.
+- A live stream has to stay under 2 GiB, although the box sizes would
+  allow 4 GB **[confirmed]**: io-media's read offset is a signed 32-bit
+  number. The read at exactly 2 GiB arrives at offset
+  0xffffffff80000000 and io-media posts an EIO error event (the picture
+  goes black). With 132 KB frame slots that is ~10.6 min at 25 fps.
+  The receiver declares at most 2 GiB and restarts the graph when the
+  declared frames run out.
 - hello9's header parser refuses what this walk refuses.
 - io-media's first read asks for 64 KB at offset 0, which reaches ~2.3
   frames into `mdat`. Open needs only the ~650-byte header, so answering
@@ -756,9 +761,10 @@ only. The test list: [src/hello9/README.md](../src/hello9/README.md).
 4. **Picture size:** at most 720 wide and 576 high, H.264 Baseline ≤ L3.
    VCAP scales to the displayable, so 720×432 (5:3, = 800×480) fills the
    screen.
-5. **Session length:** `mdat` must stay under 4 GB: ~1.6 h at
-   28 KB × 25 fps, ~2.9 h at 16 KB. A longer session needs a graph
-   restart (a short black gap) or a smaller S.
+5. **Session length:** the stream must stay under 2 GiB (§7.9):
+   ~50 min at 28 KB × 25 fps, ~20.5 min at 68 KB, ~10.6 min at 132 KB.
+   A longer session needs a graph restart (a short black gap) or a
+   smaller S.
 
 **Latency tuning doesn't help:** the queue isn't counted in bytes (frames
 2× and 4× the size change the lag by −120 to +22 ms, not by half or more),

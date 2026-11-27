@@ -336,8 +336,8 @@ std::string parse(const u8 *head, usize len, u64 file_size, Info &out)
 	out.declared = f.count;
 	out.timescale = f.timescale;
 	out.delta = f.delta;
-	if (out.total() >= (u64)1 << 32)
-		return "the stream is 4 GB or more: io-media's box sizes are 32-bit";
+	if (out.total() > kMaxStreamBytes)
+		return "the stream is 2 GiB or more: io-media's read offsets are signed 32-bit";
 	if (mdat_size != 0 && mdat_off + mdat_size != out.total())
 		return "mdat must be size 0 or end where the declared frames end";
 	if (file_size > out.data_off)
@@ -353,7 +353,7 @@ u32 max_frames(u32 sample_size, u32 hdr_max)
 {
 	if (sample_size == 0)
 		return 0;
-	u64 room = ((u64)1 << 32) - 1 - hdr_max;
+	u64 room = kMaxStreamBytes - hdr_max;
 	return (u32)(room / sample_size);
 }
 
@@ -399,8 +399,8 @@ std::string build_header(const std::vector<u8> &sps, const std::vector<u8> &pps,
 	u32 chunk_offset = (u32)(f.b.size() + 8);
 	f.b.resize(head);
 	moov(f, sps, pps, l, chunk_offset);
-	if ((u64)chunk_offset + (u64)declared * sample_size >= (u64)1 << 32)
-		return "the declared stream is 4 GB or more; declare fewer frames";
+	if ((u64)chunk_offset + (u64)declared * sample_size > kMaxStreamBytes)
+		return "the declared stream is 2 GiB or more; declare fewer frames";
 	f.put32(exact_mdat ? 8 + declared * sample_size : 0);
 	f.tag("mdat");
 	out.swap(f.b);

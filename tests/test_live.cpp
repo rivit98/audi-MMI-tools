@@ -572,10 +572,11 @@ void test_header()
 	CHECK_EQ(m.present, 10);
 
 	u32 most = csmp4::max_frames(28672);
-	CHECK((u64)most * 28672 + 4096 < ((u64)1 << 32));
-	CHECK(most > 25 * 3600);                                // over an hour at 25 fps
+	CHECK((u64)most * 28672 + 4096 < ((u64)1 << 31));      // io-media: signed 32-bit offsets
+	CHECK(most > 25 * 45 * 60);                             // over 45 min at 25 fps
 	CHECK_OK(csmp4::build_header(kSps, kPps, 25, 28672, most, hdr));
 	CHECK(!csmp4::build_header(kSps, kPps, 25, 65536, 70000, hdr).empty());   // 4.6 GB
+	CHECK(!csmp4::build_header(kSps, kPps, 25, 135168, 15888, hdr).empty());  // just over 2 GiB
 	CHECK(!csmp4::build_header(kPps, kSps, 25, 4096, 10, hdr).empty());       // swapped
 	CHECK(!csmp4::build_header(kSps, kPps, 0, 4096, 10, hdr).empty());
 }

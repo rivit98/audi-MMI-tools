@@ -62,7 +62,7 @@ struct Config {
 	std::vector<u8> sps, pps;   // NAL units, header byte first, no start code
 	unsigned fps = 25;
 	u32 sample_size = 32768;    // S, every frame padded to it
-	u32 declared = 0;           // frames in the header; 0 = as many as fit in 4 GB
+	u32 declared = 0;           // frames in the header; 0 = as many as fit in 2 GiB
 	bool fill = true;
 	unsigned fill_after_ms = 0;      // nothing pushed for this long (0: one frame
 	                                 // period) and 2+ frames behind: fill

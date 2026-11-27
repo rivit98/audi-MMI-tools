@@ -10,7 +10,8 @@
 // written before any frame exists and declare far more frames than will
 // come. io-media's own MP4 demuxer reads 32-bit box sizes only, so mdat has
 // an 8-byte header (size 0 = to the end of the file when over-declared)
-// and the whole stream stays under 4 GB (docs/phone-mirroring.md 7.9).
+// and the whole stream stays under 2 GiB: io-media reads with signed
+// 32-bit offsets (docs/phone-mirroring.md 7.9).
 //
 // build_header() writes what media/csmp4.py writes, byte for byte (checked
 // by make test).
@@ -44,8 +45,13 @@ struct Info {
 // wrong, including everything io-media would refuse.
 std::string parse(const u8 *head, usize len, u64 file_size, Info &out);
 
-// The most frames a stream of S-byte frames may declare (under 4 GB with a
-// header of up to hdr_max bytes).
+// The largest stream io-media can read: its read offset is a signed 32-bit
+// number, so the read at 2 GiB goes to offset 0xffffffff80000000 and ends in
+// an io-media EIO (box sizes alone would allow 4 GB).
+constexpr u64 kMaxStreamBytes = ((u64)1 << 31) - 1;
+
+// The most frames a stream of S-byte frames may declare (within
+// kMaxStreamBytes with a header of up to hdr_max bytes).
 u32 max_frames(u32 sample_size, u32 hdr_max = 4096);
 
 // ftyp + moov + the mdat header for a stream of declared frames of S bytes

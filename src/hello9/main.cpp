@@ -32,7 +32,7 @@
 //
 // On request (answered; src/hello9/README.md):
 //   live    steady 25 fps, 30 s; the header declares the receiver's
-//           default (~1.6 h)
+//           default (~50 min)
 //   gap     pauses of 2 s at 8 s and 5 s at 16 s, gap fill on: the
 //           picture should freeze on the last frame before each pause
 //           (199, 399) and go on without skipping (without fill it

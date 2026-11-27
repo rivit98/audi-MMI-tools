@@ -254,7 +254,7 @@ void setup(const std::vector<u8> &payload)
 	o.cfg.fps = c.fps;
 	u32 s = std::max<u32>(c.frame_bytes + csmp4::kFillerMin, 8192);
 	o.cfg.sample_size = (s + 4095) / 4096 * 4096;
-	o.cfg.declared = 0;                  // as many as fit: ~1.6 h at 28 KB x 25 fps
+	o.cfg.declared = 0;                  // as many as fit in 2 GiB: ~50 min at 28 KB, ~10.6 min at 132 KB x 25 fps
 	o.cfg.fill = true;
 	o.cfg.ring_frames = std::min<u32>(128, std::max<u32>(16, kRingBytes / o.cfg.sample_size));
 	o.cfg.shed_ahead_ms = kShedAheadMs;
