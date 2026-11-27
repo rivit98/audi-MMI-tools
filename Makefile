@@ -261,7 +261,7 @@ build/hello12: $(wildcard src/hello12/*.cpp src/hello12/*.h) $(BASE) $(SCREEN) $
 LIBS_hello12 := -lgf
 # audi_stream_receiver: C++. USB (libusbdi) + CPU-drawn status screen, no GL.
 # The phone's H.264 stream plays on the unit's DM642 through VIDEO (hwvideo.cpp).
-build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(VIDEO) $(SBCPARSE)
+build/audi_stream_receiver: $(wildcard src/audi_stream_receiver/*.cpp src/audi_stream_receiver/*.h) src/common/mono_cond.h src/common/rate_limit.h $(BASE) $(SCREEN) $(CPUMON) $(VIDEO)
 LIBS_audi_stream_receiver := -lusbdi -lgf
 
 # android_auto: C++. An Android Auto head unit over USB (AOA), a proof of
@@ -439,7 +439,7 @@ addr: build/$(APP)
 # with the SDK image's native gcc + ASan/UBSan. First tools/check_types.sh:
 # our code uses src/common/types.h's names only.
 TESTBIN := build/test_proto build/test_cpustat build/test_text build/test_lz4 \
-           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_carsig build/test_hello12 build/test_audio_rx build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
+           build/test_pulse build/test_svcid build/test_pidscan build/test_ducklink build/test_keys build/test_guide build/test_tpad build/test_hbdsi build/test_vfbcopy build/test_lmstate build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_camera build/test_carsig build/test_hello12 build/test_sbc build/test_android_auto build/test_hello11 build/test_hello10_mapinfo build/test_hello10_iomcopy \
            build/test_buttons build/test_runner build/test_quit
 # test_live also checks the live stream against a real clip: check_live.py
 # (mmi-media: ffmpeg) makes it and media/csmp4.py's MP4 of it first, and
@@ -468,16 +468,13 @@ test: $(TESTBIN) build/.media-image build/.aa-proto-image $(AA_PROTO)/.done
 # audi_stream_receiver's wire protocol, picture reassembly and ack batches (C++, below)
 build/test_proto: tests/test_proto.cpp tests/check.h src/audi_stream_receiver/proto.h \
                   src/audi_stream_receiver/vasm.h src/audi_stream_receiver/ack_batch.h
-# phone audio: our SBC parser + CRC against BlueZ's encoder, AUDIO_CONFIG,
-# the receiver's stream checks (audio_rx.h)
-build/test_audio_rx: tests/test_audio_rx.cpp tests/check.h src/common/sbc.cpp src/common/sbc.h \
-                     src/audi_stream_receiver/audio_rx.cpp src/audi_stream_receiver/audio_rx.h \
-                     src/audi_stream_receiver/proto.h $(SBC)/.done
+# our SBC parser + CRC against BlueZ's encoder
+build/test_sbc: tests/test_sbc.cpp tests/check.h src/common/sbc.cpp src/common/sbc.h $(SBC)/.done
 	mkdir -p build
 	mkdir -p build/sbc-host
 	$(RUN) sh -c 'cd build/sbc-host && gcc -O1 -g -w -fsanitize=address,undefined -c $(addprefix /src/,$(SBC_SRC))'
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/common \
-	    -Isrc/audi_stream_receiver -I$(SBC) -o $@ $(filter %.cpp,$^) build/sbc-host/*.o
+	    -I$(SBC) -o $@ $(filter %.cpp,$^) build/sbc-host/*.o
 build/test_cpustat: tests/test_cpustat.c tests/check.h $(call common,cpustat)
 build/test_text:  tests/test_text.c tests/check.h $(call common,text)
 # lz4mini against the reference liblz4 (liblz4-dev in the SDK image)
@@ -588,7 +585,7 @@ build/test_proto build/test_config_gate build/test_rate_limit build/test_camera 
 	mkdir -p build
 	$(RUN) g++ -std=gnu++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver -Isrc/common \
 	    -Isrc/common/camera -o $@ $(filter %.cpp,$^)
-$(filter-out build/test_quit build/test_hello11 build/test_hello12 build/test_audio_rx build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_carsig build/test_android_auto,$(TESTBIN)):
+$(filter-out build/test_quit build/test_hello11 build/test_hello12 build/test_sbc build/test_hello10_mapinfo build/test_hello10_iomcopy build/test_buttons build/test_runner build/test_hello8 build/test_live build/test_config_gate build/test_rate_limit build/test_proto build/test_camera build/test_carsig build/test_android_auto,$(TESTBIN)):
 	mkdir -p build
 	$(RUN) gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -Itests -Isrc/audi_stream_receiver \
 	    -Isrc/hello6 -Isrc/hello5 -Isrc/hello7 -Isrc/common -Ibuild/gen -o $@ $(filter %.c,$^) $(TESTLIBS_$(@F))

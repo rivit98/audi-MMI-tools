@@ -13,7 +13,7 @@
 //                            an old phone app's TEXT is logged and ignored.
 //   HELLO_REPLY 0x04  both   "who I am", answer to HELLO (never answered)
 //
-// Video (screen mirroring, one H.264 frame per "picture"):
+// Video (the phone's Android Auto picture, one H.264 frame per "picture"):
 //
 //   VIDEO_CAPS  0x05  MMI    land_w u16, land_h u16, port_w u16, port_h u16,
 //                            max_bytes u32, formats u8 (bit n-1 = format n:
@@ -46,8 +46,8 @@
 //                            in batches (ack_batch.h); a bad or cut-short
 //                            frame at once.
 //   STREAM_SETTINGS 0x0E phone  ASCII "key=value key=value ...": the phone
-//                            app's streaming settings (format, max fps, bit
-//                            rate, ...) and its uptime, for the MMI's log
+//                            app's streaming settings (video size, max fps,
+//                            bit rate, ...) and its uptime, for the MMI's log
 //                            only. Sent when streaming starts on a link and
 //                            whenever a setting changes. An older MMI logs
 //                            it as an unknown type and ignores it.
@@ -92,26 +92,8 @@
 //                            CONFIG   send H264_CONFIG again (in-band SPS
 //                                     / PPS differ, or the stream ended)
 //
-// Phone audio (the phone's own playback, captured and SBC-encoded on the
-// phone; docs/bt-audio-path.md §5). The MMI checks and logs it; it does not
-// play it yet:
-//
-//   AUDIO_CAPS   0x0F MMI    codecs u8 (bit 0 SBC), plays u8 (0: the MMI
-//                            only checks and logs the stream). Sent with
-//                            VIDEO_CAPS; a phone sends audio only to an MMI
-//                            that sent it.
-//   AUDIO_CONFIG 0x10 phone  codec u8 (1 SBC), rate u32 (Hz), channels u8,
-//                            blocks u8, subbands u8, mode u8 (0 mono, 1
-//                            dual, 2 stereo, 3 joint), loudness u8 (1
-//                            loudness, 0 SNR allocation), bitpool u8,
-//                            frame_len u16: every frame's size. Starts or
-//                            restarts the stream; frames count from 0.
-//   AUDIO_DATA   0x11 phone  seq u32 (the number of its first frame since
-//                            AUDIO_CONFIG), phone_ms u32 (the phone's clock,
-//                            ms, when that frame's first sample was
-//                            captured), then whole SBC frames (A2DP's
-//                            frame format, header + CRC, no RTP).
-//   AUDIO_STOP   0x12 phone  (empty) the phone stopped capturing.
+// 0x0F-0x12 were AUDIO_CAPS / AUDIO_CONFIG / AUDIO_DATA / AUDIO_STOP (the
+// screen mirroring's phone audio as SBC): retired, not to be reused.
 //
 // Frames may be split or merged arbitrarily across USB transfers; the
 // decoder reassembles them. A frame announcing more than kMaxPayload is
@@ -136,16 +118,7 @@ enum Type : u8 {
 	kH264Status = 0x0C,
 	kVideoAcks = 0x0D,
 	kStreamSettings = 0x0E,
-	kAudioCaps = 0x0F,
-	kAudioConfig = 0x10,
-	kAudioData = 0x11,
-	kAudioStop = 0x12,
 };
-
-constexpr u8 kAudioCodecSbc = 1;
-constexpr unsigned kAudioCapsLen = 2;
-constexpr unsigned kAudioConfigLen = 13;
-constexpr unsigned kAudioDataHdr = 8;     // seq u32, phone_ms u32
 
 // (1 JPEG and 2 PNG: retired, not to be reused)
 constexpr unsigned kFmtH264 = 3;
@@ -285,51 +258,6 @@ inline std::optional<H264Config> parse_h264_config(const u8 *p, unsigned n)
 	if (c.fps == 0)
 		return std::nullopt;
 	return c;
-}
-
-// AUDIO_CONFIG payload.
-struct AudioConfig {
-	u8  codec = 0;
-	u32 rate = 0;
-	u8  channels = 0, blocks = 0, subbands = 0, mode = 0, loudness = 0, bitpool = 0;
-	u16 frame_len = 0;
-};
-
-// Nothing if short or not SBC-shaped (codec, channels, blocks, subbands,
-// mode out of range, frame_len 0).
-inline std::optional<AudioConfig> parse_audio_config(const u8 *p, unsigned n)
-{
-	if (n < kAudioConfigLen)
-		return std::nullopt;
-	AudioConfig c;
-	c.codec = p[0];
-	c.rate = get_u32(p + 1);
-	c.channels = p[5];
-	c.blocks = p[6];
-	c.subbands = p[7];
-	c.mode = p[8];
-	c.loudness = p[9];
-	c.bitpool = p[10];
-	c.frame_len = get_u16(p + 11);
-	bool blocks_ok = c.blocks == 4 || c.blocks == 8 || c.blocks == 12 || c.blocks == 16;
-	if (c.codec != kAudioCodecSbc || c.rate == 0 || c.channels < 1 || c.channels > 2 ||
-	    !blocks_ok || (c.subbands != 4 && c.subbands != 8) || c.mode > 3 || c.frame_len == 0 ||
-	    (c.mode == 0) != (c.channels == 1))
-		return std::nullopt;
-	return c;
-}
-
-inline void encode_audio_config(const AudioConfig &c, u8 out[kAudioConfigLen])
-{
-	out[0] = c.codec;
-	put_u32(out + 1, c.rate);
-	out[5] = c.channels;
-	out[6] = c.blocks;
-	out[7] = c.subbands;
-	out[8] = c.mode;
-	out[9] = c.loudness;
-	out[10] = c.bitpool;
-	put_u16(out + 11, c.frame_len);
 }
 
 } // namespace proto

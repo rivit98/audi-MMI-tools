@@ -1,9 +1,10 @@
 # audi_stream_receiver
 
-The phone's screen on the MMI over USB. The Android app (`android/`, "Audi
-streaming") captures its screen and sends it over Android Open Accessory
-(AOA) as H.264, decoded in hardware by the DM642. The phone app also has an Android Auto mode
-([docs/android-auto.md §4.3](../../docs/android-auto.md)); the MMI side is the same.
+Android Auto on the MMI over USB. The Android app (`android/`, "Audi
+streaming") is the Android Auto head unit for Android Auto on the same phone
+([docs/android-auto.md §4.3](../../docs/android-auto.md)) and sends its
+picture over Android Open Accessory (AOA) as H.264, decoded in hardware by
+the DM642.
 
 ```
 phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen + log
@@ -14,8 +15,6 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Output** (`var/`): `audi_stream_receiver.log` (previous run kept as `.prev.log`),
   `usb_slog_<time>.txt` at a failed handshake / removal / io-media error (up to 6),
   `usb_slog_periodic_<time>.txt` every 60 s while streaming. `<time>` is time since boot.
-  `phone_audio_<n>.sbc`: the first ~20 s of each phone audio stream (up to 3
-  a run), raw SBC frames: `ffplay -f sbc phone_audio_1.sbc` on the desk.
 - **Build:**
 
   ```sh
@@ -31,9 +30,10 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 
 1. Install the APK, insert the SD card: the MMI says *Waiting for phone*.
 2. Plug the phone in and accept "open Audi streaming": the bar turns green, *Connected*.
-3. Tap **Stream screen** and allow the capture.
-4. Rotating, Back/Home, unplug/replug keep the stream going. Stop it in the
-   app; pull the SD card to end the MMI side.
+3. The app starts its Android Auto mode. Once, on the phone: Android Auto's
+   developer settings → *Start head unit server*. The MMI shows Android Auto.
+4. Back/Home, unplug/replug keep the stream going. Stop it in the app; pull
+   the SD card to end the MMI side.
 
 ## How it works
 
@@ -44,31 +44,24 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 - **Protocol** (`proto.h` = `android/.../Proto.kt`): `type u8 | len u16 LE | payload`,
   max 2048 B. `HELLO`, `VIDEO_CAPS` (boxes, formats, limits), `VIDEO_START` +
   `VIDEO_DATA`, batched `VIDEO_ACKS`, `VIDEO_STOP`, `H264_CONFIG`, `H264_STATUS`
-  (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only),
-  `AUDIO_CAPS` / `AUDIO_CONFIG` / `AUDIO_DATA` / `AUDIO_STOP` (the phone's audio as SBC).
+  (`PLAYING`/`SYNC`/`REFUSED`/`CONFIG`), `STREAM_SETTINGS` (phone settings, logged only).
   **Retired, never reuse:** `0x02` TEXT, `0x03` ACK, `0x08` VIDEO_ACK, `0x0A` status bar,
+  `0x0F`–`0x12` AUDIO_CAPS / CONFIG / DATA / STOP (the screen mirroring's phone audio),
   format 1 (JPEG) and 2 (PNG).
-- **H.264** (`hwvideo.cpp`, `src/common/video/hw_stream.h`): 720×432 Baseline from
-  the phone's MediaCodec → CS-MP4 stream served by our own resource manager
+- **H.264** (`hwvideo.cpp`, `src/common/video/hw_stream.h`): 720×432 (or
+  720×464 in the 1:1 mode) Baseline from the phone's MediaCodec → CS-MP4 stream served by our own resource manager
   at `/dev/audi_stream/live.mp4` → io-media → VCAP 0 input 1. 25 fps stream
   clock with skip-frame gap fill; a clock cap (> 500 ms ahead) and an io-media
   catch-up (> 12 frames behind) drop frames and resume from an IDR. Frames
-  are capped at 128 KB. Up to 3 io-media errors per 60 s restart the stream,
+  are capped at 128 KB. A stream declares at most 2 GiB (io-media's read
+  offset is signed 32-bit) and restarts when that runs out: ~10.6 min with
+  128 KB frames. Up to 3 io-media errors per 60 s restart the stream,
   then `REFUSED`: the phone pauses and tries again later. Details:
   [docs/phone-mirroring.md §7.10–7.13](../../docs/phone-mirroring.md).
 - **Rear camera:** [common/camera](../common/camera/README.md) follows the
   camera (the slog and its BAP session on ch4); while it is up the app writes nothing to VP1 and shows
   nothing, and retakes the screen 1 s after it ends
   ([docs/rear-camera.md §9](../../docs/rear-camera.md)).
-- **Phone audio** (`audio_rx.h`, pure, `tests/test_audio_rx.cpp`): the phone
-  app captures what the phone plays, encodes it with BlueZ's SBC encoder
-  (44.1 kHz joint stereo, bitpool 53, 119-byte frames, ~328 kbit/s) and
-  sends 17 frames per `AUDIO_DATA`. The receiver announces SBC in
-  `AUDIO_CAPS` with "not played", checks every frame (header as
-  configured, CRC: `src/common/sbc.h`), counts gaps and the arrival against
-  the phone's capture clock, and saves the first ~20 s. Nothing is played
-  yet: the next step is serving it to io-media's `sbc:` input (hello12
-  shows that plays) or as the Bluetooth stand-in (hello12 `W`).
 - **Screen:** while no stream plays, a CPU-drawn status screen (`ui.cpp`):
   link state and what to do next. The stream's video replaces it.
 - **Logging:** per-frame paths only count in RAM; `h264:` summaries every
@@ -79,7 +72,7 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | Line | What |
 |---|---|
 | `rx HELLO ... build <v>` | the phone app's version: check it first |
-| `rx STREAM_SETTINGS` | the phone's settings (format, fps, bit rate, frame size, …) |
+| `rx STREAM_SETTINGS` | the phone's settings (video size, fps, bit rate, frame size, …) |
 | `cpu:` (10 s) | app and unit CPU, per thread, free RAM, heap; ` - HIGH` at ≥ 50 % own load |
 | `h264: config:` | the stream's frame cap and size |
 | `h264: 10.0 s:` | frames in, skips, io-media reads/waits/lead, `lag min/median/max`, reader behind, data rate |
@@ -90,46 +83,39 @@ phone: android/ app  --USB (AOA bulk)-->  MMI: audi_stream_receiver  -->  screen
 | `car: night: day -> NIGHT (DA01.0C0D byte 0 = N)` | the HMI's night state changed (`carlog.h`, `common/camera/carsig.h`); unknown until the first change after the start |
 | `car: <function> first / [a] -> [b]` | every ch4 function: first value and changes, the changes held back counted. Light functions `0x0C0C` / `0x0C0D`: every change. Car-service blocks `DA01` / `D901` / `FB01` (clamp/energy, driving state, fuel, oil, offroad, …): at most one line per function per 1 s. Cluster, unknown blocks and BAP functions (`BAP 0B.1A`): per 5 s; the BAP clock `11.11` and counter `0F.2A` are left out |
 | `car: 60.0 s:` | night state, changes per function, the ch4 reader's state and gaps (`stopped: gaps` = no camera BAP and no car lines from then on) |
-| `rx AUDIO_CONFIG` | the phone's SBC settings (or why refused) |
-| `audio: 10.0 s:` | good frames and how much of real time they cover, kbit/s, bad (header/CRC), missing (gaps in the frame numbers), silent frames, messages and the longest gap, `lag min/max/last` (arrival vs the phone's capture clock, from the first message) |
-| `audio: stream ended (why)` | totals; `audio: capture ->` the saved file |
 
 `var/audi_stream_receiver_ch4.txt` has every ch4 telegram, decoded and named, BAP streams one line
 per function (the previous run's is `*.prev.txt`).
 
-`lag` is MMI-side only (io-media's queue); the phone's capture, encoder and USB are not in it.
+`lag` is MMI-side only (io-media's queue); the phone's decoder, GL copy, encoder and USB are not in it.
 It comes from io-media's TIME position while that clock matches the stream. After a catch-up
 (its clock runs on through the dropped stretch) it comes from io-media's read position minus
 the frames io-media holds (learnt before), counted as `from the read position`.
 
 ## Results
 
-| | |
-|---|---|
-| ![Phone screen mirrored over H.264](img/mirroring.jpg) | ![Stopwatch on the phone and the MMI: ~0.8 s apart](img/latency.jpg) |
-| Mirroring (Google Maps) | Latency check: stopwatch on phone vs MMI |
-| ![Mirroring at night while driving](img/night-drive.jpg) | ![Android Auto mode on the MMI while driving](img/android-auto.jpg) |
-| Full-screen mirroring while driving | Android Auto mode (phone screen off) |
+![Android Auto mode on the MMI while driving](img/android-auto.jpg)
 
 **Works**
 - AOA end to end (Redmi Note 8 Pro); reconnects on its own.
-- H.264: 720×432, sharp text, 22–25 fps, lag ~500 ms (~1.1 s on a session's
-  first stream), MMI CPU ~30 % (receiver 6–9 %).
+- Android Auto at 25 fps in both picture modes: 720×432 (scaled) and
+  720×464 (1:1). MMI lag median ~320 ms at 720×432, ~370–400 ms at 720×464;
+  unit CPU ~45–50 %.
 - Rear camera takes the screen and the stream comes back after it.
-- The H.264-only phone app (no JPEG fallback): a 2-minute stream with no
-  refused or bad frames, lag ~300 ms (240–400 ms per 10 s window).
-- io-media catch-up: at a stream's start io-media was 19 frames behind;
-  the frames in between were dropped, an IDR asked for, and the stream
-  played on. A frame over 64 KB raised the frame size to 128 KB with one
-  restart, as designed.
+- io-media catch-up: when io-media reads over 12 frames behind, the frames
+  in between are dropped, an IDR asked for, and the stream plays on. A
+  frame over 64 KB raises the frame size to 128 KB with one restart.
+- Restart after an io-media error: the stream comes back by itself.
 
 **Doesn't work / known**
-- Landscape only for H.264 (portrait shows a "turn the phone" card).
-- The stream stops when the phone locks (Android revokes the capture);
-  *Keep screen on* avoids the timeout lock.
-- Rotation or frame-size growth restarts the graph, often several times.
+- After ~190 s io-media reads slower than 25 fps at ~6 Mbit/s and falls
+  behind: a catch-up every ~30 s (lag swings ~100–570 ms), at either
+  picture size and at any phone frame rate (gap fill keeps the stream at 25).
+- Without the 2 GiB cap the stream went black after ~10.6 min (io-media
+  EIO at the read at 2 GiB).
+- Frame-size growth restarts the graph.
 - 256 KB frames made io-media fall behind and fail ~45 s in: hence the 128 KB cap.
 
 **Built, not yet confirmed on the car**
-- Restart after an io-media error (none happened); a stream longer than a
-  few minutes with the 128 KB cap.
+- The 2 GiB cap's planned restart (a short black gap every ~10.6 min with
+  128 KB frames).

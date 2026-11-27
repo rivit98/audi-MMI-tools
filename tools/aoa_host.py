@@ -7,7 +7,7 @@
 Does what src/audi_stream_receiver/aoa.cpp does, with libusb on a PC: switches a USB
 Android phone into accessory mode (AOA), then speaks the audi_stream_receiver
 protocol (src/audi_stream_receiver/proto.h): HELLO / HELLO_REPLY, then the phone's
-screen. Replug the phone at will; it goes back to waiting, like the MMI
+Android Auto picture. Replug the phone at will; it goes back to waiting, like the MMI
 receiver. Ctrl-C to stop.
 
 Video (H.264, the only format): announces the MMI's limits
@@ -16,7 +16,6 @@ frame the way the MMI does (an IDR first, no bigger than the config's
 frame size), acks it at once and answers H264_STATUS like
 src/audi_stream_receiver/hwvideo.cpp. With --save DIR the stream goes to
 DIR/stream.h264 (a new config starts a new file): `ffplay DIR/stream.h264`,
-and the phone's SBC audio to DIR/phone_audio.sbc (`ffplay -f sbc ...`);
 or `python3 media/csmp4.py DIR/stream.h264 out.mp4 25` for the MMI's own
 container. Every 25 frames: frame rate, sizes, IDRs.
 
@@ -77,8 +76,7 @@ SYS_USB_DEVICES = "/sys/bus/usb/devices"
 HELLO, HELLO_REPLY = 1, 4  # 2, 3: TEXT / ACK, retired
 VIDEO_CAPS, VIDEO_START, VIDEO_DATA, VIDEO_STOP = 5, 6, 7, 9  # 8: VIDEO_ACK, 10: VIDEO_DETAILS, retired
 H264_CONFIG, H264_STATUS, VIDEO_ACKS, STREAM_SETTINGS = 11, 12, 13, 14
-AUDIO_CAPS, AUDIO_CONFIG, AUDIO_DATA, AUDIO_STOP = 15, 16, 17, 18
-AUDIO_CAPS_PAYLOAD = bytes([1, 0])  # SBC, not played (= the MMI's audio_rx.h)
+# 15-18: AUDIO_CAPS / AUDIO_CONFIG / AUDIO_DATA / AUDIO_STOP, retired
 H264_PLAYING, H264_SYNC, H264_REFUSED, H264_CONFIG_WANTED = 0, 1, 2, 3
 VIDEO_SHOWN, VIDEO_BAD, VIDEO_DROPPED = 0, 1, 2
 HDR, MAX_PAYLOAD = 3, 2048
@@ -90,7 +88,7 @@ CAPS = struct.pack("<HHHHIBHHBI", SCREEN_W, SCREEN_H, SCREEN_W // 2, SCREEN_H, H
 SAVE_DIR = sys.argv[sys.argv.index("--save") + 1] if "--save" in sys.argv else None
 GAP_S = 1.0
 PHONE_TYPES = {HELLO, HELLO_REPLY, VIDEO_START, VIDEO_DATA, VIDEO_STOP, H264_CONFIG,
-               STREAM_SETTINGS, AUDIO_CONFIG, AUDIO_DATA, AUDIO_STOP}
+               STREAM_SETTINGS}
 RESWITCH_TRIES = 3
 SWITCHED_ENV = "AOA_HOST_SWITCHED"  # "1": the accessory is ours (survives the re-exec)
 PIPE_BYTES = 1024 * 1024
@@ -679,73 +677,6 @@ class Faults:
         return " | ".join(parts)
 
 
-class PhoneAudio:
-    """The phone's SBC audio, as the MMI takes it (proto.h AUDIO_*): logged
-    every 10 s and, with --save, written to DIR/phone_audio.sbc (`ffplay
-    -f sbc DIR/phone_audio.sbc`). Not played here either."""
-
-    WINDOW_S = 10.0
-
-    def __init__(self) -> None:
-        self.frame_len = 0
-        self.frames = self.bytes = self.missing = self.msgs = 0
-        self.next_seq = 0
-        self.window_at = 0.0
-        self.file = None
-        self.files = 0
-
-    def config(self, p: bytes) -> None:
-        if len(p) < 13:
-            log(f"AUDIO_CONFIG too short ({len(p)} bytes)")
-            return
-        codec, rate, ch, blocks, subbands, mode, loud, pool, flen = struct.unpack("<BIBBBBBBH", p[:13])
-        self.end("a new AUDIO_CONFIG")
-        self.frame_len, self.next_seq, self.window_at = flen, 0, time.monotonic()
-        log(f"AUDIO_CONFIG: codec {codec}, {rate} Hz, {ch} ch, {blocks} blocks, {subbands} subbands, "
-            f"mode {mode}, {'loudness' if loud else 'SNR'}, bitpool {pool}, {flen}-byte frames")
-        if SAVE_DIR:
-            self.files += 1
-            name = "phone_audio.sbc" if self.files == 1 else f"phone_audio{self.files}.sbc"
-            self.file = open(os.path.join(SAVE_DIR, name), "wb")  # noqa: SIM115 - kept open
-            log(f"audio -> {name}")
-
-    def data(self, p: bytes) -> None:
-        if not self.frame_len or len(p) < 8:
-            return
-        seq = struct.unpack_from("<I", p)[0]
-        n = (len(p) - 8) // self.frame_len
-        self.missing += max(0, seq - self.next_seq)
-        self.next_seq = seq + n
-        self.frames += n
-        self.bytes += len(p) - 8
-        self.msgs += 1
-        if self.file:
-            self.file.write(p[8:])
-        now = time.monotonic()
-        if now - self.window_at >= self.WINDOW_S:
-            self.window(now)
-
-    def window(self, now: float) -> None:
-        s = now - self.window_at
-        if self.msgs:
-            log(f"audio {s:.1f} s: {self.frames} frames ({self.frames / s:.1f}/s), "
-                f"{self.bytes * 8 / 1000 / s:.0f} kbit/s, {self.missing} missing, {self.msgs} msgs")
-        self.frames = self.bytes = self.missing = self.msgs = 0
-        self.window_at = now
-
-    def end(self, why: str) -> None:
-        if self.frame_len:
-            self.window(time.monotonic())
-            log(f"audio stream ended ({why})")
-        self.frame_len = 0
-        if self.file:
-            self.file.close()
-            self.file = None
-
-
-AUDIO = PhoneAudio()
-
-
 def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
     """React to one frame from the phone."""
     if ftype == HELLO:
@@ -753,7 +684,6 @@ def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
         link_state("connected", payload.decode(errors="replace"))
         ep_out.write(frame(HELLO_REPLY, HELLO_TEXT), timeout=2000)
         ep_out.write(frame(VIDEO_CAPS, CAPS), timeout=2000)
-        ep_out.write(frame(AUDIO_CAPS, AUDIO_CAPS_PAYLOAD), timeout=2000)
     elif ftype == HELLO_REPLY:
         log(f"phone HELLO_REPLY: {payload.decode(errors='replace')}")
         link_state("connected", payload.decode(errors="replace"))
@@ -770,12 +700,6 @@ def handle(ftype: int, payload: bytes, ep_out, pics: Pictures) -> None:
         pics.h264.on_config(payload, ep_out)
     elif ftype == STREAM_SETTINGS:
         log(f"STREAM_SETTINGS: {payload.decode('ascii', errors='replace')}")
-    elif ftype == AUDIO_CONFIG:
-        AUDIO.config(payload)
-    elif ftype == AUDIO_DATA:
-        AUDIO.data(payload)
-    elif ftype == AUDIO_STOP:
-        AUDIO.end("AUDIO_STOP")
     else:
         log(f"frame type {ftype}, {len(payload)} bytes ignored")
 
@@ -791,7 +715,6 @@ def session(acc, may_reswitch: bool = True) -> bool:
     try:
         ep_out.write(frame(HELLO, HELLO_TEXT), timeout=2000)
         ep_out.write(frame(VIDEO_CAPS, CAPS), timeout=2000)
-        ep_out.write(frame(AUDIO_CAPS, AUDIO_CAPS_PAYLOAD), timeout=2000)
     except usb.core.USBTimeoutError:
         log("(HELLO not taken yet - the phone app is not open)")
     try:
@@ -819,7 +742,6 @@ def session(acc, may_reswitch: bool = True) -> bool:
         if pics.gaps.last is not None:
             pics.gaps.ended("USB link down", time.monotonic())
         SCREEN.send("stop", why="ended by USB link down")
-        AUDIO.end("USB link down")
         try:
             usb.util.release_interface(acc, iface)
         except usb.core.USBError:

@@ -32,7 +32,6 @@ extern "C" {
 }
 
 #include "ack_batch.h"
-#include "audio_rx.h"
 #include "hwvideo.h"
 #include "model.h"
 #include "mono_cond.h"
@@ -197,57 +196,6 @@ int close_pipe_wait(struct usbd_pipe *pipe)
 // --- the accessory connection --------------------------------------------
 
 // Printable copy of a payload for the log: control chars as \n, \xNN.
-// Phone audio (audio_rx.h): the first kAudioCaptureS of each stream (up to
-// kAudioCaptures per run) go to <sd>/var/phone_audio_<n>.sbc, raw SBC
-// frames a desk tool plays (ffmpeg -f sbc -i ...), written by a thread of
-// their own so the SD card never holds up the USB reads.
-constexpr unsigned kAudioCaptureS = 20;
-constexpr usize kAudioCaptureBytes = 20u * 345u * 128u;   // 20 s at ~345 frames/s, <= 128 B each
-constexpr int kAudioCaptures = 3;
-std::thread capture_thread;
-int capture_n = 0;
-const char *capture_sd = nullptr;
-
-// One log line per line of text.
-void log_lines(const std::string &text)
-{
-	usize at = 0;
-	while (at < text.size()) {
-		usize nl = text.find('\n', at);
-		if (nl == std::string::npos)
-			nl = text.size();
-		log_msg("%s", text.substr(at, nl - at).c_str());
-		at = nl + 1;
-	}
-}
-
-void save_capture(std::vector<u8> data)
-{
-	if (data.empty() || capture_sd == nullptr)
-		return;
-	if (capture_n >= kAudioCaptures) {
-		log_msg("audio: capture not saved (%d already this run)", kAudioCaptures);
-		return;
-	}
-	int n = ++capture_n;
-	if (capture_thread.joinable())
-		capture_thread.join();
-	std::string path = std::string(capture_sd) + "/var/phone_audio_" + std::to_string(n) + ".sbc";
-	try {
-		capture_thread = std::thread([path, d = std::move(data)] {
-			unsigned t0 = log_ms();
-			FILE *f = std::fopen(path.c_str(), "wb");
-			usize w = f ? std::fwrite(d.data(), 1, d.size(), f) : 0;
-			if (f)
-				std::fclose(f);
-			log_msg("audio: capture -> %s: %zu of %zu bytes (%u ms)%s", path.c_str(), w, d.size(),
-			        log_ms() - t0, f ? "" : ": cannot open");
-		});
-	} catch (const std::system_error &e) {
-		log_msg("audio: capture thread: %s", e.what());
-	}
-}
-
 void log_text(const char *what, const u8 *s, unsigned n)
 {
 	static char buf[4 * proto::kMaxPayload + 1];
@@ -317,11 +265,8 @@ private:
 	void set_peer(const u8 *p, unsigned n);
 	void on_frame(u8 type, const u8 *p, unsigned n);
 	void on_video(u8 type, const u8 *p, unsigned n);
-	void on_audio(u8 type, const u8 *p, unsigned n);
-	void audio_end(const char *why);
 
 	proto::Decoder decoder_;
-	audio::Rx      audio_{kAudioCaptureBytes};   // usbd thread (and close, after it)
 	Assembler      assembler_;           // the frame being received
 
 	struct usbd_pipe   *in_ = nullptr, *out_ = nullptr;
@@ -402,52 +347,6 @@ void Link::send_caps()
 {
 	auto caps = hwvideo::caps(screen_w, screen_h);
 	send(proto::kVideoCaps, caps.data(), (unsigned)caps.size());
-	// SBC taken, not played: the MMI only checks and logs the stream
-	const u8 audio_caps[proto::kAudioCapsLen] = {1u << (proto::kAudioCodecSbc - 1), 0};
-	send(proto::kAudioCaps, audio_caps, sizeof(audio_caps));
-}
-
-// The audio stream ended: its last window and totals, and its capture.
-void Link::audio_end(const char *why)
-{
-	log_lines(audio_.end(why, log_ms()));
-	save_capture(audio_.take_capture());
-}
-
-// AUDIO_CONFIG / AUDIO_DATA / AUDIO_STOP; usbd thread. Checked and logged
-// (audio_rx.h), not played.
-void Link::on_audio(u8 type, const u8 *p, unsigned n)
-{
-	unsigned now = log_ms();
-
-	if (type == proto::kAudioConfig) {
-		std::string ended;
-		std::string why = audio_.config(p, n, now, &ended);
-		log_lines(ended);
-		save_capture(audio_.take_capture());
-		if (!why.empty()) {
-			log_msg("rx AUDIO_CONFIG refused (%u bytes): %s", n, why.c_str());
-			return;
-		}
-		const proto::AudioConfig &c = audio_.cfg();
-		static const char *const kModes[4] = {"mono", "dual", "stereo", "joint stereo"};
-		f64 fps = (f64)c.rate / ((f64)c.blocks * c.subbands);
-		log_msg("rx AUDIO_CONFIG: SBC %u Hz, %u ch, %s, %u blocks, %u subbands, %s, bitpool %u, "
-		        "%u-byte frames (%.1f/s, %.0f kbit/s): checked and logged, not played; the first "
-		        "%u s saved",
-		        (unsigned)c.rate, c.channels, kModes[c.mode & 3], c.blocks, c.subbands,
-		        c.loudness ? "loudness" : "SNR", c.bitpool, (unsigned)c.frame_len, fps,
-		        fps * c.frame_len * 8 / 1000, kAudioCaptureS);
-	} else if (type == proto::kAudioData) {
-		audio_.data(p, n, now);
-		std::string w = audio_.window(now);
-		if (!w.empty())
-			log_msg("%s", w.c_str());
-		save_capture(audio_.take_capture());
-	} else {
-		log_msg("rx AUDIO_STOP");
-		audio_end("AUDIO_STOP");
-	}
 }
 
 // VIDEO_START / VIDEO_DATA; usbd thread. Bad frames are acked at once,
@@ -527,11 +426,6 @@ void Link::on_frame(u8 type, const u8 *p, unsigned n)
 		break;
 	case proto::kStreamSettings:
 		log_text("rx STREAM_SETTINGS", p, n);
-		break;
-	case proto::kAudioConfig:
-	case proto::kAudioData:
-	case proto::kAudioStop:
-		on_audio(type, p, n);
 		break;
 	default:
 		log_msg("rx unknown frame type 0x%02x, %u bytes, ignored", type, n);
@@ -621,7 +515,6 @@ void Link::close(std::unique_ptr<Link> l)
 		l.release();
 		return;
 	}
-	l->audio_end("USB link down");     // nothing comes in any more
 	dispose(std::move(l));
 	log_msg("usb: link closed (%u ms)", log_ms() - t0);
 }
@@ -1319,7 +1212,6 @@ void ack_later(PicStatus status)
 bool start(const char *sd_path, unsigned scr_w, unsigned scr_h)
 {
 	slog_sd = sd_path;
-	capture_sd = sd_path;
 	screen_w = scr_w;
 	screen_h = scr_h;
 	try {
@@ -1343,8 +1235,6 @@ void stop()
 	qcond.notify();
 	manager_thread.join();
 	manager_started = false;
-	if (capture_thread.joinable())
-		capture_thread.join();
 }
 
 } // namespace aoa

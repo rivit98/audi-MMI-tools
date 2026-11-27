@@ -48,8 +48,8 @@ LINKS = {
     "accessory": ((0x2F, 0x6F, 0xA8), "Phone connected, app not open",
                   "Open Audi streaming on the phone."),
     "connected": ((0x2E, 0x8E, 0x4A), "Connected",
-                  'Tap "Stream screen" on the phone and allow the screen capture. '
-                  "The phone's screen appears here."),
+                  "Start Android Auto's head unit server on the phone. "
+                  "Android Auto appears here."),
 }
 
 

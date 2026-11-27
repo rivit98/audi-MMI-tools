@@ -77,8 +77,8 @@ const char *state_hint(LinkState s)
 	case LinkState::Accessory:
 		return "Open Audi streaming on the phone.";
 	case LinkState::Connected:
-		return "Tap \"Stream screen\" on the phone and allow the screen "
-		       "capture. The phone's screen appears here.";
+		return "Start Android Auto's head unit server on the phone (once: "
+		       "Android Auto's developer menu). Android Auto appears here.";
 	}
 	return "";
 }
