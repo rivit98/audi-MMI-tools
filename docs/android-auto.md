@@ -190,6 +190,13 @@ NDK). Differences from the car app:
   with the bar at the bottom. So a 1:1 crop of the top-left 720x432 or
   720x480 needs no scaling. `pixel_aspect_ratio_e4` (field 8) 11111 and
   9000 change nothing: round icons stay 50x50 px.
+- **Bar or rail follows the UI area's shape** [repo, desk, 800x480 at dpi
+  140, `ui_config`]. UI areas of 790x464 (1.70:1) and wider get a 70 px rail
+  on the left (80 dp; its width doesn't change with the area); 790x480
+  (1.65:1) and 720x480 get the bottom bar. With margins 10 / 16 the map card
+  is exactly 720x464 at x 70-789, y 0-463: a 1:1 crop of it gives the MMI a
+  full-width map with no bar, rail or scaling, 464 of the 480 lines the MMI
+  shows.
 - **Video size setting: 16:9 without the rail.** At 800x480 Android Auto
   draws its bar at the bottom [repo, desk]. At 1280x720 and 1920x1080 it
   draws it as a rail on the left instead, 59 of 720 columns of the scaled
